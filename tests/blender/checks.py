@@ -1,10 +1,14 @@
 """Run with Blender's embedded Python and an installed extension."""
 
+import hashlib
 import importlib
 import os
+import sys
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import bpy  # type: ignore[import-not-found]
 from tyvrana_protocol import (
@@ -18,9 +22,128 @@ extension = importlib.import_module("bl_ext.user_default.tyvrana_blender")
 adapter = importlib.import_module(extension.__name__ + ".blender")
 operations = importlib.import_module(extension.__name__ + ".operations")
 models = importlib.import_module(extension.__name__ + ".models")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+scene_helpers = importlib.import_module("tests.blender.scene")
+png_helpers = importlib.import_module("tests.png")
 
 
 class BlenderTests(unittest.TestCase):
+    def test_render_png_and_settings_restored(self) -> None:
+        scene_helpers.prepare_scene()
+        render = bpy.context.scene.render
+        render.resolution_x, render.resolution_y, render.resolution_percentage = (
+            640,
+            480,
+            25,
+        )
+        render.use_border = render.use_crop_to_border = True
+        render.image_settings.file_format = "JPEG"
+        render.image_settings.color_mode = "RGB"
+        saved = (
+            render.resolution_x,
+            render.resolution_y,
+            render.resolution_percentage,
+            render.use_border,
+            render.use_crop_to_border,
+            render.image_settings.file_format,
+            render.image_settings.color_mode,
+            render.filepath,
+        )
+        spool = adapter._runtime.worker.spool
+        response = operations.execute(
+            adapter.BlenderBackend(spool),
+            OperationRequest(
+                type="operation.request",
+                request_id="render",
+                operation="blender.render.image",
+                arguments={},
+            ),
+        )
+        self.assertIsInstance(response, OperationSuccess)
+        descriptor = response.artifacts[0]
+        data = (spool.root / (descriptor.artifact_id + ".png")).read_bytes()
+        self.assertEqual(png_helpers.inspect_png(data), (512, 512))
+        self.assertEqual(descriptor.byte_size, len(data))
+        self.assertEqual(descriptor.sha256, hashlib.sha256(data).hexdigest())
+        self.assertEqual(descriptor.media_type, "image/png")
+        self.assertEqual(
+            response.result, {"width": 512, "height": 512, "format": "png"}
+        )
+        self.assertNotIn(str(spool.root), response.model_dump_json())
+        self.assertEqual(
+            saved,
+            (
+                render.resolution_x,
+                render.resolution_y,
+                render.resolution_percentage,
+                render.use_border,
+                render.use_crop_to_border,
+                render.image_settings.file_format,
+                render.image_settings.color_mode,
+                render.filepath,
+            ),
+        )
+        spool.release(response.artifacts)
+        self.assertEqual(list(spool.root.iterdir()), [])
+
+    def test_render_failure_restores_settings_and_removes_file(self) -> None:
+        scene_helpers.prepare_scene()
+        render = bpy.context.scene.render
+        saved = render.resolution_x, render.resolution_y, render.resolution_percentage
+        spool = adapter._runtime.worker.spool
+        render_module = importlib.import_module(extension.__name__ + ".render")
+        tree = bpy.data.node_groups.new("OutputTest", "CompositorNodeTree")
+        output = tree.nodes.new("CompositorNodeOutputFile")
+        old_tree = bpy.context.scene.compositing_node_group
+        bpy.context.scene.compositing_node_group = tree
+
+        def cancelled_render(*args: object, **kwargs: object) -> set[str]:
+            self.assertTrue(output.mute)
+            self.assertEqual(render.resolution_x, 128)
+            self.assertEqual(render.resolution_percentage, 100)
+            return {"CANCELLED"}
+
+        # Replace only operator invocation; context, settings, and storage are real.
+        boundary = SimpleNamespace(
+            context=bpy.context,
+            app=bpy.app,
+            data=bpy.data,
+            ops=SimpleNamespace(render=SimpleNamespace(render=cancelled_render)),
+        )
+        with patch.object(render_module, "bpy", boundary):
+            response = operations.execute(
+                adapter.BlenderBackend(spool),
+                OperationRequest(
+                    type="operation.request",
+                    request_id="failed",
+                    operation="blender.render.image",
+                    arguments={"width": 128},
+                ),
+            )
+        self.assertIsInstance(response, OperationFailure)
+        self.assertEqual(response.error.code, "render_failed")
+        self.assertFalse(output.mute)
+        bpy.context.scene.compositing_node_group = old_tree
+        bpy.data.node_groups.remove(tree)
+        self.assertEqual(
+            saved,
+            (render.resolution_x, render.resolution_y, render.resolution_percentage),
+        )
+        self.assertEqual(list(spool.root.iterdir()), [])
+
+    def test_render_without_camera_is_structured_failure(self) -> None:
+        response = operations.execute(
+            adapter.BlenderBackend(adapter._runtime.worker.spool),
+            OperationRequest(
+                type="operation.request",
+                request_id="no-camera",
+                operation="blender.render.image",
+                arguments={},
+            ),
+        )
+        self.assertIsInstance(response, OperationFailure)
+        self.assertEqual(response.error.code, "no_camera")
+
     def setUp(self) -> None:
         if bpy.context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")

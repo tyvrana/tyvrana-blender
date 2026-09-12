@@ -20,6 +20,7 @@ def profile(tmp_path: Path) -> dict[str, str]:
         "XDG_CACHE_HOME": str(tmp_path / "cache"),
         "TYVRANA_TEST_CONTROL": str(tmp_path),
         "TYVRANA_TEST_EMPTY": "1",
+        "TMPDIR": str(tmp_path),
     }
     archive = ROOT / "dist/tyvrana_blender-0.1.0.zip"
     assert archive.is_file(), "Build the extension before integration tests"
@@ -83,3 +84,4 @@ def running_blender(
     assert (tmp_path / "stopped").read_text() == "clean", log_path.read_text()
     assert not (tmp_path / "error").exists(), (tmp_path / "error").read_text()
     assert "Traceback" not in log_path.read_text()
+    assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))

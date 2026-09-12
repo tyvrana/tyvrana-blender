@@ -19,11 +19,15 @@ class _Job:
 
 class CommandQueue:
     def __init__(
-        self, handler: Callable[[OperationRequest], Response], capacity: int = 128
+        self,
+        handler: Callable[[OperationRequest], Response],
+        capacity: int = 128,
+        discard: Callable[[Response], None] | None = None,
     ) -> None:
         if capacity < 1:
             raise ValueError("Capacity must be positive")
         self._handler = handler
+        self._discard = discard
         self._capacity = capacity
         self._jobs: dict[str, _Job] = {}
         self._queue: deque[_Job] = deque()
@@ -89,5 +93,7 @@ class CommandQueue:
                 cancelled = job.cancelled
             if not cancelled:
                 send(result)
+            elif self._discard is not None:
+                self._discard(result)
             if time.monotonic() >= deadline:
                 return

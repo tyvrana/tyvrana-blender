@@ -6,6 +6,7 @@ from typing import Protocol
 from pydantic import ValidationError
 from tyvrana_protocol import (
     AdapterRegistration,
+    ArtifactDescriptor,
     JsonValue,
     OperationFailure,
     OperationRequest,
@@ -20,6 +21,8 @@ from .models import (
     InspectArguments,
     Model,
     ObjectSummary,
+    RenderArguments,
+    RenderResult,
     SceneSummary,
     TransformArguments,
 )
@@ -29,6 +32,7 @@ OPERATIONS = (
     "blender.object.create_primitive",
     "blender.object.delete",
     "blender.object.set_transform",
+    "blender.render.image",
     "blender.scene.inspect",
 )
 type Response = OperationSuccess | OperationFailure
@@ -56,6 +60,9 @@ class SceneBackend(Protocol):
     def create(self, arguments: CreateArguments) -> ObjectSummary: ...
     def transform(self, arguments: TransformArguments) -> ObjectSummary: ...
     def delete(self, arguments: DeleteArguments) -> DeleteResult: ...
+    def render(
+        self, arguments: RenderArguments
+    ) -> tuple[RenderResult, ArtifactDescriptor]: ...
 
 
 def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure:
@@ -67,7 +74,11 @@ def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure
 def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         arguments: (
-            InspectArguments | CreateArguments | TransformArguments | DeleteArguments
+            InspectArguments
+            | CreateArguments
+            | TransformArguments
+            | DeleteArguments
+            | RenderArguments
         )
         match request.operation:
             case "blender.scene.inspect":
@@ -78,6 +89,8 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 arguments = TransformArguments.model_validate(request.arguments)
             case "blender.object.delete":
                 arguments = DeleteArguments.model_validate(request.arguments)
+            case "blender.render.image":
+                arguments = RenderArguments.model_validate(request.arguments)
             case _:
                 return failure(
                     request,
@@ -103,18 +116,23 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
         )
     try:
         result: Model
+        artifacts: tuple[ArtifactDescriptor, ...] = ()
         if isinstance(arguments, InspectArguments):
             result = backend.inspect()
         elif isinstance(arguments, CreateArguments):
             result = backend.create(arguments)
         elif isinstance(arguments, TransformArguments):
             result = backend.transform(arguments)
-        else:
+        elif isinstance(arguments, DeleteArguments):
             result = backend.delete(arguments)
+        else:
+            result, descriptor = backend.render(arguments)
+            artifacts = (descriptor,)
         return OperationSuccess(
             type="operation.success",
             request_id=request.request_id,
             result=result.model_dump(mode="json"),
+            artifacts=artifacts,
         )
     except OperationError as exc:
         logger.info("Operation %s failed: %s", request.operation, exc.error.code)

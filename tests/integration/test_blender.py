@@ -22,10 +22,10 @@ def test_real_blender_background_operations_and_lifecycle(
         env=profile,
         capture_output=True,
         text=True,
-        timeout=45,
+        timeout=90,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_TESTS_PASSED 12" in result.stdout
+    assert "BLENDER_TESTS_PASSED 15" in result.stdout
     assert "Traceback" not in result.stdout + result.stderr
 
 

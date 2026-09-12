@@ -1,0 +1,58 @@
+"""Deterministic scene built only inside isolated integration-test profiles."""
+
+import bpy  # type: ignore[import-not-found]
+from mathutils import Vector  # type: ignore[import-not-found]
+
+
+def prepare_scene() -> None:
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 8
+    scene.cycles.use_denoising = False
+    scene.render.film_transparent = False
+    scene.render.use_compositing = False
+    bpy.ops.mesh.primitive_cube_add(location=(0, 0, 1))
+    cube = bpy.context.object
+    cube.name = "RenderCube"
+    material = bpy.data.materials.new("RenderRed")
+    material.use_nodes = True
+    shader = material.node_tree.nodes.get("Principled BSDF")
+    shader.inputs["Base Color"].default_value = (0.65, 0.025, 0.015, 1)
+    shader.inputs["Roughness"].default_value = 0.35
+    cube.data.materials.append(material)
+    bpy.ops.mesh.primitive_plane_add(size=200)
+    bpy.context.object.name = "RenderGround"
+    ground = bpy.data.materials.new("RenderGray")
+    ground.use_nodes = True
+    ground.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (
+        0.16,
+        0.19,
+        0.24,
+        1,
+    )
+    bpy.context.object.data.materials.append(ground)
+    bpy.ops.object.camera_add(location=(6, -6, 4.5))
+    camera = bpy.context.object
+    camera.rotation_euler = (
+        (Vector((0, 0, 1)) - camera.location).to_track_quat("-Z", "Y").to_euler()
+    )
+    camera.data.lens = 48
+    scene.camera = camera
+    bpy.ops.object.light_add(type="AREA", location=(2, -3, 6))
+    light = bpy.context.object
+    light.data.energy = 1400
+    light.data.shape = "DISK"
+    light.data.size = 4
+    if scene.world is None:
+        scene.world = bpy.data.worlds.new("RenderWorld")
+    scene.world.use_nodes = True
+    scene.world.node_tree.nodes["Background"].inputs["Color"].default_value = (
+        0.08,
+        0.1,
+        0.15,
+        1,
+    )
+    scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.3

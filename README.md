@@ -7,7 +7,7 @@ and performs validated scene operations through the canonical
 
 Tested with **Blender 5.2.1 LTS on Linux x64**, using its embedded Python 3.13.
 The extension currently provides scene summaries and basic mesh object creation,
-transformation, and deletion.
+transformation, deletion, and PNG scene renders delivered as MCP images.
 
 ## Install and connect
 
@@ -17,6 +17,10 @@ official extension command:
 ```sh
 blender --command extension install-file --repo user_default --enable dist/tyvrana_blender-0.1.0.zip
 ```
+
+When replacing an enabled installation with changed dependencies, first disable
+Tyvrana in Preferences, save preferences, and exit Blender. Install from a fresh
+Blender process so previously imported dependency modules are not reused.
 
 Alternatively, use **Preferences → Get Extensions → Install from Disk**, select
 the ZIP, and enable Tyvrana. The package installs in the user's extension area;
@@ -55,6 +59,7 @@ Names are exact and are advertised in sorted order:
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
+| `blender.render.image` | Optional `width`, `height`, `format` | Render metadata and a typed PNG artifact |
 
 Arguments must be objects with no unexpected fields. Vectors contain exactly
 three finite numbers. Rotation uses XYZ Euler angles in radians; transforms are
@@ -107,9 +112,74 @@ input. A scene summary contains `name`, `filepath` (null when unsaved),
 
 Failures use canonical protocol `OperationFailure` messages with these local
 codes: `invalid_arguments`, `object_not_found`, `invalid_context`,
-`operation_unsupported`, `adapter_busy`, and `operation_failed`. Validation errors
+`operation_unsupported`, `adapter_busy`, `operation_failed`, `no_camera`,
+`render_failed`, `artifact_too_large`, and `artifact_transfer_failed`. Validation errors
 include field diagnostics; unexpected exceptions are logged and return a
 sanitized message. Core maps these failures to MCP tool errors.
+
+## Rendered images
+
+`blender.render.image` renders the current scene with its current camera and
+render engine. Arguments are strict and reject unknown fields:
+
+```json
+{"width": 512, "height": 512, "format": "png"}
+```
+
+All three fields are optional. Width and height default to 512 and each must be
+an integer from 64 through 1024, inclusive. Only `"png"` is supported. No camera is
+created automatically: a scene without one returns `no_camera`. An existing
+render job returns `invalid_context`. Rendering works in background and UI modes.
+
+The successful protocol response has this shape (IDs and hash shown schematically):
+
+```text
+{
+  "type": "operation.success",
+  "request_id": "<original request ID>",
+  "result": {"width": 512, "height": 512, "format": "png"},
+  "artifacts": [{
+    "artifact_id": "<32 lowercase hexadecimal digits>",
+    "name": "render.png",
+    "media_type": "image/png",
+    "byte_size": <exact PNG byte count>,
+    "sha256": "<64 lowercase hexadecimal digits>"
+  }]
+}
+```
+
+Rendering uses `bpy.ops.render.render` synchronously on Blender's main thread,
+then `Render Result.save_render()` writes an 8-bit RGBA PNG into an
+extension-owned temporary directory. Resolution is used at 100%, with border,
+crop, multiview, and sequencer output disabled for this single-camera image.
+Compositor image processing is retained; File Output nodes, including nodes in
+groups, are temporarily muted to prevent unrelated file writes. Modified settings
+and mute flags are restored on success or failure. The usual Blender Render
+Result remains in Blender; no extra image datablock is loaded for transport.
+
+The networking subprocess receives the prepared descriptor through the private
+extension pipe. It streams the file with canonical `artifact.begin` → `ready` →
+binary chunks → `complete` → `accepted`, and sends operation success only after
+core acknowledges verified bytes. The private spool is shared only within this
+extension and its owned child process. No artifact filename or directory is sent
+to core or an MCP client. Artifact bytes are never embedded in `JsonValue`.
+
+The spool permits four prepared renders, each at most 16 MiB (64 MiB maximum
+capacity); these constants are in `tyvrana_blender.artifacts`. Dimension limits
+also constrain output generation before size validation. Chunks use the protocol's
+65,536-byte payload limit. Acknowledgements have a 10-second deadline and network
+writes have a 5-second deadline; core's overall operation deadline also applies.
+Temporary files are deleted after delivery, rejection, cancellation, disconnect,
+or extension shutdown. Rendering itself cannot be interrupted safely: if cancelled
+while rendering, its result is discarded when native work returns. Cancellation
+continues to be processed by the networking subprocess during rendering/transfer.
+
+Through `tyvrana_execute_operation`, core returns the metadata in
+`structuredContent` and an actual MCP image content block containing the PNG.
+Core defaults to 4 MiB total raw inline image bytes per result; larger images
+return `image_too_large`. Future production-resolution outputs will need resource
+or file delivery semantics rather than unbounded inline images. Use a core build
+and extension bundle pinned to the same current protocol revision.
 
 ## Execution and lifecycle
 
@@ -119,7 +189,8 @@ warns against long-lived Python threads, so networking runs in a small subproces
 owned by the extension. It uses Blender's embedded interpreter and the extension's
 bundled dependency paths. It never imports Blender API modules.
 
-The worker is a WebSocket client. Nonblocking local pipes carry newline-framed
+The worker is a WebSocket client. Controls use text messages; artifact chunks use
+binary messages. Nonblocking local pipes carry newline-framed
 canonical Tyvrana messages between it and Blender. A bounded command queue is
 drained by a persistent `bpy.app.timers` callback, with a time budget and maximum
 batch size. Main-thread assertions guard execution. The worker handles heartbeats
@@ -209,4 +280,10 @@ run real core and Blender processes. Coverage includes native operations,
 register/unregister and exit cleanup, background pumping, UI timers, MCP
 registration and scene mutations, and reconnection after core restarts. Normal
 tests check validation, dispatch, cancellation races, real worker pipes/WebSockets,
-backoff, and shutdown, with strict warnings and async/thread leak checks.
+backoff, artifact framing/acknowledgements, bounded spooling, cancellation during
+transfer, and shutdown, with strict warnings and async/thread leak checks.
+The render tests build a lit cube/plane/camera scene with contrasting materials,
+verify actual PNG structure, dimensions, content variation, byte count and SHA-256,
+and prove real background and UI renders reach the official MCP client as image
+content. A separate real-render test cancels during binary transfer and verifies
+cleanup and continued adapter operation. No image-analysis service is used.

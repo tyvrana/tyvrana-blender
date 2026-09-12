@@ -30,6 +30,7 @@ async def worker() -> AsyncIterator[
     async def accept(socket: ServerConnection) -> None:
         data = await socket.recv()
         message = decode_message(data.encode() if isinstance(data, str) else data)
+        assert isinstance(data, str)
         assert isinstance(message, AdapterRegistration)
         assert message.application == "blender"
         connected.put_nowait(socket)
@@ -62,6 +63,7 @@ async def worker() -> AsyncIterator[
                     await asyncio.sleep(0.01)
             process.stop()
             assert process.process.returncode == 0
+    assert not process.spool.root.exists()
 
 
 async def until(predicate: Callable[[], bool]) -> None:
@@ -79,7 +81,7 @@ async def test_real_worker_round_trip_and_cancellation_suppresses_late_reply() -
             operation="blender.scene.inspect",
             arguments={"value": [None, "[]"]},
         )
-        await socket.send(encode_message(request))
+        await socket.send(encode_message(request).decode())
         await until(lambda: request in messages)
         process.send(
             OperationSuccess(
@@ -87,14 +89,14 @@ async def test_real_worker_round_trip_and_cancellation_suppresses_late_reply() -
             )
         )
         reply = await asyncio.wait_for(socket.recv(), 5)
-        assert isinstance(reply, bytes)
-        assert decode_message(reply) == OperationSuccess(
+        assert isinstance(reply, str)
+        assert decode_message(reply.encode()) == OperationSuccess(
             type="operation.success", request_id="one", result=request.arguments
         )
         cancelled = request.model_copy(update={"request_id": "cancelled"})
-        await socket.send(encode_message(cancelled))
+        await socket.send(encode_message(cancelled).decode())
         cancel = CancelRequest(type="operation.cancel", request_id="cancelled")
-        await socket.send(encode_message(cancel))
+        await socket.send(encode_message(cancel).decode())
         await until(lambda: cancel in messages)
         process.send(
             OperationSuccess(
@@ -102,7 +104,7 @@ async def test_real_worker_round_trip_and_cancellation_suppresses_late_reply() -
             )
         )
         following = request.model_copy(update={"request_id": "following"})
-        await socket.send(encode_message(following))
+        await socket.send(encode_message(following).decode())
         await until(lambda: following in messages)
         process.send(
             OperationSuccess(
@@ -110,8 +112,8 @@ async def test_real_worker_round_trip_and_cancellation_suppresses_late_reply() -
             )
         )
         wire = await asyncio.wait_for(socket.recv(), 5)
-        assert isinstance(wire, bytes)
-        received = decode_message(wire)
+        assert isinstance(wire, str)
+        received = decode_message(wire.encode())
         assert isinstance(received, OperationSuccess)
         assert received.request_id == "following"
 
@@ -132,7 +134,7 @@ async def test_malformed_core_messages_close_connection_and_reconnect(
 ) -> None:
     async with worker() as (_, connected, messages):
         first = await asyncio.wait_for(connected.get(), 5)
-        await first.send(wire)
+        await first.send(wire.decode())
         await asyncio.wait_for(first.wait_closed(), 5)
         assert first.close_code == 1008
         second = await asyncio.wait_for(connected.get(), 5)
@@ -152,6 +154,7 @@ def test_stop_before_initial_timer_tick_is_clean() -> None:
     process.stop()
     process.stop()
     assert process.process.returncode == 0
+    assert not process.spool.root.exists()
 
 
 def test_stop_discards_an_incomplete_parent_frame() -> None:
@@ -165,3 +168,4 @@ def test_stop_discards_an_incomplete_parent_frame() -> None:
     finally:
         process.stop()
     assert process.process.returncode == 0
+    assert not process.spool.root.exists()

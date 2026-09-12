@@ -7,8 +7,14 @@ from uuid import uuid4
 
 import bpy  # type: ignore[import-not-found]
 from mathutils import Quaternion  # type: ignore[import-not-found]
-from tyvrana_protocol import AdapterEvent, CancelRequest, OperationRequest
+from tyvrana_protocol import (
+    AdapterEvent,
+    ArtifactDescriptor,
+    CancelRequest,
+    OperationRequest,
+)
 
+from .artifacts import ArtifactSpool
 from .dispatch import CommandQueue
 from .models import (
     ConnectionConfig,
@@ -16,6 +22,8 @@ from .models import (
     DeleteArguments,
     DeleteResult,
     ObjectSummary,
+    RenderArguments,
+    RenderResult,
     SceneSummary,
     TransformArguments,
 )
@@ -76,6 +84,19 @@ def find_object(name: str) -> Any:
 
 
 class BlenderBackend:
+    def __init__(self, spool: ArtifactSpool | None = None) -> None:
+        self.spool = spool
+
+    def render(
+        self, arguments: RenderArguments
+    ) -> tuple[RenderResult, ArtifactDescriptor]:
+        main_thread()
+        from .render import render_image
+
+        if self.spool is None:
+            raise OperationError("invalid_context", "Render storage is unavailable")
+        return render_image(arguments, self.spool)
+
     def inspect(self) -> SceneSummary:
         main_thread()
         bpy.context.view_layer.update()
@@ -152,10 +173,13 @@ class Runtime:
         main_thread()
         self.config = config
         self.filepath = str(bpy.data.filepath)
-        self.queue = CommandQueue(lambda request: execute(BlenderBackend(), request))
         self.worker = WorkerProcess(
             config,
             registration(INSTANCE_ID, str(bpy.app.version_string), self.filepath),
+        )
+        self.queue = CommandQueue(
+            lambda request: execute(BlenderBackend(self.worker.spool), request),
+            discard=self.worker.discard,
         )
         self.status = "connecting"
 

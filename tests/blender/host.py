@@ -3,6 +3,7 @@
 import importlib
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -17,7 +18,10 @@ if "TYVRANA_TEST_PORT" in os.environ:
 if os.environ.get("TYVRANA_TEST_EMPTY") == "1":
     for obj in list(bpy.data.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
-deadline = time.monotonic() + 45
+if os.environ.get("TYVRANA_TEST_RENDER") == "1":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    importlib.import_module("tests.blender.scene").prepare_scene()
+deadline = time.monotonic() + 90
 
 
 def check() -> float | None:
@@ -26,15 +30,19 @@ def check() -> float | None:
             raise RuntimeError("Integration host exceeded its deadline")
         runtime = adapter._runtime
         if runtime is not None:
-            (control / "ready.json").write_text(
+            (control / "ready.tmp").write_text(
                 json.dumps(
                     {
                         "instance_id": adapter.INSTANCE_ID,
                         "status": runtime.status,
                         "worker_pid": runtime.worker.process.pid,
+                        "spooled_artifacts": len(
+                            list(runtime.worker.spool.root.iterdir())
+                        ),
                     }
                 )
             )
+            (control / "ready.tmp").replace(control / "ready.json")
         if (control / "stop").exists():
             worker = runtime.worker if runtime is not None else None
             adapter.unregister()

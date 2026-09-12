@@ -2,6 +2,7 @@ import logging
 
 import pytest
 from tyvrana_protocol import (
+    ArtifactDescriptor,
     JsonValue,
     OperationFailure,
     OperationRequest,
@@ -13,6 +14,8 @@ from tyvrana_blender.models import (
     DeleteArguments,
     DeleteResult,
     ObjectSummary,
+    RenderArguments,
+    RenderResult,
     SceneSummary,
     TransformArguments,
 )
@@ -22,6 +25,16 @@ from tyvrana_blender.operations import OperationError, execute
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def render(
+        self, arguments: RenderArguments
+    ) -> tuple[RenderResult, ArtifactDescriptor]:
+        self.calls.append("render")
+        return RenderResult(
+            width=arguments.width, height=arguments.height
+        ), ArtifactDescriptor(
+            artifact_id="1" * 32, media_type="image/png", byte_size=1, sha256="0" * 64
+        )
 
     def inspect(self) -> SceneSummary:
         self.calls.append("inspect")
@@ -78,6 +91,7 @@ def call(
     ("operation", "arguments", "method"),
     [
         ("blender.scene.inspect", {}, "inspect"),
+        ("blender.render.image", {}, "render"),
         (
             "blender.object.create_primitive",
             {"primitive": "cube", "name": "Example"},

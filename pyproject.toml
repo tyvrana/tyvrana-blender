@@ -12,7 +12,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = [
     "pydantic>=2.13.5",
-    "tyvrana-protocol @ git+https://github.com/tyvrana/tyvrana-protocol.git@ba623d22555dff46e1d8a7a6b3a01417bf584136",
+    "tyvrana-protocol @ git+https://github.com/tyvrana/tyvrana-protocol.git@7fae352c9b137a92c505a0a39b8d0eeac1993700",
     "websockets>=17.1",
 ]
 

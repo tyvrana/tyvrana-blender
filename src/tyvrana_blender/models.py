@@ -88,3 +88,15 @@ class SceneSummary(Model):
 
 class DeleteResult(Model):
     deleted: str
+
+
+class RenderArguments(Model):
+    width: int = Field(default=512, ge=64, le=1024)
+    height: int = Field(default=512, ge=64, le=1024)
+    format: Literal["png"] = "png"
+
+
+class RenderResult(Model):
+    width: int
+    height: int
+    format: Literal["png"] = "png"

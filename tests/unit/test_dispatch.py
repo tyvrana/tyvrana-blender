@@ -54,7 +54,8 @@ def test_cancel_running_work_suppresses_completion() -> None:
         assert cancelled.wait(2)
         return success(message)
 
-    queue = CommandQueue(handler)
+    discarded: list[Response] = []
+    queue = CommandQueue(handler, discard=discarded.append)
     queue.submit(request())
 
     def cancel() -> None:
@@ -68,6 +69,7 @@ def test_cancel_running_work_suppresses_completion() -> None:
         results: list[Response] = []
         queue.drain(results.append)
         assert results == [] and queue.pending_count == 0
+        assert discarded == [success(request())]
     finally:
         thread.join(2)
         assert not thread.is_alive()

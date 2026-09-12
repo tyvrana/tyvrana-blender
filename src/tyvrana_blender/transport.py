@@ -10,10 +10,12 @@ from pathlib import Path
 from tyvrana_protocol import (
     AdapterRegistration,
     Message,
+    OperationSuccess,
     decode_message,
     encode_message,
 )
 
+from .artifacts import ArtifactSpool
 from .models import ConnectionConfig
 
 logger = logging.getLogger(__name__)
@@ -24,28 +26,34 @@ class WorkerProcess:
     def __init__(
         self, config: ConnectionConfig, registration: AdapterRegistration
     ) -> None:
+        self.spool = ArtifactSpool()
         # Blender supplies extension-managed wheel paths. The isolated child uses
         # those exact paths and its bundled interpreter, never a global install.
         bootstrap = (
-            "import runpy,sys; sys.path[:0]=sys.argv[1:-2]; "
-            "sys.argv=sys.argv[-2:]; "
+            "import runpy,sys; sys.path[:0]=sys.argv[1:-3]; "
+            "sys.argv=sys.argv[-3:]; "
             "runpy.run_path(sys.argv[0],run_name='__main__')"
         )
-        self.process = subprocess.Popen(
-            [
-                sys.executable,
-                "-I",
-                "-u",
-                "-c",
-                bootstrap,
-                *[p for p in sys.path if p and Path(p).is_absolute()],
-                str(Path(__file__).with_name("worker.py")),
-                config.uri,
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            bufsize=0,
-        )
+        try:
+            self.process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-I",
+                    "-u",
+                    "-c",
+                    bootstrap,
+                    *[p for p in sys.path if p and Path(p).is_absolute()],
+                    str(Path(__file__).with_name("worker.py")),
+                    config.uri,
+                    str(self.spool.root),
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                bufsize=0,
+            )
+        except BaseException:
+            self.spool.close()
+            raise
         assert self.process.stdin is not None
         assert self.process.stdout is not None
         os.set_blocking(self.process.stdin.fileno(), False)
@@ -128,3 +136,8 @@ class WorkerProcess:
             self.process.stdout.close()
             self._outgoing.clear()
             self._incoming.clear()
+            self.spool.close()
+
+    def discard(self, message: Message) -> None:
+        if isinstance(message, OperationSuccess):
+            self.spool.release(message.artifacts)

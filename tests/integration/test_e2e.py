@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import hashlib
 import json
 import os
 import shutil
@@ -10,12 +12,14 @@ from pathlib import Path
 import pytest
 from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.types import ImageContent
 from pydantic import TypeAdapter
-from tyvrana_protocol import AdapterRegistration, JsonValue
+from tyvrana_protocol import AdapterRegistration, ArtifactDescriptor, JsonValue
 
 from tyvrana_blender.models import DeleteResult, ObjectSummary, SceneSummary
 from tyvrana_blender.operations import OPERATIONS
 
+from ..png import inspect_png
 from .conftest import running_blender
 
 
@@ -32,10 +36,10 @@ async def core_client(
         params = StdioServerParameters(
             command=executable,
             args=["mcp", "--port", str(port)],
-            env={"PYTHONASYNCIODEBUG": "1"},
+            env={"PYTHONASYNCIODEBUG": "1", "TMPDIR": str(tmp_path)},
         )
         async with Client(
-            stdio_client(params, errlog=log), read_timeout_seconds=10
+            stdio_client(params, errlog=log), read_timeout_seconds=45
         ) as client:
             line = next(
                 line
@@ -46,6 +50,65 @@ async def core_client(
             yield client, actual_port
     assert "Adapter server stopped" in log_path.read_text()
     assert "Traceback" not in log_path.read_text()
+    assert not list(tmp_path.glob("tyvrana-artifacts-*"))  # noqa: ASYNC240 - Test directory.
+
+
+def spooled_count(directory: Path) -> int:
+    return int(json.loads((directory / "ready.json").read_text())["spooled_artifacts"])
+
+
+@pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
+async def test_real_render_reaches_mcp_image_content(
+    profile: dict[str, str], tmp_path: Path, ui: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    profile["TYVRANA_TEST_RENDER"] = "1"
+    async with core_client(tmp_path) as (client, port):
+        profile["TYVRANA_TEST_PORT"] = str(port)
+        with running_blender(profile, tmp_path, ui=ui):
+            registered = await discover(client)
+            assert registered is not None
+            result = await client.call_tool(
+                "tyvrana_execute_operation",
+                {
+                    "adapter_id": registered.instance_id,
+                    "operation": "blender.render.image",
+                    "arguments": {"width": 512, "height": 512, "format": "png"},
+                },
+            )
+            assert not result.is_error, result.content
+            images = [
+                content
+                for content in result.content
+                if isinstance(content, ImageContent)
+            ]
+            assert len(images) == 1 and images[0].mime_type == "image/png"
+            data = base64.b64decode(images[0].data, validate=True)
+            assert inspect_png(data) == (512, 512)
+            descriptor = ArtifactDescriptor.model_validate(
+                result.structured_content["artifacts"][0]
+            )
+            assert descriptor.byte_size == len(data) and len(data) > 1000
+            assert descriptor.sha256 == hashlib.sha256(data).hexdigest()
+            assert result.structured_content["result"] == {
+                "width": 512,
+                "height": 512,
+                "format": "png",
+            }
+            assert (
+                "/tmp/" not in result.model_dump_json()
+                and "file:" not in result.model_dump_json()
+            )
+            assert "data" not in result.structured_content["result"]
+            print("MCP_RENDER_ARTIFACT", descriptor.model_dump_json())
+            async with asyncio.timeout(5):
+                while spooled_count(tmp_path):  # noqa: ASYNC110 - Observe an external process.
+                    await asyncio.sleep(0.02)
+        await discover(client, empty=True)
+    ready = json.loads((tmp_path / "ready.json").read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(ready["worker_pid"], 0)
+
+    assert "Failed to parse" not in caplog.text
 
 
 async def discover(
@@ -98,6 +161,16 @@ async def test_full_mcp_core_blender_vertical_slice(
                 await operation(client, identifier, "blender.scene.inspect", {})
             )
             assert initial.object_count == 0
+            no_camera = await client.call_tool(
+                "tyvrana_execute_operation",
+                {
+                    "adapter_id": identifier,
+                    "operation": "blender.render.image",
+                    "arguments": {},
+                },
+            )
+            assert no_camera.is_error
+            assert '"no_camera"' in no_camera.model_dump_json().replace('\\"', '"')
             created = ObjectSummary.model_validate(
                 await operation(
                     client,

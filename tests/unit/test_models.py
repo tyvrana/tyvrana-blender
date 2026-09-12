@@ -88,3 +88,33 @@ def test_registration_is_canonical_and_optional_filepath_is_omitted() -> None:
         registration("other", "5.2.1 LTS", "example.blend").project_path
         == "example.blend"
     )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"width": 63},
+        {"height": 1025},
+        {"width": True},
+        {"height": "512"},
+        {"width": None},
+        {"format": "jpeg"},
+        {"path": "output.png"},
+    ],
+)
+def test_invalid_render_arguments(arguments: object) -> None:
+    from tyvrana_blender.models import RenderArguments
+
+    with pytest.raises(ValueError):
+        RenderArguments.model_validate(arguments)
+
+
+def test_render_defaults_and_dimension_bounds() -> None:
+    from tyvrana_blender.models import RenderArguments
+
+    assert RenderArguments().model_dump() == {
+        "width": 512,
+        "height": 512,
+        "format": "png",
+    }
+    assert RenderArguments(width=64, height=1024).height == 1024
