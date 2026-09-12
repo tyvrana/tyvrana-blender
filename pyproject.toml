@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tyvrana-blender"
+version = "0.1.0"
+description = "Blender extension for local Tyvrana adapter operations."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "pydantic>=2.13.5",
+    "tyvrana-protocol @ git+https://github.com/tyvrana/tyvrana-protocol.git@ba623d22555dff46e1d8a7a6b3a01417bf584136",
+    "websockets>=17.1",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.7",
+    "pip>=26.2",
+    "mcp>=2.2.0",
+    "hatchling>=1.32.0",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tyvrana_blender"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+addopts = ["--import-mode=importlib", "-ra"]
+asyncio_mode = "auto"
+asyncio_debug = true
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests", "tools"]
+strict = true
+plugins = ["pydantic.mypy"]

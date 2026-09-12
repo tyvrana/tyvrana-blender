@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+id = "tyvrana_blender"
+version = "0.1.0"
+name = "Tyvrana"
+tagline = "Connect Blender to local Tyvrana scene operations"
+maintainer = "Tyvrana contributors"
+type = "add-on"
+website = "https://github.com/tyvrana/tyvrana-blender"
+blender_version_min = "5.2.0"
+license = ["SPDX:Apache-2.0"]
+platforms = ["linux-x64"]
+
+# The build tool adds the locked CPython 3.13 dependency wheels to this manifest.
+[permissions]
+network = "Connect to the local Tyvrana core on loopback"
