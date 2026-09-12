@@ -77,3 +77,52 @@ def prepare_lighting_scene() -> None:
     scene.cycles.samples = 32
     scene.cycles.seed = 0
     scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0
+
+
+def prepare_material_scene() -> None:
+    """Fixed studio sphere; the client creates and assigns its tested materials."""
+    prepare_scene()
+    scene = bpy.context.scene
+    bpy.data.objects.remove(bpy.data.objects["RenderCube"], do_unlink=True)
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32, location=(0, 0, 1))
+    subject = bpy.context.object
+    subject.name = "RenderSubject"
+    for polygon in subject.data.polygons:
+        polygon.use_smooth = True
+    camera = scene.camera
+    camera.location = (0, -7, 3)
+    camera.rotation_euler = (
+        (Vector((0, 0, 1)) - camera.location).to_track_quat("-Z", "Y").to_euler()
+    )
+    camera.data.type = "ORTHO"
+    camera.data.ortho_scale = 5
+    light = next(obj for obj in scene.objects if obj.type == "LIGHT")
+    light.location = (-3, -4, 6)
+    light.rotation_euler = (
+        (Vector((0, 0, 1)) - light.location).to_track_quat("-Z", "Y").to_euler()
+    )
+    light.data.shape = "SQUARE"
+    light.data.size = 1.5
+    light.data.energy = 1200
+    for material in bpy.data.materials:
+        shader = material.node_tree.nodes.get("Principled BSDF")
+        if shader is not None:
+            shader.inputs["Base Color"].default_value = (0.18, 0.18, 0.18, 1)
+            shader.inputs["Roughness"].default_value = 0.8
+    custom = bpy.data.materials.new("CustomGraph")
+    tree = custom.node_tree
+    shader = tree.nodes.get("Principled BSDF")
+    value = tree.nodes.new("ShaderNodeValue")
+    tree.links.new(value.outputs["Value"], shader.inputs["Roughness"])
+    scene.view_settings.view_transform = "Standard"
+    scene.view_settings.exposure = 0
+    scene.view_settings.gamma = 1
+    scene.cycles.samples = 64
+    scene.cycles.seed = 0
+    scene.world.node_tree.nodes["Background"].inputs["Color"].default_value = (
+        0.1,
+        0.1,
+        0.1,
+        1,
+    )
+    scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.3

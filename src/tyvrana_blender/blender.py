@@ -39,6 +39,18 @@ from .light_models import (
     LightSummary,
     light_state,
 )
+from .material_models import (
+    PRINCIPLED_SOCKETS,
+    MaterialAssignArguments,
+    MaterialAssignment,
+    MaterialAssignResult,
+    MaterialConfigureArguments,
+    MaterialCreateArguments,
+    MaterialInspectResult,
+    MaterialSummary,
+    PrincipledSummary,
+    Surface,
+)
 from .models import (
     ConnectionConfig,
     CreateArguments,
@@ -234,9 +246,353 @@ def light_summary(obj: Any) -> LightSummary:
     )
 
 
+def shader_socket(sockets: Any, identifier: str) -> Any:
+    """Use the built-in semantic identifier, independent of node/socket labels."""
+    return next(socket for socket in sockets if socket.identifier == identifier)
+
+
+def principled_surface(material: Any) -> tuple[Surface, Any]:
+    main_thread()
+    tree = material.node_tree
+    if tree is None or not tree.nodes:
+        return "none", None
+    outputs = [
+        node for node in tree.nodes if node.bl_idname == "ShaderNodeOutputMaterial"
+    ]
+    if not outputs:
+        return "none", None
+    active = [node for node in outputs if node.is_active_output]
+    if (
+        len(active) != 1
+        or active[0].target != "ALL"
+        or tree.animation_data is not None
+        or material.is_grease_pencil
+    ):
+        return "custom", None
+    output = active[0]
+    if output.mute or any(
+        tree.get_output_node(target) != output for target in ("ALL", "EEVEE", "CYCLES")
+    ):
+        return "custom", None
+    surface = shader_socket(output.inputs, "Surface")
+    if not surface.is_linked:
+        return "none", None
+    if len(surface.links) != 1:
+        return "custom", None
+    link = surface.links[0]
+    node = link.from_node
+    if (
+        not link.is_valid
+        or link.is_muted
+        or link.from_socket.identifier != "BSDF"
+        or node.bl_idname != "ShaderNodeBsdfPrincipled"
+        or node.mute
+        or any(socket.is_linked for socket in node.inputs)
+        or any(socket.is_linked for socket in output.inputs if socket != surface)
+    ):
+        return "custom", None
+    return "principled", node
+
+
+def principled_values(node: Any) -> PrincipledSummary:
+    main_thread()
+    values: dict[str, JsonValue] = {}
+    for field, identifier in PRINCIPLED_SOCKETS.items():
+        value = shader_socket(node.inputs, identifier).default_value
+        if field in {"base_color", "emission_color", "subsurface_radius"}:
+            values[field] = [float(value[i]) for i in range(3)]
+        else:
+            values[field] = float(value)
+    return PrincipledSummary.model_validate(values)
+
+
+def material_summary(material: Any) -> MaterialSummary:
+    main_thread()
+    surface, node = principled_surface(material)
+    values = None
+    if node is not None:
+        try:
+            values = principled_values(node)
+        except ValidationError:
+            # Non-finite externally authored state cannot be represented as JSON.
+            surface = "custom"
+    return MaterialSummary(
+        name=str(material.name),
+        surface=surface,
+        principled=values,
+        assignments=[
+            MaterialAssignment(object=str(obj.name), slot=index)
+            for obj in sorted(bpy.data.objects, key=lambda obj: obj.name)
+            for index, slot in enumerate(obj.material_slots)
+            if slot.material == material
+        ],
+    )
+
+
+def find_material(name: str) -> Any:
+    main_thread()
+    matches = [material for material in bpy.data.materials if material.name == name]
+    if not matches:
+        raise OperationError(
+            "material_not_found", "Material does not exist", {"name": name}
+        )
+    if len(matches) != 1:
+        raise OperationError(
+            "invalid_arguments",
+            "Material name is ambiguous across libraries",
+            {"name": name},
+        )
+    return matches[0]
+
+
+def apply_principled_values(node: Any, values: dict[str, JsonValue]) -> None:
+    main_thread()
+    for field, value in values.items():
+        socket = shader_socket(node.inputs, PRINCIPLED_SOCKETS[field])
+        if field in {"base_color", "emission_color"}:
+            assert isinstance(value, list)
+            # RGB shader colors have an unused fourth socket component, not Alpha.
+            socket.default_value = [*value, float(socket.default_value[3])]
+        else:
+            socket.default_value = value
+
+
+MATERIAL_OBJECT_TYPES = frozenset(
+    {"MESH", "CURVE", "SURFACE", "FONT", "CURVES", "POINTCLOUD", "VOLUME"}
+)
+
+
+def assignment_result(obj: Any, index: int, material: Any) -> MaterialAssignResult:
+    return MaterialAssignResult(
+        object_name=str(obj.name),
+        assigned_slot=index,
+        material_name=str(material.name),
+        slots=[
+            str(slot.material.name) if slot.material else None
+            for slot in obj.material_slots
+        ],
+    )
+
+
+def material_index_snapshot(data: Any) -> list[tuple[Any, str, int]]:
+    """Preserve authored indices when rolling back Blender's slot-removal remap."""
+    if isinstance(data, bpy.types.Mesh):
+        return [
+            (face, "material_index", int(face.material_index)) for face in data.polygons
+        ]
+    if isinstance(data, bpy.types.Curve):
+        characters = data.body_format if isinstance(data, bpy.types.TextCurve) else ()
+        return [
+            (item, "material_index", int(item.material_index))
+            for item in (*data.splines, *characters)
+        ]
+    return []
+
+
 class BlenderBackend:
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
+
+    def material_inspect(self) -> MaterialInspectResult:
+        main_thread()
+        bpy.context.view_layer.update()
+        return MaterialInspectResult(
+            materials=[
+                material_summary(material)
+                for material in sorted(
+                    bpy.data.materials, key=lambda material: material.name
+                )
+            ]
+        )
+
+    def material_create(self, arguments: MaterialCreateArguments) -> MaterialSummary:
+        data_mutation_context()
+        if arguments.name is not None and any(
+            material.name == arguments.name for material in bpy.data.materials
+        ):
+            raise OperationError(
+                "invalid_arguments",
+                "Material name already exists",
+                {"name": arguments.name},
+            )
+        material = bpy.data.materials.new(arguments.name or "Material")
+        try:
+            if arguments.name is not None and material.name != arguments.name:
+                raise OperationError(
+                    "invalid_arguments",
+                    "Blender cannot store the requested name exactly",
+                )
+            # Blender 5.2 creates precisely the native Principled -> Output graph.
+            surface, node = principled_surface(material)
+            if surface != "principled":
+                raise OperationError(
+                    "operation_failed", "Blender did not create a Principled surface"
+                )
+            requested = arguments.model_dump(
+                mode="json", exclude={"name"}, exclude_unset=True
+            )
+            apply_principled_values(node, requested)
+            bpy.context.view_layer.update()
+            stored = principled_values(node).model_dump(mode="json")
+            if any(stored[key] != value for key, value in requested.items()):
+                raise OperationError(
+                    "operation_failed",
+                    "Blender did not retain the requested shader values",
+                )
+            return material_summary(material)
+        except Exception:
+            bpy.data.materials.remove(material, do_unlink=True)
+            raise
+
+    def material_configure(
+        self, arguments: MaterialConfigureArguments
+    ) -> MaterialSummary:
+        data_mutation_context()
+        material = find_material(arguments.name)
+        surface, node = principled_surface(material)
+        if surface != "principled":
+            raise OperationError(
+                "unsupported_material_graph",
+                "Material has no supported constant Principled surface",
+                {"name": arguments.name},
+            )
+        requested = arguments.model_dump(
+            mode="json", exclude={"name"}, exclude_unset=True
+        )
+        if (
+            not material.is_editable
+            or not material.node_tree.is_editable
+            or any(
+                shader_socket(
+                    node.inputs, PRINCIPLED_SOCKETS[key]
+                ).is_property_readonly("default_value")
+                for key in requested
+            )
+        ):
+            raise OperationError(
+                "invalid_context", "Material shader data is not editable"
+            )
+        try:
+            original = principled_values(node).model_dump(mode="json")
+        except ValidationError as exc:
+            raise OperationError(
+                "unsupported_material_graph",
+                "Material contains unsupported non-finite shader values",
+            ) from exc
+        # Validate the complete state before writing any socket.
+        PrincipledSummary.model_validate({**original, **requested})
+        try:
+            apply_principled_values(node, requested)
+            bpy.context.view_layer.update()
+            stored = principled_values(node).model_dump(mode="json")
+            if any(stored[key] != value for key, value in requested.items()):
+                raise OperationError(
+                    "operation_failed",
+                    "Blender did not retain the requested shader values",
+                )
+            return material_summary(material)
+        except Exception:
+            apply_principled_values(node, {key: original[key] for key in requested})
+            bpy.context.view_layer.update()
+            raise
+
+    def material_assign(
+        self, arguments: MaterialAssignArguments
+    ) -> MaterialAssignResult:
+        data_mutation_context()
+        obj = find_object(arguments.object_name, mutable=False)
+        if (
+            obj.type not in MATERIAL_OBJECT_TYPES
+            or obj.data is None
+            or not hasattr(obj.data, "materials")
+        ):
+            raise OperationError(
+                "object_not_material_capable",
+                "Object does not support these material slots",
+                {"name": arguments.object_name},
+            )
+        material = find_material(arguments.material_name)
+        if material.is_grease_pencil:
+            raise OperationError(
+                "invalid_arguments",
+                "Grease Pencil materials require a Grease Pencil assignment API",
+            )
+        if bpy.context.mode != "OBJECT" or not obj.is_editable:
+            raise OperationError(
+                "invalid_context",
+                "Material assignment requires an editable object in Object Mode",
+            )
+        data = obj.data
+        count = len(obj.material_slots)
+        try:
+            index = arguments.checked_slot(count)
+        except ValueError as exc:
+            raise OperationError("invalid_arguments", str(exc)) from exc
+        append = index == count
+        if append and (not data.is_editable or obj.is_property_readonly("data")):
+            raise OperationError(
+                "invalid_context", "Cannot extend this object's material slots"
+            )
+        if not append:
+            slot = obj.material_slots[index]
+            if slot.is_property_readonly("link") or (
+                slot.link == "OBJECT" and slot.is_property_readonly("material")
+            ):
+                raise OperationError("invalid_context", "Material slot is not editable")
+        # Replacements are object overrides. Extending shared geometry must not
+        # change another object's slot count or face-index interpretation.
+        working = data.copy() if append and data.users > 1 else data
+        indices = material_index_snapshot(data) if append and working == data else []
+        old_slot = (
+            None
+            if append
+            else (obj.material_slots[index].link, obj.material_slots[index].material)
+        )
+        previous_active = obj.active_material_index
+        try:
+            if working != data:
+                obj.data = working
+            if append:
+                working.materials.append(None)
+            slot = obj.material_slots[index]
+            slot.link = "OBJECT"
+            # A DATA-linked slot on linked geometry becomes writable only after
+            # switching this local object to its own material override.
+            if slot.is_property_readonly("material"):
+                raise OperationError("invalid_context", "Material slot is not editable")
+            slot.material = material
+            bpy.context.view_layer.update()
+            if (
+                len(obj.material_slots) != count + int(append)
+                or slot.link != "OBJECT"
+                or slot.material != material
+            ):
+                raise OperationError(
+                    "operation_failed",
+                    "Blender did not retain the requested assignment",
+                )
+            return assignment_result(obj, index, material)
+        except Exception:
+            if working != data:
+                obj.data = data
+                bpy.data.batch_remove(ids=(working,))
+            elif append:
+                if len(working.materials) > count:
+                    if count == 0:
+                        # pop's last-slot path does not sync object slot lengths.
+                        working.materials.clear()
+                    else:
+                        working.materials.pop(index=count)
+                    for item, property_name, value in indices:
+                        setattr(item, property_name, value)
+            elif old_slot is not None:
+                slot = obj.material_slots[index]
+                slot.link = old_slot[0]
+                if slot.material != old_slot[1]:
+                    slot.material = old_slot[1]
+            obj.active_material_index = previous_active
+            bpy.context.view_layer.update()
+            raise
 
     def light_inspect(self) -> LightInspectResult:
         main_thread()

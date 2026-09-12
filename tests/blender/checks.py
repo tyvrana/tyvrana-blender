@@ -27,6 +27,7 @@ scene_helpers = importlib.import_module("tests.blender.scene")
 png_helpers = importlib.import_module("tests.png")
 camera_checks = importlib.import_module("tests.blender.camera_checks")
 light_checks = importlib.import_module("tests.blender.light_checks")
+material_checks = importlib.import_module("tests.blender.material_checks")
 
 
 class BlenderTests(unittest.TestCase):
@@ -354,6 +355,9 @@ try:
         unittest.TestSuite(
             [
                 unittest.defaultTestLoader.loadTestsFromTestCase(BlenderTests),
+                unittest.defaultTestLoader.loadTestsFromTestCase(
+                    material_checks.MaterialTests
+                ),
                 unittest.defaultTestLoader.loadTestsFromTestCase(
                     light_checks.LightTests
                 ),

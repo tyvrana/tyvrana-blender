@@ -126,3 +126,23 @@ def mean_pixel_difference(first: bytes, second: bytes) -> float:
     assert inspect_png(first) == inspect_png(second)
     before, after = rgb_pixels(first), rgb_pixels(second)
     return sum(abs(a - b) for a, b in zip(before, after, strict=True)) / len(before)
+
+
+def highlight_statistics(data: bytes) -> tuple[float, float, float]:
+    """Median, upper percentile, and bright-area fraction inside the studio sphere."""
+    width, height = inspect_png(data)
+    assert width == height
+    rgb = rgb_pixels(data)
+    center = width / 2
+    radius = width * 0.17
+    values = sorted(
+        sum(rgb[(y * width + x) * 3 : (y * width + x) * 3 + 3]) / 3
+        for y in range(height)
+        for x in range(width)
+        if (x - center) ** 2 + (y - center) ** 2 < radius**2
+    )
+    return (
+        values[len(values) // 2],
+        values[int(len(values) * 0.999)],
+        sum(value > 240 for value in values) / len(values),
+    )

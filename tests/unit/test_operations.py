@@ -23,6 +23,14 @@ from tyvrana_blender.light_models import (
     LightSummary,
     light_state,
 )
+from tyvrana_blender.material_models import (
+    MaterialAssignArguments,
+    MaterialAssignResult,
+    MaterialConfigureArguments,
+    MaterialCreateArguments,
+    MaterialInspectResult,
+    MaterialSummary,
+)
 from tyvrana_blender.models import (
     CreateArguments,
     DeleteArguments,
@@ -39,6 +47,38 @@ from tyvrana_blender.operations import OperationError, execute
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def material_inspect(self) -> MaterialInspectResult:
+        self.calls.append("material_inspect")
+        return MaterialInspectResult(materials=[])
+
+    def material_create(self, arguments: MaterialCreateArguments) -> MaterialSummary:
+        self.calls.append("material_create")
+        return MaterialSummary(
+            name=arguments.name or "Material",
+            surface="none",
+            principled=None,
+            assignments=[],
+        )
+
+    def material_configure(
+        self, arguments: MaterialConfigureArguments
+    ) -> MaterialSummary:
+        self.calls.append("material_configure")
+        return MaterialSummary(
+            name=arguments.name, surface="none", principled=None, assignments=[]
+        )
+
+    def material_assign(
+        self, arguments: MaterialAssignArguments
+    ) -> MaterialAssignResult:
+        self.calls.append("material_assign")
+        return MaterialAssignResult(
+            object_name=arguments.object_name,
+            assigned_slot=0,
+            material_name=arguments.material_name,
+            slots=[arguments.material_name],
+        )
 
     def light_inspect(self) -> LightInspectResult:
         self.calls.append("light_inspect")
@@ -168,6 +208,18 @@ def camera_summary(name: str) -> CameraSummary:
 @pytest.mark.parametrize(
     ("operation", "arguments", "method"),
     [
+        ("blender.material.inspect", {}, "material_inspect"),
+        ("blender.material.create_principled", {}, "material_create"),
+        (
+            "blender.material.configure_principled",
+            {"name": "Material", "roughness": 0.5},
+            "material_configure",
+        ),
+        (
+            "blender.material.assign",
+            {"object_name": "Cube", "material_name": "Material"},
+            "material_assign",
+        ),
         ("blender.light.inspect", {}, "light_inspect"),
         ("blender.light.create", {"type": "point"}, "light_create"),
         ("blender.light.configure", {"name": "Light", "energy": 20}, "light_configure"),

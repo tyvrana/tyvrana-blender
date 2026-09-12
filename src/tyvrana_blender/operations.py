@@ -27,6 +27,14 @@ from .light_models import (
     LightInspectResult,
     LightSummary,
 )
+from .material_models import (
+    MaterialAssignArguments,
+    MaterialAssignResult,
+    MaterialConfigureArguments,
+    MaterialCreateArguments,
+    MaterialInspectResult,
+    MaterialSummary,
+)
 from .models import (
     CreateArguments,
     DeleteArguments,
@@ -49,6 +57,10 @@ OPERATIONS = (
     "blender.light.configure",
     "blender.light.create",
     "blender.light.inspect",
+    "blender.material.assign",
+    "blender.material.configure_principled",
+    "blender.material.create_principled",
+    "blender.material.inspect",
     "blender.object.create_primitive",
     "blender.object.delete",
     "blender.object.set_transform",
@@ -76,6 +88,16 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def material_inspect(self) -> MaterialInspectResult: ...
+    def material_create(
+        self, arguments: MaterialCreateArguments
+    ) -> MaterialSummary: ...
+    def material_configure(
+        self, arguments: MaterialConfigureArguments
+    ) -> MaterialSummary: ...
+    def material_assign(
+        self, arguments: MaterialAssignArguments
+    ) -> MaterialAssignResult: ...
     def light_inspect(self) -> LightInspectResult: ...
     def light_create(self, arguments: LightCreateArguments) -> LightSummary: ...
     def light_configure(self, arguments: LightConfigureArguments) -> LightSummary: ...
@@ -115,8 +137,19 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | CameraSetActiveArguments
             | LightCreateArguments
             | LightConfigureArguments
+            | MaterialCreateArguments
+            | MaterialConfigureArguments
+            | MaterialAssignArguments
         )
         match request.operation:
+            case "blender.material.inspect":
+                arguments = InspectArguments.model_validate(request.arguments)
+            case "blender.material.create_principled":
+                arguments = MaterialCreateArguments.model_validate(request.arguments)
+            case "blender.material.configure_principled":
+                arguments = MaterialConfigureArguments.model_validate(request.arguments)
+            case "blender.material.assign":
+                arguments = MaterialAssignArguments.model_validate(request.arguments)
             case "blender.light.inspect":
                 arguments = InspectArguments.model_validate(request.arguments)
             case "blender.light.create":
@@ -168,12 +201,20 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
         if isinstance(arguments, InspectArguments):
-            if request.operation == "blender.light.inspect":
+            if request.operation == "blender.material.inspect":
+                result = backend.material_inspect()
+            elif request.operation == "blender.light.inspect":
                 result = backend.light_inspect()
             elif request.operation == "blender.camera.inspect":
                 result = backend.camera_inspect()
             else:
                 result = backend.inspect()
+        elif isinstance(arguments, MaterialCreateArguments):
+            result = backend.material_create(arguments)
+        elif isinstance(arguments, MaterialConfigureArguments):
+            result = backend.material_configure(arguments)
+        elif isinstance(arguments, MaterialAssignArguments):
+            result = backend.material_assign(arguments)
         elif isinstance(arguments, LightCreateArguments):
             result = backend.light_create(arguments)
         elif isinstance(arguments, LightConfigureArguments):

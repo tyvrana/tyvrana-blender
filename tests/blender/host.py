@@ -24,6 +24,9 @@ if os.environ.get("TYVRANA_TEST_RENDER") == "1":
 if os.environ.get("TYVRANA_TEST_LIGHTING") == "1":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     importlib.import_module("tests.blender.scene").prepare_lighting_scene()
+if os.environ.get("TYVRANA_TEST_MATERIAL") == "1":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    importlib.import_module("tests.blender.scene").prepare_material_scene()
 deadline = time.monotonic() + 180
 
 

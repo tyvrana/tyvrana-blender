@@ -59,6 +59,10 @@ Names are exact and are advertised in sorted order:
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
+| `blender.material.inspect` | `{}` | Sorted material resources and assignments |
+| `blender.material.create_principled` | Optional name and Principled fields | Created material summary |
+| `blender.material.configure_principled` | Required name; partial Principled fields | Updated material summary |
+| `blender.material.assign` | Object/material names; optional slot index | Assigned slot and ordered slots |
 | `blender.light.inspect` | `{}` | Sorted light summaries |
 | `blender.light.create` | Light type, optional name/transform and applicable settings | Created light summary |
 | `blender.light.configure` | Name and partial applicable light settings | Updated light summary |
@@ -288,6 +292,174 @@ Semantics follow the official [Blender 5.2 Light API](https://docs.blender.org/a
 [light manual](https://docs.blender.org/manual/en/5.2/render/lights/light_object.html),
 and [Blender 5.2.1 RNA definitions](https://github.com/blender/blender/blob/v5.2.1/source/blender/makesrna/intern/rna_light.cc),
 with native checks for property limits, defaults, shared data, and rollback.
+
+## Materials
+
+Materials are named reusable resources in the blend file. Configuring a named
+material updates that resource for every user; it never silently duplicates the
+material. Creation and assignment are separate. Object transforms remain
+`blender.object.set_transform`; assigning slots does not edit face-material
+indices.
+
+`blender.material.inspect` takes `{}` and returns `{"materials": [...]}`, sorted
+by material name, including unused and linked materials. Each material has:
+
+```text
+{
+  name: string,
+  surface: "principled" | "custom" | "none",
+  principled: PrincipledSummary | null,
+  assignments: [{object: string, slot: integer}, ...]
+}
+```
+
+Assignments report effective object slots across the blend file, sorted by object
+name and slot index. Unassigned materials have an empty list. These references
+report authored slots, not evaluated Geometry Nodes assignments or per-face
+usage. Assignment targets must exist in the current scene.
+
+### Principled surface configuration
+
+`blender.material.create_principled` accepts an optional `name` and any of the
+fields below as flat arguments. It creates the native two-node graph, Principled
+BSDF → Material Output Surface, and returns a material summary without assigning
+it. Omitted properties retain Blender-native defaults. Explicit duplicate names,
+including names used by linked materials, and names Blender cannot store exactly
+are rejected. Omit `name` for native unique naming and use the returned name.
+
+`blender.material.configure_principled` requires `name` and accepts a partial set
+of the same fields. Omitted properties retain their values; a name-only call
+validates and returns the material. Configuration neither rebuilds the graph nor
+makes a shared material single-user. Named lookup rejects ambiguous names shared
+by different libraries. Create another named material for a distinct resource.
+
+| JSON field / `PrincipledSummary` field | Blender socket identifier | Native default |
+| --- | --- | --- |
+| `base_color` | Base Color | `[0.8, 0.8, 0.8]` |
+| `metallic` | Metallic | `0` |
+| `roughness` | Roughness | `0.5` |
+| `ior` | IOR | `1.5` |
+| `alpha` | Alpha | `1` |
+| `subsurface_weight` | Subsurface Weight | `0` |
+| `subsurface_radius` | Subsurface Radius | `[1, 0.2, 0.1]` |
+| `subsurface_scale` | Subsurface Scale | `0.005` |
+| `transmission_weight` | Transmission Weight | `0` |
+| `coat_weight` | Coat Weight | `0` |
+| `coat_roughness` | Coat Roughness | `0.03` |
+| `emission_color` | Emission Color | `[1, 1, 1]` |
+| `emission_strength` | Emission Strength | `0` |
+
+The summary contains exactly these fields. Colors and radius are three-number
+arrays; other fields are numbers. Defaults above are rounded for readability;
+results expose actual float32 values. Socket lookup uses semantic identifiers,
+so node names, display labels, and socket positions do not select the shader.
+
+```json
+{"name": "Ceramic", "base_color": [0.5, 0.5, 0.5], "roughness": 0.65}
+```
+
+Colors are scene-linear numeric shader RGB values, not CSS/sRGB strings. RGB
+configuration preserves the color socket's unused fourth component. Transparency
+uses the separate `alpha` socket. Radius components correspond to RGB scattering
+distances, multiplied by `subsurface_scale` in Blender scene units. Emission uses
+its color and strength; roughness controls reflection/transmission microfacets,
+metallic blends dielectric and metallic shading, and IOR controls refraction and
+reflection. The remaining weight fields blend the named layers.
+
+All values must be strict finite numbers. Numeric strings/booleans, malformed
+vectors, unknown fields, explicit nulls, float32 overflow, and nonzero values
+that round to zero are rejected before mutation. Inputs are checked before
+rounding to float32, then stored values are verified after writing. With
+`F = 3.4028234663852886e38`, accepted Blender 5.2 socket **hard storage limits** are:
+
+| Inputs | Hard range |
+| --- | --- |
+| Base/emission RGB components | `[0, F]` |
+| Every supported scalar and subsurface-radius component | `[-F, F]` |
+
+Blender's dynamic float/vector socket range callbacks distinguish storage limits
+from node-declared slider ranges. Even factor sockets store values outside 0–1;
+static RNA subtype metadata alone does not describe their dynamic hard range.
+This API does not substitute UI soft limits for storage limits. Ordinary physical
+use is narrower: weights, metallic, roughness, and alpha generally use 0–1; IOR is
+normally at least 1; radius, scale, and emission strength are normally nonnegative.
+Values outside physical ranges may be clamped or otherwise interpreted by the
+render engine; their storage does not guarantee a distinct rendered effect.
+See Blender's [dynamic socket range implementation](https://github.com/blender/blender/blob/v5.2.1/source/blender/makesrna/intern/rna_node_socket.cc)
+and [Principled socket declarations](https://github.com/blender/blender/blob/v5.2.1/source/blender/nodes/shader/nodes/node_shader_bsdf_principled.cc).
+
+### Recognized and custom graphs
+
+A configurable surface has one active Material Output targeting `ALL`, resolved
+to that same output for both Cycles and EEVEE. Its Surface is connected directly
+by one valid, unmuted BSDF link to an unmuted Principled node. No Principled input
+is linked, no other input of that output is linked, and the node tree has no
+animation data. Disconnected nodes and inactive unused outputs may remain.
+Unexposed native shader settings are preserved and can still affect shading.
+
+Mixed shaders, reroutes, texture-driven inputs, volume/displacement links, muted
+nodes, engine-specific/ambiguous outputs, animated node trees, Grease Pencil
+materials, and non-finite shader state are `custom`, with `principled: null`.
+Missing node trees, empty graphs, missing outputs, or an unconnected active
+Surface are `none`. Inspection preserves all graphs. Typed configuration of
+`custom` or `none` returns `unsupported_material_graph` without conversion.
+Blender 5.2 materials use nodes inherently; deprecated `use_nodes` is not accessed.
+
+Linked/read-only shader data and mutation during rendering return
+`invalid_context`. Requested values are validated together before writes;
+unexpected failures restore the changed supported values, and failed creation
+removes the newly created datablock. Unused resources follow Blender's native
+lifetime rules: an unassigned material without a fake user may not survive a
+save/reload. This layer does not expose resource removal or persistence flags.
+
+### Object material slots
+
+`blender.material.assign` takes:
+
+```json
+{"object_name": "Body", "material_name": "Ceramic", "slot_index": 0}
+```
+
+`slot_index` is optional and defaults to 0. An existing index replaces that slot;
+an index equal to the slot count appends one slot. Thus an object with no slots
+gets slot 0. Negative indices, gaps, nulls, booleans, and non-integers are rejected.
+Other slots retain their order and assignments. The result is:
+
+```text
+{
+  object_name: string,
+  assigned_slot: integer,
+  material_name: string,
+  slots: [string | null, ...]
+}
+```
+
+The assigned slot uses Blender's `OBJECT` link mode, preserving other objects'
+materials even when they share geometry. Appending to shared geometry first
+copies the geometry datablock to preserve other objects' slot counts and index
+interpretation. Existing material resources stay shared; no material is copied.
+Failed assignments restore slot state, any original shared geometry reference,
+and authored indices affected by Blender's slot-removal rollback.
+
+Supported object types are `MESH`, `CURVE`, `SURFACE`, `FONT`, `CURVES`,
+`POINTCLOUD`, and `VOLUME`, using their native material-slot API. Assignment does
+not promise every slot or surface shader is meaningful for every geometry type;
+for example a volume needs a volume shader. Metaball family shading and Grease
+Pencil's distinct material model are outside this operation. Empty objects,
+cameras, lights, and unsupported types return `object_not_material_capable`.
+Assignment requires an editable object in Object Mode. Existing object slots can
+reference linked materials or override linked geometry; extending read-only
+geometry is rejected. Missing resources return `material_not_found`; missing
+objects return `object_not_found`; invalid names/indices return
+`invalid_arguments`. Unexpected failures are logged and sanitized as
+`operation_failed`.
+
+Alpha changes only the Principled Alpha socket. It does not configure material
+surface-render methods, transparency/shadow settings, or guarantee identical
+transparency across render engines and modes. Texture resources, arbitrary shader
+graph editing, UVs, normal/bump/displacement nodes, baking, and face-material-index
+editing are separate future capabilities. Material tests verify actual renders
+for color, roughness highlights, metallic, emission, and slot reassignment.
 
 ## Cameras
 
