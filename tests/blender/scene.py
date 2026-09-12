@@ -18,7 +18,7 @@ def prepare_scene() -> None:
     cube = bpy.context.object
     cube.name = "RenderCube"
     material = bpy.data.materials.new("RenderRed")
-    material.use_nodes = True
+    assert material.node_tree is not None
     shader = material.node_tree.nodes.get("Principled BSDF")
     shader.inputs["Base Color"].default_value = (0.65, 0.025, 0.015, 1)
     shader.inputs["Roughness"].default_value = 0.35
@@ -26,7 +26,7 @@ def prepare_scene() -> None:
     bpy.ops.mesh.primitive_plane_add(size=200)
     bpy.context.object.name = "RenderGround"
     ground = bpy.data.materials.new("RenderGray")
-    ground.use_nodes = True
+    assert ground.node_tree is not None
     ground.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (
         0.16,
         0.19,
@@ -48,7 +48,7 @@ def prepare_scene() -> None:
     light.data.size = 4
     if scene.world is None:
         scene.world = bpy.data.worlds.new("RenderWorld")
-    scene.world.use_nodes = True
+    assert scene.world.node_tree is not None
     scene.world.node_tree.nodes["Background"].inputs["Color"].default_value = (
         0.08,
         0.1,
@@ -56,3 +56,24 @@ def prepare_scene() -> None:
         1,
     )
     scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.3
+
+
+def prepare_lighting_scene() -> None:
+    """Neutral scene with no emitters; tests create all lights through operations."""
+    prepare_scene()
+    for obj in list(bpy.context.scene.objects):
+        if obj.type == "LIGHT":
+            bpy.data.objects.remove(obj, do_unlink=True)
+    for material in bpy.data.materials:
+        if material.node_tree is not None:
+            shader = material.node_tree.nodes.get("Principled BSDF")
+            if shader is not None:
+                shader.inputs["Base Color"].default_value = (0.5, 0.5, 0.5, 1)
+                shader.inputs["Roughness"].default_value = 1
+    scene = bpy.context.scene
+    scene.view_settings.view_transform = "Standard"
+    scene.view_settings.exposure = 0
+    scene.view_settings.gamma = 1
+    scene.cycles.samples = 32
+    scene.cycles.seed = 0
+    scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0

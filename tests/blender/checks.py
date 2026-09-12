@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 scene_helpers = importlib.import_module("tests.blender.scene")
 png_helpers = importlib.import_module("tests.png")
 camera_checks = importlib.import_module("tests.blender.camera_checks")
+light_checks = importlib.import_module("tests.blender.light_checks")
 
 
 class BlenderTests(unittest.TestCase):
@@ -64,6 +65,7 @@ class BlenderTests(unittest.TestCase):
         descriptor = response.artifacts[0]
         data = (spool.root / (descriptor.artifact_id + ".png")).read_bytes()
         self.assertEqual(png_helpers.inspect_png(data), (512, 512))
+        png_helpers.assert_image_variation(data)
         self.assertEqual(descriptor.byte_size, len(data))
         self.assertEqual(descriptor.sha256, hashlib.sha256(data).hexdigest())
         self.assertEqual(descriptor.media_type, "image/png")
@@ -352,6 +354,9 @@ try:
         unittest.TestSuite(
             [
                 unittest.defaultTestLoader.loadTestsFromTestCase(BlenderTests),
+                unittest.defaultTestLoader.loadTestsFromTestCase(
+                    light_checks.LightTests
+                ),
                 unittest.defaultTestLoader.loadTestsFromTestCase(
                     camera_checks.CameraTests
                 ),

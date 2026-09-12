@@ -31,9 +31,6 @@ def inspect_png(data: bytes) -> tuple[int, int]:
     raw = zlib.decompress(compressed)
     channels = 4 if color == 6 else 3
     assert len(raw) == height * (1 + width * channels)
-    # Filtered scanlines of the contrasting, lit scene must contain real variation.
-    assert len(set(raw)) > 32
-    assert sum(value != 0 for value in raw) > width * height // 4
     return width, height
 
 
@@ -79,6 +76,13 @@ def rgb_pixels(data: bytes) -> bytes:
     return bytes(rgb)
 
 
+def assert_image_variation(data: bytes) -> None:
+    """Require rich visible content for the contrasting render fixtures."""
+    pixels = rgb_pixels(data)
+    assert len(set(pixels)) > 32
+    assert sum(value != 0 for value in pixels) > len(pixels) // 12
+
+
 def red_bounds(data: bytes) -> tuple[int, int, int, int]:
     """Simple framing metric for the contrasting subject in render fixtures."""
     width, _ = inspect_png(data)
@@ -95,3 +99,30 @@ def red_bounds(data: bytes) -> tuple[int, int, int, int]:
         max(x for x, _ in points),
         max(y for _, y in points),
     )
+
+
+def channel_means(
+    data: bytes, box: tuple[int, int, int, int]
+) -> tuple[float, float, float]:
+    """RGB averages in a fixed rectangular probe, with exclusive right/bottom."""
+    width, height = inspect_png(data)
+    left, top, right, bottom = box
+    assert 0 <= left < right <= width and 0 <= top < bottom <= height
+    rgb = rgb_pixels(data)
+    count = (right - left) * (bottom - top)
+    means = [
+        sum(
+            rgb[(y * width + x) * 3 + channel]
+            for y in range(top, bottom)
+            for x in range(left, right)
+        )
+        / count
+        for channel in range(3)
+    ]
+    return means[0], means[1], means[2]
+
+
+def mean_pixel_difference(first: bytes, second: bytes) -> float:
+    assert inspect_png(first) == inspect_png(second)
+    before, after = rgb_pixels(first), rgb_pixels(second)
+    return sum(abs(a - b) for a, b in zip(before, after, strict=True)) / len(before)

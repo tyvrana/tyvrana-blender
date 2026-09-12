@@ -59,6 +59,9 @@ Names are exact and are advertised in sorted order:
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
+| `blender.light.inspect` | `{}` | Sorted light summaries |
+| `blender.light.create` | Light type, optional name/transform and applicable settings | Created light summary |
+| `blender.light.configure` | Name and partial applicable light settings | Updated light summary |
 | `blender.camera.inspect` | `{}` | Active-camera name and sorted camera summaries |
 | `blender.camera.create` | Optional name, projection, initial transform, optics, clipping, shifts, activation | Created camera summary |
 | `blender.camera.configure` | Required `name`; optional projection, optics, clipping, shifts | Updated camera summary |
@@ -115,12 +118,176 @@ input. A scene summary contains `name`, `filepath` (null when unsaved),
 `objects` sorted by name. It summarizes objects without dumping mesh geometry.
 
 Failures use canonical protocol `OperationFailure` messages with these local
-codes: `invalid_arguments`, `object_not_found`, `object_not_camera`,
+codes: `invalid_arguments`, `object_not_found`, `object_not_camera`, `object_not_light`,
 `unsupported_projection`, `invalid_context`,
 `operation_unsupported`, `adapter_busy`, `operation_failed`, `no_camera`,
 `render_failed`, `artifact_too_large`, and `artifact_transfer_failed`. Validation errors
 include field diagnostics; unexpected exceptions are logged and return a
 sanitized message. Core maps these failures to MCP tool errors.
+
+## Lights
+
+`blender.light.inspect` takes `{}` and returns `{"lights": [...]}`, sorted by
+object name in the current scene. No lights returns `{"lights": []}`.
+`blender.light.create` and `blender.light.configure` return the resulting
+`LightSummary`. Every summary has these common fields:
+
+```json
+{
+  "name": "Key",
+  "type": "point",
+  "location": [2, -3, 6],
+  "rotation": [0, 0, 0],
+  "scale": [1, 1, 1],
+  "color": [1, 1, 1],
+  "energy": 1000,
+  "exposure": 0,
+  "normalize": true,
+  "use_shadow": true,
+  "visible": true,
+  "hide_viewport": false,
+  "hide_render": false,
+  "parent": null,
+  "settings": {"radius": 0.25}
+}
+```
+
+`type` is `point`, `sun`, `spot`, or `area`, matching Blender's four native light
+types. `settings` contains only the corresponding properties:
+
+| Type / shape | Exact `settings` fields |
+| --- | --- |
+| Point | `radius` |
+| Sun | `angle` |
+| Spot | `radius`, `spot_size`, `spot_blend` |
+| Area: square or disk | `shape`, `size` |
+| Area: rectangle or ellipse | `shape`, `size`, `size_y` |
+
+Transforms and visibility follow object inspection: local authored XYZ location,
+XYZ Euler radians, scale, current-view-layer visibility, viewport/render hide
+flags, and parent name or null. Constraints, animation, and parenting still affect
+evaluated rendering. These summaries do not expose node trees, temperature,
+linking collections, or renderer-specific sampling settings. Existing advanced
+settings continue to affect the final illumination; `color` reports the light's
+stored RGB tint, not a computed shader or temperature color.
+
+### Creating and configuring lights
+
+`blender.light.create` requires `type`. Optional fields are `name`, `location`,
+`rotation`, `scale`, the common settings below, and applicable type-specific
+settings. Arguments are flat; the result groups type-specific data in `settings`.
+
+| Common argument | Default / semantics |
+| --- | --- |
+| `color` | `[1, 1, 1]`; linear RGB tint, including HDR channels above 1 |
+| `energy` | `10`; native power/strength value |
+| `exposure` | `0`; multiplies intensity by `2 ** exposure` |
+| `normalize` | `true`; normalizes intensity for consistent output as emitter size changes |
+| `use_shadow` | `true`; enables shadow casting from this light |
+
+With normalization enabled, energy is radiant power in watts for point/area
+lights and irradiance in watts per square meter for sun lights. Spot energy
+represents power before limiting emission to its cone. With normalization
+disabled, changing emitter size also changes its total output. These are Blender's
+radiometric settings, not electrical bulb wattages. Exposure and color further
+scale the emitted light.
+
+| Type-specific argument | Default / meaning |
+| --- | --- |
+| Point/spot `radius` | `0`; maps to `shadow_soft_size`, in scene units |
+| Sun `angle` | Approximately `0.0091804322`; angular diameter in radians |
+| Spot `spot_size` | Approximately `0.7853981853`; full cone angle in radians |
+| Spot `spot_blend` | Approximately `0.150000006`; cone-edge softness |
+| Area `shape` | `square`; supports `square`, `rectangle`, `disk`, `ellipse` |
+| Area `size` | `0.25`; square side, disk diameter, or rectangle/ellipse X dimension |
+| Area `size_y` | `0.25`; Y dimension, applicable only to rectangle/ellipse |
+
+Creation defaults to location/rotation `[0, 0, 0]` and scale `[1, 1, 1]`. It creates
+both a light datablock and object in the current editable collection, requires
+Object Mode, and preserves object selection. An explicit name already used by
+any object in the file is rejected with `invalid_arguments`; names Blender cannot
+store exactly are also rejected. An omitted name uses Blender's normal unique
+naming and returns the actual name. Existing lights are preserved.
+
+```json
+{
+  "type": "area",
+  "name": "Key",
+  "location": [0, 0, 6],
+  "rotation": [0, 0, 0],
+  "energy": 1000,
+  "shape": "rectangle",
+  "size": 3,
+  "size_y": 2
+}
+```
+
+`blender.light.configure` requires `name` and accepts only the common and
+applicable type-specific settings above. Omitted properties retain their values;
+a name-only call validates and returns current state. It does not accept `type`,
+transforms, visibility, or a nested `settings` argument. To replace a light's type,
+create the desired light and delete the previous object explicitly.
+
+```json
+{"name": "Key", "energy": 1500, "color": [1, 0.8, 0.6]}
+```
+
+Irrelevant fields are rejected even if Blender stores an unused value internally:
+for example `angle` on point, `radius` on sun/area, or `spot_size` on area.
+`size_y` requires the resulting shape to be rectangle or ellipse. Changing area
+shape to either of those may include `size_y` in the same request; otherwise its
+stored Y dimension is retained. Square/disk summaries omit that unused dimension.
+
+Use `blender.object.set_transform` to move or rotate a light, and
+`blender.object.delete` to remove it. Sun rotation determines illumination
+direction; its position does not affect the render. There is no active-light,
+light-transform, light-delete, or type-conversion operation. Object deletion
+unlinks the light object; Blender may retain its now-unused datablock.
+
+### Light validation and rendering
+
+All inputs are strict, finite, and checked at float32 precision before mutation.
+Unknown fields, explicit nulls, numeric booleans/strings, blank names, overflow,
+and nonzero values that would underflow to zero are rejected.
+
+Let `F = 3.4028234663852886e38`, Blender's maximum finite float32 value:
+
+| Property | Accepted hard range |
+| --- | --- |
+| Energy and creation transform components | `[-F, F]` |
+| RGB channels, radius, area dimensions | `[0, F]` |
+| Exposure | `[-32, 32]` |
+| Sun angle | `[0, 3.1415927410125732]` radians |
+| Spot angle | `[0.01745329238474369, 3.1415927410125732]` radians |
+| Spot blend | `[0, 1]` |
+
+Zero radius/dimensions and negative energy follow Blender's native storage
+limits. Negative power is not physically based and should be used deliberately.
+UI soft limits do not constrain this API. Returned values reflect stored
+precision; the adapter checks that requested settings were retained.
+
+Configuration validates the merged state before writing. Invalid combined state
+returns `invalid_arguments` with no partial mutation. Shared light datablocks
+are copied before changing the target object, preserving other objects' settings.
+Linked/read-only data and mutation during a render job are rejected with
+`invalid_context`. Unexpected failures restore changed properties or the original
+shared datablock; failed creation removes its new object and data.
+
+A non-light target returns `object_not_light`, and a missing object returns
+`object_not_found`. Unexpected failures are logged and sanitized as
+`operation_failed`. All light inspection and mutation uses the existing Blender
+main-thread dispatcher; the networking subprocess does not access `bpy`.
+
+`blender.render.image` renders the scene's configured lighting. Cycles and EEVEE
+have different shadow/sampling implementations; this API does not promise
+identical images or expose their advanced controls. The render integration tests
+use deterministic Cycles CPU scenes and verify energy, color, light position,
+sun rotation, and radius changes through actual pixels.
+
+Semantics follow the official [Blender 5.2 Light API](https://docs.blender.org/api/5.2/bpy.types.Light.html),
+[light manual](https://docs.blender.org/manual/en/5.2/render/lights/light_object.html),
+and [Blender 5.2.1 RNA definitions](https://github.com/blender/blender/blob/v5.2.1/source/blender/makesrna/intern/rna_light.cc),
+with native checks for property limits, defaults, shared data, and rollback.
 
 ## Cameras
 

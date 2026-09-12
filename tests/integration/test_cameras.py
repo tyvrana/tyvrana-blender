@@ -67,7 +67,7 @@ async def test_camera_controls_and_render_framing_over_mcp(
     profile["TYVRANA_TEST_RENDER"] = "1"
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
-        with running_blender(profile, tmp_path, ui=ui):
+        async with running_blender(profile, tmp_path, ui=ui):
             registered = await discover(client)
             assert registered is not None
             identifier = registered.instance_id

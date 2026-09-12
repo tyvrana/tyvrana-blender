@@ -6,7 +6,6 @@ from tyvrana_protocol import JsonValue, OperationFailure, OperationSuccess
 
 from tyvrana_blender.camera_models import (
     CLIP_MIN,
-    FLOAT32_MAX,
     CameraConfigureArguments,
     CameraCreateArguments,
     CameraInspectResult,
@@ -16,6 +15,7 @@ from tyvrana_blender.camera_models import (
     normalize_projection,
 )
 from tyvrana_blender.models import Model
+from tyvrana_blender.numeric import FLOAT32_MAX
 from tyvrana_blender.operations import OPERATIONS, OperationError, registration
 
 from .test_operations import Backend, call, camera_summary

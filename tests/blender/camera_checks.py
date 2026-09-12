@@ -18,6 +18,7 @@ from tyvrana_protocol import (
 
 adapter = importlib.import_module("bl_ext.user_default.tyvrana_blender.blender")
 models = importlib.import_module("bl_ext.user_default.tyvrana_blender.camera_models")
+numeric = importlib.import_module("bl_ext.user_default.tyvrana_blender.numeric")
 objects = importlib.import_module("bl_ext.user_default.tyvrana_blender.models")
 operations = importlib.import_module("bl_ext.user_default.tyvrana_blender.operations")
 scene_helpers = importlib.import_module("tests.blender.scene")
@@ -148,7 +149,9 @@ class CameraTests(unittest.TestCase):
         data = bpy.data.objects[camera.name].data
         self.assertEqual(data.bl_rna.properties["lens"].hard_min, 1)
         self.assertEqual(data.bl_rna.properties["clip_start"].hard_min, models.CLIP_MIN)
-        self.assertEqual(data.bl_rna.properties["shift_x"].hard_max, models.FLOAT32_MAX)
+        self.assertEqual(
+            data.bl_rna.properties["shift_x"].hard_max, numeric.FLOAT32_MAX
+        )
         self.assertEqual(
             set(data.bl_rna.properties["type"].enum_items.keys()),
             set(models.PROJECTIONS),

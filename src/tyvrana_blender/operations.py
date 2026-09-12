@@ -21,6 +21,12 @@ from .camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from .light_models import (
+    LightConfigureArguments,
+    LightCreateArguments,
+    LightInspectResult,
+    LightSummary,
+)
 from .models import (
     CreateArguments,
     DeleteArguments,
@@ -40,6 +46,9 @@ OPERATIONS = (
     "blender.camera.create",
     "blender.camera.inspect",
     "blender.camera.set_active",
+    "blender.light.configure",
+    "blender.light.create",
+    "blender.light.inspect",
     "blender.object.create_primitive",
     "blender.object.delete",
     "blender.object.set_transform",
@@ -67,6 +76,9 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def light_inspect(self) -> LightInspectResult: ...
+    def light_create(self, arguments: LightCreateArguments) -> LightSummary: ...
+    def light_configure(self, arguments: LightConfigureArguments) -> LightSummary: ...
     def camera_inspect(self) -> CameraInspectResult: ...
     def camera_create(self, arguments: CameraCreateArguments) -> CameraSummary: ...
     def camera_configure(
@@ -101,8 +113,16 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | CameraCreateArguments
             | CameraConfigureArguments
             | CameraSetActiveArguments
+            | LightCreateArguments
+            | LightConfigureArguments
         )
         match request.operation:
+            case "blender.light.inspect":
+                arguments = InspectArguments.model_validate(request.arguments)
+            case "blender.light.create":
+                arguments = LightCreateArguments.model_validate(request.arguments)
+            case "blender.light.configure":
+                arguments = LightConfigureArguments.model_validate(request.arguments)
             case "blender.camera.inspect":
                 arguments = InspectArguments.model_validate(request.arguments)
             case "blender.camera.create":
@@ -148,11 +168,16 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
         if isinstance(arguments, InspectArguments):
-            result = (
-                backend.camera_inspect()
-                if request.operation == "blender.camera.inspect"
-                else backend.inspect()
-            )
+            if request.operation == "blender.light.inspect":
+                result = backend.light_inspect()
+            elif request.operation == "blender.camera.inspect":
+                result = backend.camera_inspect()
+            else:
+                result = backend.inspect()
+        elif isinstance(arguments, LightCreateArguments):
+            result = backend.light_create(arguments)
+        elif isinstance(arguments, LightConfigureArguments):
+            result = backend.light_configure(arguments)
         elif isinstance(arguments, CameraCreateArguments):
             result = backend.camera_create(arguments)
         elif isinstance(arguments, CameraConfigureArguments):

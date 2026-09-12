@@ -12,6 +12,7 @@ from tyvrana_protocol import (
     AdapterEvent,
     ArtifactDescriptor,
     CancelRequest,
+    JsonValue,
     OperationRequest,
 )
 
@@ -28,6 +29,16 @@ from .camera_models import (
     validate_optics,
 )
 from .dispatch import CommandQueue
+from .light_models import (
+    COMMON_FIELDS,
+    LIGHT_TYPES,
+    TYPE_FIELDS,
+    LightConfigureArguments,
+    LightCreateArguments,
+    LightInspectResult,
+    LightSummary,
+    light_state,
+)
 from .models import (
     ConnectionConfig,
     CreateArguments,
@@ -159,17 +170,191 @@ def apply_camera_values(data: Any, values: CameraProperties, fields: set[str]) -
             setattr(data, prop, value)
 
 
-def camera_mutation_context() -> None:
+def data_mutation_context() -> None:
     main_thread()
     if bpy.app.is_job_running("RENDER"):
-        raise OperationError("invalid_context", "Cannot change cameras during a render")
+        raise OperationError(
+            "invalid_context", "Cannot change scene data during a render"
+        )
     if not bpy.context.scene.is_editable:
         raise OperationError("invalid_context", "Scene is not editable")
+
+
+def light_values(data: Any) -> dict[str, JsonValue]:
+    main_thread()
+    kind = LIGHT_TYPES[str(data.type)]
+    values: dict[str, JsonValue] = {}
+    for key in COMMON_FIELDS | TYPE_FIELDS[kind]:
+        value = getattr(data, _LIGHT_FIELDS[key])
+        if key == "color":
+            color: list[JsonValue] = [float(value[i]) for i in range(3)]
+            values[key] = color
+        elif key == "shape":
+            values[key] = str(value).lower()
+        elif key in {"normalize", "use_shadow"}:
+            values[key] = bool(value)
+        else:
+            values[key] = float(value)
+    return values
+
+
+_LIGHT_FIELDS = {
+    "color": "color",
+    "energy": "energy",
+    "exposure": "exposure",
+    "normalize": "normalize",
+    "use_shadow": "use_shadow",
+    "radius": "shadow_soft_size",
+    "angle": "angle",
+    "spot_size": "spot_size",
+    "spot_blend": "spot_blend",
+    "shape": "shape",
+    "size": "size",
+    "size_y": "size_y",
+}
+
+
+def apply_light_values(data: Any, values: dict[str, JsonValue]) -> None:
+    main_thread()
+    for key, value in values.items():
+        setattr(
+            data, _LIGHT_FIELDS[key], str(value).upper() if key == "shape" else value
+        )
+
+
+def light_summary(obj: Any) -> LightSummary:
+    main_thread()
+    pose = object_summary(obj)
+    state = light_state(LIGHT_TYPES[str(obj.data.type)], light_values(obj.data), set())
+    return LightSummary.model_validate(
+        {
+            **state.model_dump(mode="json"),
+            **pose.model_dump(mode="json", exclude={"type", "dimensions", "selected"}),
+        }
+    )
 
 
 class BlenderBackend:
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
+
+    def light_inspect(self) -> LightInspectResult:
+        main_thread()
+        bpy.context.view_layer.update()
+        return LightInspectResult(
+            lights=[
+                light_summary(obj)
+                for obj in sorted(bpy.context.scene.objects, key=lambda obj: obj.name)
+                if obj.type == "LIGHT"
+            ]
+        )
+
+    def light_create(self, arguments: LightCreateArguments) -> LightSummary:
+        data_mutation_context()
+        if bpy.context.mode != "OBJECT" or not bpy.context.collection.is_editable:
+            raise OperationError(
+                "invalid_context", "Light creation requires editable Object Mode"
+            )
+        if arguments.name is not None and arguments.name in bpy.data.objects:
+            raise OperationError(
+                "invalid_arguments",
+                "Object name already exists",
+                {"name": arguments.name},
+            )
+        settings = arguments.settings_state().writable_values()
+        data = bpy.data.lights.new(arguments.name or "Light", arguments.type.upper())
+        obj = None
+        try:
+            apply_light_values(data, settings)
+            obj = bpy.data.objects.new(arguments.name or "Light", data)
+            if arguments.name is not None and obj.name != arguments.name:
+                raise OperationError(
+                    "invalid_arguments",
+                    "Blender cannot store the requested name exactly",
+                )
+            bpy.context.collection.objects.link(obj)
+            obj.location = arguments.location
+            obj.rotation_mode = "XYZ"
+            obj.rotation_euler = arguments.rotation
+            obj.scale = arguments.scale
+            bpy.context.view_layer.update()
+            stored = light_values(data)
+            if any(stored[key] != value for key, value in settings.items()):
+                raise OperationError(
+                    "operation_failed",
+                    "Blender did not retain the requested light settings",
+                )
+            return light_summary(obj)
+        except Exception:
+            if obj is not None:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            bpy.data.lights.remove(data)
+            raise
+
+    def light_configure(self, arguments: LightConfigureArguments) -> LightSummary:
+        data_mutation_context()
+        obj = find_object(arguments.name, mutable=False)
+        if obj.type != "LIGHT":
+            raise OperationError(
+                "object_not_light", "Object is not a light", {"name": arguments.name}
+            )
+        if obj.library is not None and obj.override_library is None:
+            raise OperationError(
+                "invalid_context", "Linked objects cannot be modified directly"
+            )
+        data = obj.data
+        fields = arguments.model_fields_set - {"name"}
+        original = light_values(data)
+        values = {
+            **original,
+            **arguments.model_dump(mode="json", exclude={"name"}, exclude_unset=True),
+        }
+        try:
+            settings = light_state(
+                LIGHT_TYPES[str(data.type)], values, fields
+            ).writable_values()
+        except ValueError as exc:
+            message = (
+                "; ".join(error["msg"] for error in exc.errors(include_input=False))
+                if isinstance(exc, ValidationError)
+                else str(exc)
+            )
+            raise OperationError(
+                "invalid_arguments", message, {"name": arguments.name}
+            ) from exc
+        if not data.is_editable or any(
+            data.is_property_readonly(_LIGHT_FIELDS[key]) for key in fields
+        ):
+            raise OperationError("invalid_context", "Light data is not editable")
+        if not fields:
+            return light_summary(obj)
+        if data.users > 1 and obj.is_property_readonly("data"):
+            raise OperationError(
+                "invalid_context", "Cannot make light data independent"
+            )
+        requested = {key: settings[key] for key in fields}
+        working = data.copy() if data.users > 1 else data
+        try:
+            apply_light_values(working, requested)
+            if working != data:
+                obj.data = working
+            bpy.context.view_layer.update()
+            stored = light_values(working)
+            if any(stored[key] != value for key, value in requested.items()):
+                raise OperationError(
+                    "operation_failed",
+                    "Blender did not retain the requested light settings",
+                )
+            return light_summary(obj)
+        except Exception:
+            if working != data:
+                if obj.data != data:
+                    obj.data = data
+                bpy.data.lights.remove(working)
+            else:
+                apply_light_values(data, {key: original[key] for key in fields})
+            bpy.context.view_layer.update()
+            raise
 
     def camera_inspect(self) -> CameraInspectResult:
         main_thread()
@@ -185,7 +370,7 @@ class BlenderBackend:
         )
 
     def camera_create(self, arguments: CameraCreateArguments) -> CameraSummary:
-        camera_mutation_context()
+        data_mutation_context()
         if bpy.context.mode != "OBJECT" or not bpy.context.collection.is_editable:
             raise OperationError(
                 "invalid_context", "Camera creation requires editable Object Mode"
@@ -214,7 +399,7 @@ class BlenderBackend:
             raise
 
     def camera_configure(self, arguments: CameraConfigureArguments) -> CameraSummary:
-        camera_mutation_context()
+        data_mutation_context()
         obj = find_camera(arguments.name)
         data = obj.data
         fields = arguments.model_fields_set - {"name"}
@@ -271,7 +456,7 @@ class BlenderBackend:
             raise
 
     def camera_set_active(self, arguments: CameraSetActiveArguments) -> CameraSummary:
-        camera_mutation_context()
+        data_mutation_context()
         obj = find_camera(arguments.name, mutable=False)
         scene = bpy.context.scene
         previous = scene.camera

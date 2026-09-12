@@ -16,6 +16,13 @@ from tyvrana_blender.camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from tyvrana_blender.light_models import (
+    LightConfigureArguments,
+    LightCreateArguments,
+    LightInspectResult,
+    LightSummary,
+    light_state,
+)
 from tyvrana_blender.models import (
     CreateArguments,
     DeleteArguments,
@@ -32,6 +39,18 @@ from tyvrana_blender.operations import OperationError, execute
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def light_inspect(self) -> LightInspectResult:
+        self.calls.append("light_inspect")
+        return LightInspectResult(lights=[])
+
+    def light_create(self, arguments: LightCreateArguments) -> LightSummary:
+        self.calls.append("light_create")
+        return light_summary(arguments.name or "Light")
+
+    def light_configure(self, arguments: LightConfigureArguments) -> LightSummary:
+        self.calls.append("light_configure")
+        return light_summary(arguments.name)
 
     def camera_inspect(self) -> CameraInspectResult:
         self.calls.append("camera_inspect")
@@ -110,6 +129,22 @@ def call(
     )
 
 
+def light_summary(name: str) -> LightSummary:
+    return LightSummary.model_validate(
+        {
+            **light_state("point", {}, set()).model_dump(mode="json"),
+            "name": name,
+            "location": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "visible": True,
+            "hide_viewport": False,
+            "hide_render": False,
+            "parent": None,
+        }
+    )
+
+
 def camera_summary(name: str) -> CameraSummary:
     return CameraSummary(
         name=name,
@@ -133,6 +168,9 @@ def camera_summary(name: str) -> CameraSummary:
 @pytest.mark.parametrize(
     ("operation", "arguments", "method"),
     [
+        ("blender.light.inspect", {}, "light_inspect"),
+        ("blender.light.create", {"type": "point"}, "light_create"),
+        ("blender.light.configure", {"name": "Light", "energy": 20}, "light_configure"),
         ("blender.camera.inspect", {}, "camera_inspect"),
         ("blender.camera.create", {}, "camera_create"),
         (

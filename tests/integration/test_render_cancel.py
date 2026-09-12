@@ -33,7 +33,7 @@ async def test_cancellation_after_real_render_during_binary_transfer(
     async with serve(accept, "127.0.0.1", 0, close_timeout=0.1) as server:
         profile["TYVRANA_TEST_RENDER"] = "1"
         profile["TYVRANA_TEST_PORT"] = str(server.sockets[0].getsockname()[1])
-        with running_blender(profile, tmp_path, ui=False):
+        async with running_blender(profile, tmp_path, ui=False):
             socket = await asyncio.wait_for(connected.get(), 15)
             await socket.send(
                 encode_message(

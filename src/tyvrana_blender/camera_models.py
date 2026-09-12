@@ -1,6 +1,5 @@
 """Typed camera contracts, independent of Blender's Python module."""
 
-import struct
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -12,30 +11,11 @@ from pydantic import (
 )
 
 from .models import Model, ObjectName, Vector
+from .numeric import FLOAT32_MAX, Float32, Vector32, binary32
 
-FLOAT32_MAX = float.fromhex("0x1.fffffep+127")
-CLIP_MIN = float(struct.unpack("f", struct.pack("f", 1e-6))[0])
-
-
-def binary32(value: float) -> float:
-    """Validate the precision Blender will store, without clamping or underflow."""
-    if not -FLOAT32_MAX <= value <= FLOAT32_MAX:
-        raise ValueError("Value exceeds Blender's finite float32 range")
-    rounded = float(struct.unpack("f", struct.pack("f", value))[0])
-    if value != 0 and rounded == 0:
-        raise ValueError("Value underflows Blender's float32 precision")
-    return rounded
+CLIP_MIN = binary32(1e-6)
 
 
-def camera_vector(value: list[float]) -> list[float]:
-    return [binary32(component) for component in value]
-
-
-type CameraFloat = Annotated[
-    FiniteFloat,
-    Field(ge=-FLOAT32_MAX, le=FLOAT32_MAX),
-    AfterValidator(binary32),
-]
 type Lens = Annotated[
     FiniteFloat, Field(ge=1, le=FLOAT32_MAX), AfterValidator(binary32)
 ]
@@ -45,7 +25,6 @@ type OrthoScale = Annotated[
 type ClipDistance = Annotated[
     FiniteFloat, Field(ge=CLIP_MIN, le=FLOAT32_MAX), AfterValidator(binary32)
 ]
-type CameraVector = Annotated[Vector, AfterValidator(camera_vector)]
 type Projection = Literal["perspective", "orthographic", "panoramic", "custom"]
 type ConfigurableProjection = Literal["perspective", "orthographic"]
 type SensorFit = Literal["auto", "horizontal", "vertical"]
@@ -70,8 +49,8 @@ class CameraProperties(Model):
     ortho_scale: OrthoScale = 6.0
     clip_start: ClipDistance = 0.1
     clip_end: ClipDistance = 1000.0
-    shift_x: CameraFloat = 0.0
-    shift_y: CameraFloat = 0.0
+    shift_x: Float32 = 0.0
+    shift_y: Float32 = 0.0
 
     @model_validator(mode="after")
     def coherent_clipping(self) -> Self:
@@ -82,9 +61,9 @@ class CameraProperties(Model):
 
 class CameraCreateArguments(CameraProperties):
     name: ObjectName | None = None
-    location: CameraVector = Field(default_factory=lambda: [0.0, 0.0, 0.0])
-    rotation: CameraVector = Field(default_factory=lambda: [0.0, 0.0, 0.0])
-    scale: CameraVector = Field(default_factory=lambda: [1.0, 1.0, 1.0])
+    location: Vector32 = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+    rotation: Vector32 = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+    scale: Vector32 = Field(default_factory=lambda: [1.0, 1.0, 1.0])
     make_active: bool = False
 
     @field_validator("name", mode="before")
@@ -107,8 +86,8 @@ class CameraConfigureArguments(Model):
     ortho_scale: OrthoScale | None = None
     clip_start: ClipDistance | None = None
     clip_end: ClipDistance | None = None
-    shift_x: CameraFloat | None = None
-    shift_y: CameraFloat | None = None
+    shift_x: Float32 | None = None
+    shift_y: Float32 | None = None
 
     @field_validator("*", mode="before")
     @classmethod

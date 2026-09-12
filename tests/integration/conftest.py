@@ -1,8 +1,9 @@
+import asyncio
 import os
 import signal
 import subprocess
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -47,10 +48,10 @@ def profile(tmp_path: Path) -> dict[str, str]:
     return env
 
 
-@contextmanager
-def running_blender(
+@asynccontextmanager
+async def running_blender(
     env: dict[str, str], tmp_path: Path, *, ui: bool
-) -> Iterator[subprocess.Popen[bytes]]:
+) -> AsyncIterator[asyncio.subprocess.Process]:
     command = [
         "blender",
         "--python-exit-code",
@@ -64,24 +65,27 @@ def running_blender(
         command.insert(1, "--background")
     log_path = tmp_path / "blender.log"
     with log_path.open("wb") as log:
-        with subprocess.Popen(
-            command, env=env, stdout=log, stderr=log, start_new_session=True
-        ) as process:
+        process = await asyncio.create_subprocess_exec(
+            *command, env=env, stdout=log, stderr=log, start_new_session=True
+        )
+        try:
+            yield process
+        finally:
+            (tmp_path / "stop").touch()
             try:
-                yield process
-            finally:
-                (tmp_path / "stop").touch()
+                async with asyncio.timeout(10):
+                    await process.wait()
+            except TimeoutError:
+                os.killpg(process.pid, signal.SIGTERM)
                 try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGTERM)
-                    try:
-                        process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGKILL)
-                        process.wait()
-                assert process.returncode == 0, log_path.read_text()
+                    async with asyncio.timeout(3):
+                        await process.wait()
+                except TimeoutError:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    async with asyncio.timeout(3):
+                        await process.wait()
+            assert process.returncode == 0, log_path.read_text()
     assert (tmp_path / "stopped").read_text() == "clean", log_path.read_text()
     assert not (tmp_path / "error").exists(), (tmp_path / "error").read_text()
     assert "Traceback" not in log_path.read_text()
-    assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))
+    assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))  # noqa: ASYNC240 - Isolated test directory.

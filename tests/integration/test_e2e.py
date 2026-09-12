@@ -6,6 +6,7 @@ import os
 import shutil
 import socket
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from tyvrana_protocol import AdapterRegistration, ArtifactDescriptor, JsonValue
 from tyvrana_blender.models import DeleteResult, ObjectSummary, SceneSummary
 from tyvrana_blender.operations import OPERATIONS
 
-from ..png import inspect_png
+from ..png import assert_image_variation, inspect_png
 from .conftest import running_blender
 
 
@@ -64,7 +65,7 @@ async def test_real_render_reaches_mcp_image_content(
     profile["TYVRANA_TEST_RENDER"] = "1"
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
-        with running_blender(profile, tmp_path, ui=ui):
+        async with running_blender(profile, tmp_path, ui=ui):
             registered = await discover(client)
             assert registered is not None
             result = await client.call_tool(
@@ -84,6 +85,10 @@ async def test_real_render_reaches_mcp_image_content(
             assert len(images) == 1 and images[0].mime_type == "image/png"
             data = base64.b64decode(images[0].data, validate=True)
             assert inspect_png(data) == (512, 512)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                await asyncio.get_running_loop().run_in_executor(
+                    executor, assert_image_variation, data
+                )
             descriptor = ArtifactDescriptor.model_validate(
                 result.structured_content["artifacts"][0]
             )
@@ -151,7 +156,7 @@ async def test_full_mcp_core_blender_vertical_slice(
 ) -> None:
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
-        with running_blender(profile, tmp_path, ui=ui):
+        async with running_blender(profile, tmp_path, ui=ui):
             registered = await discover(client)
             assert registered is not None
             assert registered.project_path is None
@@ -232,13 +237,15 @@ async def test_ui_remains_responsive_and_reconnects_when_core_restarts(
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
     profile["TYVRANA_TEST_PORT"] = str(port)
-    with running_blender(profile, tmp_path, ui=True):
+    async with running_blender(profile, tmp_path, ui=True):
         async with asyncio.timeout(12):
             while not (tmp_path / "ready.json").exists():  # noqa: ASYNC110 - Observe the external UI timer.
                 await asyncio.sleep(0.02)
         async with core_client(tmp_path, port) as (first, _):
             registered = await discover(first)
             assert registered is not None
+            # Registration comes from the worker; wait for main-thread readiness too.
+            await operation(first, registered.instance_id, "blender.scene.inspect", {})
         previous_tick = (tmp_path / "ready.json").stat().st_mtime_ns
         async with asyncio.timeout(5):
             while (tmp_path / "ready.json").stat().st_mtime_ns <= previous_tick:  # noqa: ASYNC110 - Observe the external UI timer.
