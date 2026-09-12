@@ -25,6 +25,7 @@ models = importlib.import_module(extension.__name__ + ".models")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 scene_helpers = importlib.import_module("tests.blender.scene")
 png_helpers = importlib.import_module("tests.png")
+camera_checks = importlib.import_module("tests.blender.camera_checks")
 
 
 class BlenderTests(unittest.TestCase):
@@ -348,7 +349,14 @@ class BlenderTests(unittest.TestCase):
 
 try:
     outcome = unittest.TextTestRunner(verbosity=2).run(
-        unittest.defaultTestLoader.loadTestsFromTestCase(BlenderTests)
+        unittest.TestSuite(
+            [
+                unittest.defaultTestLoader.loadTestsFromTestCase(BlenderTests),
+                unittest.defaultTestLoader.loadTestsFromTestCase(
+                    camera_checks.CameraTests
+                ),
+            ]
+        )
     )
 finally:
     adapter.unregister()

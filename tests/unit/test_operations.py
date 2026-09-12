@@ -9,6 +9,13 @@ from tyvrana_protocol import (
     OperationSuccess,
 )
 
+from tyvrana_blender.camera_models import (
+    CameraConfigureArguments,
+    CameraCreateArguments,
+    CameraInspectResult,
+    CameraSetActiveArguments,
+    CameraSummary,
+)
 from tyvrana_blender.models import (
     CreateArguments,
     DeleteArguments,
@@ -25,6 +32,22 @@ from tyvrana_blender.operations import OperationError, execute
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def camera_inspect(self) -> CameraInspectResult:
+        self.calls.append("camera_inspect")
+        return CameraInspectResult(active_camera=None, cameras=[])
+
+    def camera_create(self, arguments: CameraCreateArguments) -> CameraSummary:
+        self.calls.append("camera_create")
+        return camera_summary(arguments.name or "Camera")
+
+    def camera_configure(self, arguments: CameraConfigureArguments) -> CameraSummary:
+        self.calls.append("camera_configure")
+        return camera_summary(arguments.name)
+
+    def camera_set_active(self, arguments: CameraSetActiveArguments) -> CameraSummary:
+        self.calls.append("camera_set_active")
+        return camera_summary(arguments.name)
 
     def render(
         self, arguments: RenderArguments
@@ -87,9 +110,37 @@ def call(
     )
 
 
+def camera_summary(name: str) -> CameraSummary:
+    return CameraSummary(
+        name=name,
+        active=True,
+        projection="perspective",
+        location=[0, 0, 0],
+        rotation=[0, 0, 0],
+        scale=[1, 1, 1],
+        lens_mm=50,
+        ortho_scale=None,
+        clip_start=0.1,
+        clip_end=1000,
+        shift_x=0,
+        shift_y=0,
+        sensor_width_mm=36,
+        sensor_height_mm=24,
+        sensor_fit="auto",
+    )
+
+
 @pytest.mark.parametrize(
     ("operation", "arguments", "method"),
     [
+        ("blender.camera.inspect", {}, "camera_inspect"),
+        ("blender.camera.create", {}, "camera_create"),
+        (
+            "blender.camera.configure",
+            {"name": "Camera", "lens_mm": 80},
+            "camera_configure",
+        ),
+        ("blender.camera.set_active", {"name": "Camera"}, "camera_set_active"),
         ("blender.scene.inspect", {}, "inspect"),
         ("blender.render.image", {}, "render"),
         (

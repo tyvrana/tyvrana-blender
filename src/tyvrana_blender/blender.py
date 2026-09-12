@@ -2,11 +2,12 @@
 
 import logging
 import threading
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import bpy  # type: ignore[import-not-found]
 from mathutils import Quaternion  # type: ignore[import-not-found]
+from pydantic import ValidationError
 from tyvrana_protocol import (
     AdapterEvent,
     ArtifactDescriptor,
@@ -15,6 +16,17 @@ from tyvrana_protocol import (
 )
 
 from .artifacts import ArtifactSpool
+from .camera_models import (
+    CameraConfigureArguments,
+    CameraCreateArguments,
+    CameraInspectResult,
+    CameraProperties,
+    CameraSetActiveArguments,
+    CameraSummary,
+    SensorFit,
+    normalize_projection,
+    validate_optics,
+)
 from .dispatch import CommandQueue
 from .models import (
     ConnectionConfig,
@@ -67,7 +79,7 @@ def object_summary(obj: Any) -> ObjectSummary:
     )
 
 
-def find_object(name: str) -> Any:
+def find_object(name: str, *, mutable: bool = True) -> Any:
     main_thread()
     obj = bpy.context.scene.objects.get(name)
     if obj is None:
@@ -76,16 +88,200 @@ def find_object(name: str) -> Any:
             f'Object "{name}" does not exist in the current scene',
             {"name": name},
         )
-    if obj.library is not None and obj.override_library is None:
+    if mutable and obj.library is not None and obj.override_library is None:
         raise OperationError(
             "invalid_context", "Linked objects cannot be modified directly"
         )
     return obj
 
 
+def camera_summary(obj: Any) -> CameraSummary:
+    main_thread()
+    pose = object_summary(obj)
+    data = obj.data
+    projection = normalize_projection(str(data.type))
+    return CameraSummary(
+        name=pose.name,
+        active=obj == bpy.context.scene.camera,
+        projection=projection,
+        location=pose.location,
+        rotation=pose.rotation,
+        scale=pose.scale,
+        lens_mm=float(data.lens) if projection == "perspective" else None,
+        ortho_scale=float(data.ortho_scale) if projection == "orthographic" else None,
+        clip_start=float(data.clip_start),
+        clip_end=float(data.clip_end),
+        shift_x=float(data.shift_x),
+        shift_y=float(data.shift_y),
+        sensor_width_mm=float(data.sensor_width),
+        sensor_height_mm=float(data.sensor_height),
+        sensor_fit=cast(SensorFit, str(data.sensor_fit).lower()),
+    )
+
+
+def find_camera(name: str, *, mutable: bool = True) -> Any:
+    obj = find_object(name, mutable=mutable)
+    if obj.type != "CAMERA":
+        raise OperationError(
+            "object_not_camera", "Object is not a camera", {"name": name}
+        )
+    return obj
+
+
+_CAMERA_FIELDS = {
+    "projection": "type",
+    "lens_mm": "lens",
+    "ortho_scale": "ortho_scale",
+    "clip_start": "clip_start",
+    "clip_end": "clip_end",
+    "shift_x": "shift_x",
+    "shift_y": "shift_y",
+}
+
+
+def camera_values(data: Any) -> dict[str, str | float]:
+    main_thread()
+    return {
+        key: normalize_projection(str(data.type))
+        if key == "projection"
+        else float(getattr(data, prop))
+        for key, prop in _CAMERA_FIELDS.items()
+    }
+
+
+def apply_camera_values(data: Any, values: CameraProperties, fields: set[str]) -> None:
+    main_thread()
+    for key, prop in _CAMERA_FIELDS.items():
+        if key in fields:
+            value = getattr(values, key)
+            if key == "projection":
+                value = "PERSP" if values.projection == "perspective" else "ORTHO"
+            setattr(data, prop, value)
+
+
+def camera_mutation_context() -> None:
+    main_thread()
+    if bpy.app.is_job_running("RENDER"):
+        raise OperationError("invalid_context", "Cannot change cameras during a render")
+    if not bpy.context.scene.is_editable:
+        raise OperationError("invalid_context", "Scene is not editable")
+
+
 class BlenderBackend:
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
+
+    def camera_inspect(self) -> CameraInspectResult:
+        main_thread()
+        bpy.context.view_layer.update()
+        cameras = [
+            camera_summary(obj)
+            for obj in sorted(bpy.context.scene.objects, key=lambda obj: obj.name)
+            if obj.type == "CAMERA"
+        ]
+        return CameraInspectResult(
+            active_camera=next((obj.name for obj in cameras if obj.active), None),
+            cameras=cameras,
+        )
+
+    def camera_create(self, arguments: CameraCreateArguments) -> CameraSummary:
+        camera_mutation_context()
+        if bpy.context.mode != "OBJECT" or not bpy.context.collection.is_editable:
+            raise OperationError(
+                "invalid_context", "Camera creation requires editable Object Mode"
+            )
+        scene = bpy.context.scene
+        previous = scene.camera
+        data = bpy.data.cameras.new(arguments.name or "Camera")
+        obj = None
+        try:
+            apply_camera_values(data, arguments, set(_CAMERA_FIELDS))
+            obj = bpy.data.objects.new(arguments.name or "Camera", data)
+            bpy.context.collection.objects.link(obj)
+            obj.location = arguments.location
+            obj.rotation_mode = "XYZ"
+            obj.rotation_euler = arguments.rotation
+            obj.scale = arguments.scale
+            if arguments.make_active or previous is None:
+                scene.camera = obj
+            bpy.context.view_layer.update()
+            return camera_summary(obj)
+        except Exception:
+            scene.camera = previous
+            if obj is not None:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            bpy.data.cameras.remove(data)
+            raise
+
+    def camera_configure(self, arguments: CameraConfigureArguments) -> CameraSummary:
+        camera_mutation_context()
+        obj = find_camera(arguments.name)
+        data = obj.data
+        fields = arguments.model_fields_set - {"name"}
+        if not data.is_editable or any(
+            data.is_property_readonly(_CAMERA_FIELDS[key]) for key in fields
+        ):
+            raise OperationError("invalid_context", "Camera data is not editable")
+        values = camera_values(data)
+        values.update(arguments.model_dump(exclude={"name"}, exclude_unset=True))
+        if values["projection"] not in ("perspective", "orthographic"):
+            raise OperationError(
+                "unsupported_projection",
+                "Configure requires perspective or orthographic projection",
+                {"projection": values["projection"]},
+            )
+        try:
+            settings = CameraProperties.model_validate(values)
+            validate_optics(settings.projection, fields)
+        except (ValidationError, ValueError) as exc:
+            # Validation errors here describe merged state, not an internal failure.
+            message = (
+                "; ".join(error["msg"] for error in exc.errors(include_input=False))
+                if isinstance(exc, ValidationError)
+                else str(exc)
+            )
+            raise OperationError(
+                "invalid_arguments", message, {"name": arguments.name}
+            ) from exc
+        if not fields:
+            return camera_summary(obj)
+        if data.users > 1 and obj.is_property_readonly("data"):
+            raise OperationError(
+                "invalid_context", "Cannot make camera data independent"
+            )
+        original = {
+            _CAMERA_FIELDS[key]: getattr(data, _CAMERA_FIELDS[key]) for key in fields
+        }
+        working = data.copy() if data.users > 1 else data
+        try:
+            apply_camera_values(working, settings, fields)
+            if working != data:
+                obj.data = working
+            bpy.context.view_layer.update()
+            return camera_summary(obj)
+        except Exception:
+            if working != data:
+                if obj.data != data:
+                    obj.data = data
+                bpy.data.cameras.remove(working)
+            else:
+                for prop, value in original.items():
+                    setattr(data, prop, value)
+            bpy.context.view_layer.update()
+            raise
+
+    def camera_set_active(self, arguments: CameraSetActiveArguments) -> CameraSummary:
+        camera_mutation_context()
+        obj = find_camera(arguments.name, mutable=False)
+        scene = bpy.context.scene
+        previous = scene.camera
+        try:
+            scene.camera = obj
+            bpy.context.view_layer.update()
+            return camera_summary(obj)
+        except Exception:
+            scene.camera = previous
+            raise
 
     def render(
         self, arguments: RenderArguments

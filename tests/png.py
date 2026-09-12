@@ -35,3 +35,63 @@ def inspect_png(data: bytes) -> tuple[int, int]:
     assert len(set(raw)) > 32
     assert sum(value != 0 for value in raw) > width * height // 4
     return width, height
+
+
+def rgb_pixels(data: bytes) -> bytes:
+    """Decode the bounded 8-bit RGB/RGBA PNGs emitted by the render operation."""
+    width, height = inspect_png(data)
+    channels = 4 if data[25] == 6 else 3
+    offset = 8
+    compressed = bytearray()
+    while offset < len(data):
+        length = int.from_bytes(data[offset : offset + 4], "big")
+        if data[offset + 4 : offset + 8] == b"IDAT":
+            compressed.extend(data[offset + 8 : offset + 8 + length])
+        offset += length + 12
+    raw = zlib.decompress(compressed)
+    stride = width * channels
+    previous = bytearray(stride)
+    rgb = bytearray()
+    for y in range(height):
+        start = y * (stride + 1)
+        kind = raw[start]
+        assert kind in (0, 1, 2, 3, 4)
+        row = bytearray(raw[start + 1 : start + 1 + stride])
+        for x in range(stride):
+            left = row[x - channels] if x >= channels else 0
+            up = previous[x]
+            corner = previous[x - channels] if x >= channels else 0
+            predictor = 0
+            if kind == 1:
+                predictor = left
+            elif kind == 2:
+                predictor = up
+            elif kind == 3:
+                predictor = (left + up) // 2
+            elif kind == 4:
+                p = left + up - corner
+                distances = (abs(p - left), abs(p - up), abs(p - corner))
+                predictor = (left, up, corner)[distances.index(min(distances))]
+            row[x] = (row[x] + predictor) & 255
+        for x in range(0, stride, channels):
+            rgb.extend(row[x : x + 3])
+        previous = row
+    return bytes(rgb)
+
+
+def red_bounds(data: bytes) -> tuple[int, int, int, int]:
+    """Simple framing metric for the contrasting subject in render fixtures."""
+    width, _ = inspect_png(data)
+    rgb = rgb_pixels(data)
+    points = [
+        (i // 3 % width, i // 3 // width)
+        for i in range(0, len(rgb), 3)
+        if rgb[i] > 90 and rgb[i] > rgb[i + 1] * 1.5 and rgb[i] > rgb[i + 2] * 1.5
+    ]
+    assert points, "Rendered subject is not visible"
+    return (
+        min(x for x, _ in points),
+        min(y for _, y in points),
+        max(x for x, _ in points),
+        max(y for _, y in points),
+    )

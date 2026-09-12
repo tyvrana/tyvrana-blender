@@ -59,6 +59,10 @@ Names are exact and are advertised in sorted order:
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
+| `blender.camera.inspect` | `{}` | Active-camera name and sorted camera summaries |
+| `blender.camera.create` | Optional name, projection, initial transform, optics, clipping, shifts, activation | Created camera summary |
+| `blender.camera.configure` | Required `name`; optional projection, optics, clipping, shifts | Updated camera summary |
+| `blender.camera.set_active` | Required `name` | Selected camera summary |
 | `blender.render.image` | Optional `width`, `height`, `format` | Render metadata and a typed PNG artifact |
 
 Arguments must be objects with no unexpected fields. Vectors contain exactly
@@ -111,11 +115,154 @@ input. A scene summary contains `name`, `filepath` (null when unsaved),
 `objects` sorted by name. It summarizes objects without dumping mesh geometry.
 
 Failures use canonical protocol `OperationFailure` messages with these local
-codes: `invalid_arguments`, `object_not_found`, `invalid_context`,
+codes: `invalid_arguments`, `object_not_found`, `object_not_camera`,
+`unsupported_projection`, `invalid_context`,
 `operation_unsupported`, `adapter_busy`, `operation_failed`, `no_camera`,
 `render_failed`, `artifact_too_large`, and `artifact_transfer_failed`. Validation errors
 include field diagnostics; unexpected exceptions are logged and return a
 sanitized message. Core maps these failures to MCP tool errors.
+
+## Cameras
+
+Camera objects hold transforms and reference camera data containing optical and
+projection settings. Use `blender.object.set_transform` for a camera's location,
+XYZ Euler rotation in radians, and scale. `blender.camera.configure` changes
+camera data only; transform arguments are rejected. All camera operations run
+through the same main-thread queue as object operations.
+
+### Inspection
+
+`blender.camera.inspect` takes `{}` and returns:
+
+```json
+{
+  "active_camera": "Camera",
+  "cameras": [{
+    "name": "Camera",
+    "active": true,
+    "projection": "perspective",
+    "location": [0, -8, 4.5],
+    "rotation": [1.1583858728408813, 0, 0],
+    "scale": [1, 1, 1],
+    "lens_mm": 50,
+    "ortho_scale": null,
+    "clip_start": 0.10000000149011612,
+    "clip_end": 1000,
+    "shift_x": 0,
+    "shift_y": 0,
+    "sensor_width_mm": 36,
+    "sensor_height_mm": 24,
+    "sensor_fit": "auto"
+  }]
+}
+```
+
+Only objects in the current scene are listed, sorted by name. An empty scene
+returns `{"active_camera": null, "cameras": []}`. Transforms describe authored
+local object state, consistently with scene inspection; they are not evaluated
+world matrices. Existing parenting, constraints, animation, sensor settings, and
+render settings continue to affect Blender's evaluated rendering.
+
+Inspection maps Blender's `PERSP`, `ORTHO`, `PANO`, and `CUSTOM` projections to
+`perspective`, `orthographic`, `panoramic`, and `custom`. `lens_mm` is non-null
+only for perspective; `ortho_scale` is non-null only for orthographic. Sensor
+dimensions and `sensor_fit` (`auto`, `horizontal`, or `vertical`) are inspected
+but are not writable through this initial API. Panoramic subtype, custom camera
+shaders, depth of field, and other advanced camera data are not exposed.
+
+### Creation and configuration
+
+`blender.camera.create` accepts these optional fields:
+
+| Field | Default / meaning |
+| --- | --- |
+| `name` | Blender's `Camera` name; duplicate names are resolved by Blender |
+| `projection` | `"perspective"`; also supports `"orthographic"` |
+| `location`, `rotation`, `scale` | `[0, 0, 0]`, `[0, 0, 0]`, `[1, 1, 1]` |
+| `lens_mm` | 50; specify only with perspective projection |
+| `ortho_scale` | 6; specify only with orthographic projection |
+| `clip_start`, `clip_end` | 0.1 and 1000, in scene units |
+| `shift_x`, `shift_y` | 0 and 0, Blender's dimensionless lens shifts |
+| `make_active` | `false`; preserve an existing active camera. The first camera becomes active automatically when none exists. `true` explicitly replaces the active camera. |
+
+Creation makes a new object and camera datablock in the current collection,
+requires editable Object Mode, and preserves object selection. It returns the
+actual resulting `CameraSummary`, including Blender's resolved name.
+
+```json
+{
+  "name": "Overview",
+  "projection": "orthographic",
+  "ortho_scale": 8,
+  "location": [0, -8, 4.5],
+  "rotation": [1.1583858728408813, 0, 0],
+  "make_active": true
+}
+```
+
+`blender.camera.configure` requires `name` and accepts only these optional fields:
+`projection`, `lens_mm`, `ortho_scale`, `clip_start`, `clip_end`, `shift_x`,
+`shift_y`. Omitted properties retain their stored values. A name-only request
+validates and returns the current supported camera state. Explicit nulls,
+unexpected fields, and numeric strings/booleans are rejected.
+
+```json
+{"name": "Overview", "ortho_scale": 10, "clip_start": 0.25, "clip_end": 500}
+```
+
+The resulting projection determines which optical field is valid. To switch
+projection, include the new projection and optionally its applicable optics:
+
+```json
+{"name": "Overview", "projection": "perspective", "lens_mm": 65}
+```
+
+Creation/configuration accept perspective and orthographic only. Existing
+panoramic/custom cameras remain inspectable and selectable; configuring one
+requires explicitly switching it to a supported projection. This does not
+configure panoramic or custom-shader parameters.
+
+### Validation and mutation
+
+Camera inputs use Blender's finite float32 range, approximately
+`[-3.4028234663852886e38, 3.4028234663852886e38]`, with these additional rules:
+
+- `lens_mm` is at least 1 mm.
+- `ortho_scale` is strictly positive. Zero is rejected as a degenerate view even
+  though Blender permits storing it.
+- Clipping distances are at least Blender's float32 `1e-6` minimum
+  (`9.999999974752427e-7`), and `clip_end` must exceed `clip_start`.
+- Shifts use the full finite float32 range; the UI's ±2 soft range is not a limit.
+- Non-finite values, overflow, and values that underflow to zero are rejected.
+  Coherence is checked at Blender's stored precision, including clipping planes
+  that would round to the same value. Returned values reflect that precision.
+
+Partial updates are merged with existing data and validated before mutation.
+An invalid combined state returns `invalid_arguments` without changing the
+camera. Unexpected failures restore changed data; failed creation removes its
+new object/datablock. If multiple objects share camera data, configuration makes
+the target's data independent first. It does not change other cameras' optics.
+Linked/read-only camera data is rejected. Camera mutations are rejected while a
+render job is active. Unsupported existing projections return
+`unsupported_projection`; a non-camera target returns `object_not_camera` and
+a missing target returns `object_not_found`.
+
+### Active camera and rendering
+
+`blender.camera.set_active` takes `{"name": "Overview"}` and returns that
+camera's summary with `active: true`. The target must be a camera in the current
+scene. It may be linked because selecting it does not mutate its camera data.
+Selection changes `Scene.camera`, independently of viewport object selection.
+
+`blender.render.image` uses this explicit active scene camera. It has no camera
+selection argument. Deleting the active camera with `blender.object.delete`
+clears active-camera state; other cameras are not selected automatically, and
+rendering returns `no_camera` until a camera is selected or created.
+
+Camera semantics and limits follow the official
+[Blender 5.2 Camera API](https://docs.blender.org/api/5.2/bpy.types.Camera.html)
+and [Scene.camera](https://docs.blender.org/api/5.2/bpy.types.Scene.html#bpy.types.Scene.camera),
+with native Blender checks for stored precision and render behavior.
 
 ## Rendered images
 
@@ -287,3 +434,9 @@ verify actual PNG structure, dimensions, content variation, byte count and SHA-2
 and prove real background and UI renders reach the official MCP client as image
 content. A separate real-render test cancels during binary transfer and verifies
 cleanup and continued adapter operation. No image-analysis service is used.
+
+Camera checks cover projection normalization, data/transform separation,
+float32 limits, coherent partial updates, failure rollback, shared and linked
+camera data, active selection, and camera deletion. Real background and UI MCP
+tests compare decoded PNG subject bounds at different focal lengths, switch
+active viewpoints, and verify orthographic configuration changes the render.
