@@ -21,6 +21,12 @@ from .camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from .image_models import (
+    ImageConfigureArguments,
+    ImageCreateArguments,
+    ImageInspectResult,
+    ImageSummary,
+)
 from .light_models import (
     LightConfigureArguments,
     LightCreateArguments,
@@ -47,6 +53,19 @@ from .models import (
     SceneSummary,
     TransformArguments,
 )
+from .shader_models import (
+    ConnectArguments,
+    DisconnectArguments,
+    DisconnectResult,
+    LinkSummary,
+    NodeConfigureArguments,
+    NodeCreateArguments,
+    NodeDeleteArguments,
+    NodeDeleteResult,
+    NodeSummary,
+    ShaderGraphSummary,
+    ShaderInspectArguments,
+)
 
 logger = logging.getLogger(__name__)
 OPERATIONS = (
@@ -54,6 +73,9 @@ OPERATIONS = (
     "blender.camera.create",
     "blender.camera.inspect",
     "blender.camera.set_active",
+    "blender.image.configure",
+    "blender.image.create_generated",
+    "blender.image.inspect",
     "blender.light.configure",
     "blender.light.create",
     "blender.light.inspect",
@@ -66,6 +88,12 @@ OPERATIONS = (
     "blender.object.set_transform",
     "blender.render.image",
     "blender.scene.inspect",
+    "blender.shader.connect",
+    "blender.shader.disconnect",
+    "blender.shader.inspect",
+    "blender.shader.node.configure",
+    "blender.shader.node.create",
+    "blender.shader.node.delete",
 )
 type Response = OperationSuccess | OperationFailure
 
@@ -88,6 +116,18 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def image_inspect(self) -> ImageInspectResult: ...
+    def image_create(self, arguments: ImageCreateArguments) -> ImageSummary: ...
+    def image_configure(self, arguments: ImageConfigureArguments) -> ImageSummary: ...
+    def shader_inspect(
+        self, arguments: ShaderInspectArguments
+    ) -> ShaderGraphSummary: ...
+    def shader_create(self, arguments: NodeCreateArguments) -> NodeSummary: ...
+    def shader_configure(self, arguments: NodeConfigureArguments) -> NodeSummary: ...
+    def shader_delete(self, arguments: NodeDeleteArguments) -> NodeDeleteResult: ...
+    def shader_connect(self, arguments: ConnectArguments) -> LinkSummary: ...
+    def shader_disconnect(self, arguments: DisconnectArguments) -> DisconnectResult: ...
+
     def material_inspect(self) -> MaterialInspectResult: ...
     def material_create(
         self, arguments: MaterialCreateArguments
@@ -140,8 +180,35 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MaterialCreateArguments
             | MaterialConfigureArguments
             | MaterialAssignArguments
+            | ImageCreateArguments
+            | ImageConfigureArguments
+            | ShaderInspectArguments
+            | NodeCreateArguments
+            | NodeConfigureArguments
+            | NodeDeleteArguments
+            | ConnectArguments
+            | DisconnectArguments
         )
         match request.operation:
+            case "blender.image.inspect":
+                arguments = InspectArguments.model_validate(request.arguments)
+            case "blender.image.create_generated":
+                arguments = ImageCreateArguments.model_validate(request.arguments)
+            case "blender.image.configure":
+                arguments = ImageConfigureArguments.model_validate(request.arguments)
+            case "blender.shader.inspect":
+                arguments = ShaderInspectArguments.model_validate(request.arguments)
+            case "blender.shader.node.create":
+                arguments = NodeCreateArguments.model_validate(request.arguments)
+            case "blender.shader.node.configure":
+                arguments = NodeConfigureArguments.model_validate(request.arguments)
+            case "blender.shader.node.delete":
+                arguments = NodeDeleteArguments.model_validate(request.arguments)
+            case "blender.shader.connect":
+                arguments = ConnectArguments.model_validate(request.arguments)
+            case "blender.shader.disconnect":
+                arguments = DisconnectArguments.model_validate(request.arguments)
+
             case "blender.material.inspect":
                 arguments = InspectArguments.model_validate(request.arguments)
             case "blender.material.create_principled":
@@ -201,7 +268,9 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
         if isinstance(arguments, InspectArguments):
-            if request.operation == "blender.material.inspect":
+            if request.operation == "blender.image.inspect":
+                result = backend.image_inspect()
+            elif request.operation == "blender.material.inspect":
                 result = backend.material_inspect()
             elif request.operation == "blender.light.inspect":
                 result = backend.light_inspect()
@@ -209,6 +278,22 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 result = backend.camera_inspect()
             else:
                 result = backend.inspect()
+        elif isinstance(arguments, ImageCreateArguments):
+            result = backend.image_create(arguments)
+        elif isinstance(arguments, ImageConfigureArguments):
+            result = backend.image_configure(arguments)
+        elif isinstance(arguments, ShaderInspectArguments):
+            result = backend.shader_inspect(arguments)
+        elif isinstance(arguments, NodeCreateArguments):
+            result = backend.shader_create(arguments)
+        elif isinstance(arguments, NodeConfigureArguments):
+            result = backend.shader_configure(arguments)
+        elif isinstance(arguments, NodeDeleteArguments):
+            result = backend.shader_delete(arguments)
+        elif isinstance(arguments, ConnectArguments):
+            result = backend.shader_connect(arguments)
+        elif isinstance(arguments, DisconnectArguments):
+            result = backend.shader_disconnect(arguments)
         elif isinstance(arguments, MaterialCreateArguments):
             result = backend.material_create(arguments)
         elif isinstance(arguments, MaterialConfigureArguments):

@@ -28,6 +28,7 @@ png_helpers = importlib.import_module("tests.png")
 camera_checks = importlib.import_module("tests.blender.camera_checks")
 light_checks = importlib.import_module("tests.blender.light_checks")
 material_checks = importlib.import_module("tests.blender.material_checks")
+shader_checks = importlib.import_module("tests.blender.shader_checks")
 
 
 class BlenderTests(unittest.TestCase):
@@ -354,6 +355,12 @@ try:
     outcome = unittest.TextTestRunner(verbosity=2).run(
         unittest.TestSuite(
             [
+                unittest.defaultTestLoader.loadTestsFromTestCase(
+                    shader_checks.ImageStartupTests
+                ),
+                unittest.defaultTestLoader.loadTestsFromTestCase(
+                    shader_checks.ShaderTests
+                ),
                 unittest.defaultTestLoader.loadTestsFromTestCase(BlenderTests),
                 unittest.defaultTestLoader.loadTestsFromTestCase(
                     material_checks.MaterialTests

@@ -88,4 +88,5 @@ async def running_blender(
     assert (tmp_path / "stopped").read_text() == "clean", log_path.read_text()
     assert not (tmp_path / "error").exists(), (tmp_path / "error").read_text()
     assert "Traceback" not in log_path.read_text()
+    assert "WARNING" not in log_path.read_text()
     assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))  # noqa: ASYNC240 - Isolated test directory.

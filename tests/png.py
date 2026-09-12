@@ -146,3 +146,30 @@ def highlight_statistics(data: bytes) -> tuple[float, float, float]:
         values[int(len(values) * 0.999)],
         sum(value > 240 for value in values) / len(values),
     )
+
+
+def texture_statistics(data: bytes) -> tuple[float, float, int]:
+    """Interior luminance variance, adjacent RGB contrast, and quantized colors."""
+    width, height = inspect_png(data)
+    rgb = rgb_pixels(data)
+    left, right = width // 4, width * 3 // 4
+    top, bottom = height // 4, height * 3 // 4
+    values = []
+    colors = set()
+    edges = []
+    for y in range(top, bottom):
+        for x in range(left, right):
+            offset = (y * width + x) * 3
+            pixel = rgb[offset : offset + 3]
+            values.append(sum(pixel) / 3)
+            colors.add(tuple(channel // 16 for channel in pixel))
+            for neighbor in (offset + 3, offset + width * 3):
+                edges.append(
+                    sum(abs(pixel[c] - rgb[neighbor + c]) for c in range(3)) / 3
+                )
+    mean = sum(values) / len(values)
+    return (
+        sum((value - mean) ** 2 for value in values) / len(values),
+        sum(edges) / len(edges),
+        len(colors),
+    )

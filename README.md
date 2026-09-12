@@ -5,9 +5,14 @@ running Blender instance to [tyvrana-core](https://github.com/tyvrana/tyvrana-co
 and performs validated scene operations through the canonical
 [tyvrana-protocol](https://github.com/tyvrana/tyvrana-protocol) contracts.
 
-Tested with **Blender 5.2.1 LTS on Linux x64**, using its embedded Python 3.13.
-The extension currently provides scene summaries and basic mesh object creation,
-transformation, deletion, and PNG scene renders delivered as MCP images.
+Minimum supported host: **Blender 5.2.1 LTS**. Currently validated:
+**Blender 5.2.1 LTS on Linux x64**, using its embedded Python 3.13.
+The extension manifest and runtime guard reject older hosts. Newer versions pass
+the minimum-version guard but require native and end-to-end testing before they
+are declared validated. One current adapter implementation serves supported hosts.
+
+The extension provides objects, cameras, lights, materials, generated images,
+shader graph controls, and PNG scene renders delivered as MCP images.
 
 ## Install and connect
 
@@ -63,6 +68,15 @@ Names are exact and are advertised in sorted order:
 | `blender.material.create_principled` | Optional name and Principled fields | Created material summary |
 | `blender.material.configure_principled` | Required name; partial Principled fields | Updated material summary |
 | `blender.material.assign` | Object/material names; optional slot index | Assigned slot and ordered slots |
+| `blender.image.inspect` | `{}` | Sorted image resources |
+| `blender.image.create_generated` | Width/height; optional name, generation and color settings | Created image summary |
+| `blender.image.configure` | Name; optional color space and alpha mode | Updated image summary |
+| `blender.shader.inspect` | Material name | One shader graph summary |
+| `blender.shader.node.create` | Material name, supported node type; optional name and typed settings | Created node summary |
+| `blender.shader.node.configure` | Material/node names and partial typed settings | Updated node summary |
+| `blender.shader.node.delete` | Material/node names | Material name and deleted node name |
+| `blender.shader.connect` | Material and output/input endpoints; optional explicit replacement | Link summary |
+| `blender.shader.disconnect` | Material and target input | Target and number of removed links |
 | `blender.light.inspect` | `{}` | Sorted light summaries |
 | `blender.light.create` | Light type, optional name/transform and applicable settings | Created light summary |
 | `blender.light.configure` | Name and partial applicable light settings | Updated light summary |
@@ -456,10 +470,249 @@ objects return `object_not_found`; invalid names/indices return
 
 Alpha changes only the Principled Alpha socket. It does not configure material
 surface-render methods, transparency/shadow settings, or guarantee identical
-transparency across render engines and modes. Texture resources, arbitrary shader
-graph editing, UVs, normal/bump/displacement nodes, baking, and face-material-index
-editing are separate future capabilities. Material tests verify actual renders
-for color, roughness highlights, metallic, emission, and slot reassignment.
+transparency across render engines and modes. Generated image resources and typed
+shader graph controls are described below. UV editing, displacement authoring,
+baking, and face-material-index editing remain future capabilities. Material tests
+verify actual renders for color, roughness highlights, metallic, emission, and
+slot reassignment.
+
+## Images and shader graphs
+
+Image datablocks are reusable named resources; their color-space interpretation
+is shared by every Image Texture node using them. Graph edits affect the named
+material and its users. They preserve existing trees and unknown nodes, without
+converting custom materials, inserting nodes implicitly, or duplicating resources.
+All operations run through the existing main-thread dispatcher.
+
+### Image resources
+
+`blender.image.inspect` accepts `{}` and returns `{"images": [ImageSummary, ...]}`,
+sorted by name, including readable linked and file-backed images. It exposes no
+image path or pixel payload. A summary has:
+
+```text
+{
+  name: string, source: string,
+  width: integer, height: integer, channels: integer,
+  has_alpha: boolean, is_float: boolean,
+  color_space: string | null,
+  alpha_mode: "straight" | "premultiplied" | "channel_packed" | "none",
+  packed: boolean, users: integer, dirty: boolean,
+  generated_type: "blank" | "uv_grid" | "color_grid" | null
+}
+```
+
+`source` uses lowercase native identifiers such as `generated`, `file`, `tiled`,
+`sequence`, `movie`, and `viewer`. Unloaded/unavailable buffers can report zero
+size/channels. `has_alpha` reports buffer color-mode alpha capability, not whether
+any pixel is transparent. Blender can allocate four buffer channels even for an
+RGB image; `channels` alone does not establish alpha. `packed` means embedded
+image data exists, and `dirty` identifies unsaved pixel edits.
+Render/compositor (`viewer`) buffers have no input image color space: inspection
+reports `color_space: null`, and metadata edits are rejected with `invalid_context`.
+
+`blender.image.create_generated` requires integer `width` and `height`. Optional
+flat arguments are:
+
+| Field | Default / meaning |
+| --- | --- |
+| `name` | Native unique naming; returns the actual name |
+| `generated_type` | `blank`; also `uv_grid` and `color_grid` |
+| `color` | `[0, 0, 0, 1]`, four normalized RGBA components; blank images only |
+| `alpha` | `true`; allocate alpha-capable image data |
+| `float_buffer` | `false`; otherwise use 32-bit float channels |
+| `color_space` | Native image default under the current OCIO configuration |
+
+Dimensions are 1–4096 on each axis. The largest float RGBA base buffer is 256 MiB;
+a byte RGBA buffer is 64 MiB. Blender may allocate additional working/render
+buffers. These are per-image allocation limits, not a total project memory quota.
+Invalid sizes are rejected before allocation. Duplicate explicit names and names
+Blender cannot store exactly are rejected; failed creation removes the new image.
+
+Fill `color` deliberately uses normalized 0–1 components to avoid byte-buffer
+clamping and unbounded HDR generation. It follows Blender's generated-color
+**gamma-encoded RGB** semantics: float generation converts RGB to scene linear,
+while byte generation quantizes to 8-bit channels. Alpha is a separate normalized
+component. This differs from the scene-linear Principled shader RGB arguments.
+An image created with `alpha: false` requires an opaque fill. Grid generation owns
+its pattern; passing an irrelevant `color` with a grid is rejected.
+
+`blender.image.configure` takes required `name`, optional `color_space`, and
+optional `alpha_mode`. It changes interpretation metadata; it does not resize,
+paint, regenerate, pack, or reload images explicitly. Omitted values remain
+unchanged and nulls are rejected. Color-space names are checked against the
+actual runtime OCIO enumeration, including custom configurations. Names are exact;
+`sRGB` and `Non-Color` are examples, not a hardcoded list. Color space belongs to
+the image, never to the texture node. Non-Color avoids color management for data
+textures such as normal maps.
+
+Blender's metadata callbacks may invalidate/reload buffers. Changes that could
+reload a **dirty image** are rejected with `invalid_context` to preserve unsaved
+pixel edits; save those edits first. Unchanged-value calls do not invoke setters.
+Generated-image alpha-mode changes do not reload pixels. The modes map to native
+`STRAIGHT`, `PREMUL`, `CHANNEL_PACKED`, and `NONE`; they control alpha interpretation
+for image loading/saving. They do not add an alpha channel, change Principled
+Alpha, or configure material transparency. Native generated images are unaffected
+by alpha-mode pixel conversion.
+
+Linked/read-only image mutation is rejected. Missing resources use
+`image_not_found`; ambiguous names across libraries use `invalid_arguments`.
+Unassigned resources follow native orphan lifetime; no image delete, persistence,
+packing, external filesystem image import, URL downloading, or inbound pixel
+upload operation is provided.
+
+### Inspecting shader trees
+
+`blender.shader.inspect` takes `{"material_name": "Surface"}`. It inspects one
+material, including custom and linked trees, without mutating it:
+
+```text
+ShaderGraphSummary {
+  material_name: string, node_tree_present: boolean,
+  nodes: NodeSummary[], links: LinkSummary[]
+}
+NodeSummary {
+  node_name: string, node_type: string, label: string, muted: boolean,
+  inputs: SocketSummary[], outputs: SocketSummary[], settings: NodeSettings | null
+}
+SocketSummary {
+  name: string, identifier: string, socket_type: string,
+  linked: boolean, enabled: boolean,
+  default_value: boolean | integer | number | number[0..4] | null
+}
+LinkSummary {
+  from_node: string, from_socket: string, to_node: string, to_socket: string,
+  valid: boolean, muted: boolean
+}
+```
+
+Nodes sort by name; links sort by their source/target names and socket identifiers.
+Socket lists retain native order for readability, but indices are never public
+endpoints. `node_type` is the actual `bl_idname`. Socket identifiers, rather than
+display names/labels, identify connections. Enabled excludes unavailable inputs.
+Only finite numeric scalars and vectors of at most four components are exposed
+as defaults; strings, pointers, complex/large values, and non-finite values become
+null. Unsupported node settings are null. Material Output settings report
+`{active: boolean, target: string}`. Principled defaults remain visible in its
+inputs. Unknown nodes and their links remain inspectable.
+
+### Typed auxiliary nodes
+
+`blender.shader.node.create` requires `material_name` and `node_type`, with optional
+`name` and applicable flat settings below. It creates one unconnected node and
+returns NodeSummary. Explicit duplicate/unstoreable names are rejected.
+
+`blender.shader.node.configure` requires `material_name` and `node_name`, plus
+applicable partial settings. It resolves the actual node type; callers cannot
+change it. Omitted fields remain unchanged. Wrong-type fields, explicit nulls,
+numeric coercion, non-finite values, float32 overflow/underflow, and malformed
+vectors are rejected. Requested values are verified after writes and restored on
+unexpected failure. Driven input defaults must be disconnected before configuring
+them; the operation does not silently override a link.
+
+| Public node type | Blender type | Configurable fields / native defaults |
+| --- | --- | --- |
+| `image_texture` | `ShaderNodeTexImage` | `image_name` (initially unassigned), `interpolation: linear`, `projection: flat`, `extension: repeat` |
+| `texture_coordinate` | `ShaderNodeTexCoord` | `from_instancer: false` |
+| `mapping` | `ShaderNodeMapping` | `vector_type: point`, `location: [0,0,0]`, `rotation: [0,0,0]`, `scale: [1,1,1]` |
+| `normal_map` | `ShaderNodeNormalMap` | `strength: 1`, `space: tangent`, `uv_map: ""` |
+| `bump` | `ShaderNodeBump` | `strength: 1`, `distance: 0.001`, `invert: false` |
+
+Node settings summaries contain these current values. Texture Coordinate also
+reports its existing read-only `object_name`, or null. Image assignment uses the
+named image directly, including readable linked images; it never copies it.
+There is no implicit image creation or image-unassignment through null.
+
+Image interpolation supports `linear`, `closest`, `cubic`, and `smart`; the latter
+has native engine/OSL restrictions and is not a universal quality guarantee.
+Projection supports `flat`, `box`, `sphere`, `tube`; extension supports `repeat`,
+`extend`, `clip`, `mirror`. Other native image-user/projection settings are retained.
+
+Mapping types are `point`, `texture`, `vector`, and `normal`. Point mapping scales,
+rotates, then translates coordinates; larger coordinate scale makes a repeated
+texture denser. Texture mapping applies the inverse transform. Vector omits
+translation; Normal uses inverse-transpose and normalization. Location is accepted
+only for point/texture, and mode changes cannot disable an existing Location link.
+Rotation is XYZ Euler radians. The scalar/vector socket hard limits are finite
+float32 `[-3.4028234663852886e38, 3.4028234663852886e38]`, distinct from physical/UI
+ranges; returned values reflect float32 storage.
+
+Normal-map spaces are `tangent`, `object`, and `world`; historical Blender-space
+variants are inspectable but not configurable. `uv_map` applies only to tangent
+space; empty uses the native active UV choice. A tangent normal map's coordinates
+must match that UV map, and its image should use Non-Color. Other native normal-map
+settings are preserved. Bump strength/distance use native numeric socket units;
+physical use normally uses nonnegative values. `invert` reverses the bump direction.
+No UV editing, normal-map generation, or displacement authoring is implied.
+
+### Explicit connections and deletion
+
+`blender.shader.connect` accepts:
+
+```json
+{
+  "material_name": "Surface",
+  "from_node": "Texture", "from_socket": "Color",
+  "to_node": "Principled BSDF", "to_socket": "Base Color",
+  "replace_existing": false
+}
+```
+
+Source resolves only among outputs and target only among inputs. Unknown or
+ambiguous identifiers use `socket_not_found`. Disabled/unavailable/multi-input
+sockets, cycles, and unsupported socket types are rejected. Numeric shader sockets
+(`VALUE`, `INT`, `BOOLEAN`, `VECTOR`, `RGBA`) follow Blender's implicit conversions;
+shader outputs can connect only to shader inputs. No conversion node is inserted.
+Bundle/closure/menu and other socket families are outside this operation. Material
+Output edits are limited to Surface; volume/displacement/thickness inputs remain
+outside this layer.
+
+An occupied input returns `socket_already_connected`, including an identical
+requested link. Only `replace_existing: true` authorizes removing that input's
+links. Replacement validates endpoints first, preserves unrelated links, verifies
+the new link, and restores previous endpoints/mute state if it fails. The result
+is LinkSummary. This operation does not select an active output or reconnect
+anything beyond the requested endpoint.
+
+`blender.shader.disconnect` accepts `material_name`, `to_node`, `to_socket`. It
+removes only links entering that input and returns
+`{material_name, to_node, to_socket, removed}`. An already disconnected valid input
+returns `removed: 0`; bad resources/endpoints remain errors.
+
+`blender.shader.node.delete` accepts `material_name`, `node_name` and returns
+`{material_name, deleted}`. Only the five supported auxiliary types can be deleted.
+All Principled and Material Output nodes are protected with `node_protected`,
+including the active/surface-driving pair. Unsupported nodes use
+`node_type_unsupported`; missing nodes use `node_not_found`. Blender removes the
+deleted auxiliary node's own links naturally. No other nodes are rewritten.
+
+Shader mutation requires editable material/tree data and a safe main-thread
+context. Read-only data returns `invalid_context`; absent/non-shader trees return
+`unsupported_material_graph`. Unexpected internal errors remain logged and
+sanitized as `operation_failed`.
+
+For an explicit UV texture workflow, create a generated image, a Principled
+material, and the three auxiliary nodes; assign the image to the texture node and
+connect these identifiers:
+
+```text
+Coordinates.UV → Mapping.Vector
+Mapping.Vector → Texture.Vector
+Texture.Color → Principled BSDF.Base Color
+```
+
+Assign the material separately with `blender.material.assign`, then render.
+Texture Coordinate exposes native Generated, Normal, UV, Object, Camera, Window,
+and Reflection outputs. This example uses the mesh's existing active render UVs;
+it does not create or edit a UV map. Once Principled inputs are linked, the existing
+constant-Principled configure operation rejects that material as custom; use the
+explicit graph operations to manage those connections.
+
+Behavior is checked against native Blender 5.2.1 and official
+[image API](https://docs.blender.org/api/5.2/bpy.types.Image.html),
+[image texture workflow](https://docs.blender.org/manual/en/5.2/render/shader_nodes/textures/image.html),
+[mapping workflow](https://docs.blender.org/manual/en/5.2/render/shader_nodes/utilities/vector/mapping.html),
+and [shader link validation](https://github.com/blender/blender/blob/v5.2.1/source/blender/nodes/shader/node_shader_tree.cc).
 
 ## Cameras
 

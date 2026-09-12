@@ -25,8 +25,9 @@ def test_real_blender_background_operations_and_lifecycle(
         timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_TESTS_PASSED 70" in result.stdout
+    assert "BLENDER_TESTS_PASSED 96" in result.stdout
     assert "Traceback" not in result.stdout + result.stderr
+    assert "WARNING" not in result.stdout + result.stderr
 
 
 def test_blender_exit_handler_reaps_an_active_worker(profile: dict[str, str]) -> None:

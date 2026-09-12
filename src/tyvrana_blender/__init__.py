@@ -2,6 +2,11 @@
 
 
 def register() -> None:
+    import bpy  # type: ignore[import-not-found]
+
+    from .compatibility import require_blender
+
+    require_blender(bpy.app.version)
     from .blender import register as enable
 
     enable()

@@ -6,7 +6,7 @@ tagline = "Connect Blender to local Tyvrana scene operations"
 maintainer = "Tyvrana contributors"
 type = "add-on"
 website = "https://github.com/tyvrana/tyvrana-blender"
-blender_version_min = "5.2.0"
+blender_version_min = "5.2.1"
 license = ["SPDX:Apache-2.0"]
 platforms = ["linux-x64"]
 

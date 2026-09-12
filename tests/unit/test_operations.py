@@ -16,6 +16,12 @@ from tyvrana_blender.camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from tyvrana_blender.image_models import (
+    ImageConfigureArguments,
+    ImageCreateArguments,
+    ImageInspectResult,
+    ImageSummary,
+)
 from tyvrana_blender.light_models import (
     LightConfigureArguments,
     LightCreateArguments,
@@ -42,11 +48,79 @@ from tyvrana_blender.models import (
     TransformArguments,
 )
 from tyvrana_blender.operations import OperationError, execute
+from tyvrana_blender.shader_models import (
+    ConnectArguments,
+    DisconnectArguments,
+    DisconnectResult,
+    LinkSummary,
+    NodeConfigureArguments,
+    NodeCreateArguments,
+    NodeDeleteArguments,
+    NodeDeleteResult,
+    NodeSummary,
+    ShaderGraphSummary,
+    ShaderInspectArguments,
+)
 
 
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def image_inspect(self) -> ImageInspectResult:
+        self.calls.append("image_inspect")
+        return ImageInspectResult(images=[])
+
+    def image_create(self, arguments: ImageCreateArguments) -> ImageSummary:
+        self.calls.append("image_create")
+        return image_summary(arguments.name or "Image")
+
+    def image_configure(self, arguments: ImageConfigureArguments) -> ImageSummary:
+        self.calls.append("image_configure")
+        return image_summary(arguments.name)
+
+    def shader_inspect(self, arguments: ShaderInspectArguments) -> ShaderGraphSummary:
+        self.calls.append("shader_inspect")
+        return ShaderGraphSummary(
+            material_name=arguments.material_name,
+            node_tree_present=True,
+            nodes=[],
+            links=[],
+        )
+
+    def shader_create(self, arguments: NodeCreateArguments) -> NodeSummary:
+        self.calls.append("shader_create")
+        return node_summary(arguments.name or "Node")
+
+    def shader_configure(self, arguments: NodeConfigureArguments) -> NodeSummary:
+        self.calls.append("shader_configure")
+        return node_summary(arguments.node_name)
+
+    def shader_delete(self, arguments: NodeDeleteArguments) -> NodeDeleteResult:
+        self.calls.append("shader_delete")
+        return NodeDeleteResult(
+            material_name=arguments.material_name, deleted=arguments.node_name
+        )
+
+    def shader_connect(self, arguments: ConnectArguments) -> LinkSummary:
+        self.calls.append("shader_connect")
+        return LinkSummary(
+            from_node=arguments.from_node,
+            from_socket=arguments.from_socket,
+            to_node=arguments.to_node,
+            to_socket=arguments.to_socket,
+            valid=True,
+            muted=False,
+        )
+
+    def shader_disconnect(self, arguments: DisconnectArguments) -> DisconnectResult:
+        self.calls.append("shader_disconnect")
+        return DisconnectResult(
+            material_name=arguments.material_name,
+            to_node=arguments.to_node,
+            to_socket=arguments.to_socket,
+            removed=0,
+        )
 
     def material_inspect(self) -> MaterialInspectResult:
         self.calls.append("material_inspect")
@@ -155,6 +229,36 @@ class Backend:
         return DeleteResult(deleted=arguments.name)
 
 
+def image_summary(name: str) -> ImageSummary:
+    return ImageSummary(
+        name=name,
+        source="generated",
+        width=4,
+        height=4,
+        channels=4,
+        has_alpha=True,
+        is_float=False,
+        color_space="sRGB",
+        alpha_mode="straight",
+        packed=False,
+        users=0,
+        dirty=False,
+        generated_type="blank",
+    )
+
+
+def node_summary(name: str) -> NodeSummary:
+    return NodeSummary(
+        node_name=name,
+        node_type="ShaderNodeMapping",
+        label="",
+        muted=False,
+        inputs=[],
+        outputs=[],
+        settings=None,
+    )
+
+
 def call(
     backend: Backend, operation: str, arguments: JsonValue
 ) -> OperationSuccess | OperationFailure:
@@ -208,6 +312,45 @@ def camera_summary(name: str) -> CameraSummary:
 @pytest.mark.parametrize(
     ("operation", "arguments", "method"),
     [
+        ("blender.image.inspect", {}, "image_inspect"),
+        ("blender.image.create_generated", {"width": 4, "height": 4}, "image_create"),
+        (
+            "blender.image.configure",
+            {"name": "Image", "color_space": "Non-Color"},
+            "image_configure",
+        ),
+        ("blender.shader.inspect", {"material_name": "M"}, "shader_inspect"),
+        (
+            "blender.shader.node.create",
+            {"material_name": "M", "node_type": "mapping"},
+            "shader_create",
+        ),
+        (
+            "blender.shader.node.configure",
+            {"material_name": "M", "node_name": "N", "scale": [2, 2, 2]},
+            "shader_configure",
+        ),
+        (
+            "blender.shader.node.delete",
+            {"material_name": "M", "node_name": "N"},
+            "shader_delete",
+        ),
+        (
+            "blender.shader.connect",
+            {
+                "material_name": "M",
+                "from_node": "A",
+                "from_socket": "Color",
+                "to_node": "B",
+                "to_socket": "Base Color",
+            },
+            "shader_connect",
+        ),
+        (
+            "blender.shader.disconnect",
+            {"material_name": "M", "to_node": "B", "to_socket": "Base Color"},
+            "shader_disconnect",
+        ),
         ("blender.material.inspect", {}, "material_inspect"),
         ("blender.material.create_principled", {}, "material_create"),
         (

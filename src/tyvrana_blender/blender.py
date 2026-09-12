@@ -16,6 +16,7 @@ from tyvrana_protocol import (
     OperationRequest,
 )
 
+from . import shader
 from .artifacts import ArtifactSpool
 from .camera_models import (
     CameraConfigureArguments,
@@ -28,7 +29,15 @@ from .camera_models import (
     normalize_projection,
     validate_optics,
 )
+from .compatibility import require_blender
 from .dispatch import CommandQueue
+from .image_models import (
+    ALPHA_MODES,
+    ImageConfigureArguments,
+    ImageCreateArguments,
+    ImageInspectResult,
+    ImageSummary,
+)
 from .light_models import (
     COMMON_FIELDS,
     LIGHT_TYPES,
@@ -63,6 +72,19 @@ from .models import (
     TransformArguments,
 )
 from .operations import OperationError, execute, registration
+from .shader_models import (
+    ConnectArguments,
+    DisconnectArguments,
+    DisconnectResult,
+    LinkSummary,
+    NodeConfigureArguments,
+    NodeCreateArguments,
+    NodeDeleteArguments,
+    NodeDeleteResult,
+    NodeSummary,
+    ShaderGraphSummary,
+    ShaderInspectArguments,
+)
 from .transport import WorkerProcess
 
 logger = logging.getLogger(__name__)
@@ -389,9 +411,212 @@ def material_index_snapshot(data: Any) -> list[tuple[Any, str, int]]:
     return []
 
 
+def image_summary(image: Any) -> ImageSummary:
+    main_thread()
+    return ImageSummary(
+        name=str(image.name),
+        source=str(image.source).lower(),
+        width=int(image.size[0]),
+        height=int(image.size[1]),
+        channels=int(image.channels),
+        has_alpha=image.depth // (32 if image.is_float else 8) in {2, 4},
+        is_float=bool(image.is_float),
+        color_space=(
+            None if image.source == "VIEWER" else str(image.colorspace_settings.name)
+        ),
+        alpha_mode=next(
+            key for key, value in ALPHA_MODES.items() if value == image.alpha_mode
+        ),
+        packed=bool(image.packed_files),
+        users=int(image.users),
+        dirty=bool(image.is_dirty),
+        generated_type=image.generated_type.lower()
+        if image.source == "GENERATED"
+        else None,
+    )
+
+
+def find_image(name: str) -> Any:
+    main_thread()
+    matches = [image for image in bpy.data.images if image.name == name]
+    if not matches:
+        raise OperationError("image_not_found", "Image does not exist", {"name": name})
+    if len(matches) != 1:
+        raise OperationError(
+            "invalid_arguments", "Image name is ambiguous across libraries"
+        )
+    return matches[0]
+
+
+def validate_color_space(name: str) -> None:
+    main_thread()
+    names = {
+        item.identifier
+        for item in bpy.types.ColorManagedInputColorspaceSettings.bl_rna.properties[
+            "name"
+        ].enum_items
+    }
+    if name not in names:
+        raise OperationError(
+            "invalid_arguments",
+            "Color space is unavailable in the active OCIO configuration",
+            {"color_space": name, "available": sorted(names)},
+        )
+
+
 class BlenderBackend:
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
+
+    def image_inspect(self) -> ImageInspectResult:
+        main_thread()
+        return ImageInspectResult(
+            images=[
+                image_summary(image)
+                for image in sorted(bpy.data.images, key=lambda image: image.name)
+            ]
+        )
+
+    def image_create(self, arguments: ImageCreateArguments) -> ImageSummary:
+        data_mutation_context()
+        if arguments.name is not None and any(
+            image.name == arguments.name for image in bpy.data.images
+        ):
+            raise OperationError("invalid_arguments", "Image name already exists")
+        if arguments.color_space is not None:
+            validate_color_space(arguments.color_space)
+        image = bpy.data.images.new(
+            arguments.name or "Image",
+            width=arguments.width,
+            height=arguments.height,
+            alpha=arguments.alpha,
+            float_buffer=arguments.float_buffer,
+        )
+        try:
+            if arguments.name is not None and image.name != arguments.name:
+                raise OperationError(
+                    "invalid_arguments",
+                    "Blender cannot store the requested image name exactly",
+                )
+            image.generated_type = arguments.generated_type.upper()
+            if arguments.generated_type == "blank":
+                image.generated_color = arguments.color
+            if arguments.color_space is not None:
+                image.colorspace_settings.name = arguments.color_space
+            image.update()
+            result = image_summary(image)
+            if (
+                result.width != arguments.width
+                or result.height != arguments.height
+                or result.generated_type != arguments.generated_type
+                or result.has_alpha != arguments.alpha
+                or result.is_float != arguments.float_buffer
+                or (
+                    arguments.color_space is not None
+                    and result.color_space != arguments.color_space
+                )
+            ):
+                raise OperationError(
+                    "operation_failed",
+                    "Blender did not retain the requested image settings",
+                )
+            return result
+        except Exception:
+            bpy.data.images.remove(image, do_unlink=True)
+            raise
+
+    def image_configure(self, arguments: ImageConfigureArguments) -> ImageSummary:
+        data_mutation_context()
+        image = find_image(arguments.name)
+        if not image.is_editable:
+            raise OperationError("invalid_context", "Image is not editable")
+        if image.source == "VIEWER" and arguments.model_fields_set - {"name"}:
+            raise OperationError(
+                "invalid_context",
+                "Render/compositor buffers have no input image metadata",
+            )
+        if arguments.color_space is not None:
+            validate_color_space(arguments.color_space)
+        changes: list[tuple[Any, str, Any, Any]] = []
+        if arguments.color_space is not None:
+            changes.append(
+                (
+                    image.colorspace_settings,
+                    "name",
+                    image.colorspace_settings.name,
+                    arguments.color_space,
+                )
+            )
+        if arguments.alpha_mode is not None:
+            changes.append(
+                (
+                    image,
+                    "alpha_mode",
+                    image.alpha_mode,
+                    ALPHA_MODES[arguments.alpha_mode],
+                )
+            )
+        changes = [change for change in changes if change[2] != change[3]]
+        if image.is_dirty and any(
+            key == "name" or image.source != "GENERATED"
+            for owner, key, old, new in changes
+        ):
+            raise OperationError(
+                "invalid_context",
+                "Save image pixel edits before changing buffer-reloading metadata",
+            )
+        if any(owner.is_property_readonly(key) for owner, key, old, new in changes):
+            raise OperationError("invalid_context", "Image metadata is not editable")
+        try:
+            for owner, key, _old, new in changes:
+                setattr(owner, key, new)
+            if any(getattr(owner, key) != new for owner, key, old, new in changes):
+                raise OperationError(
+                    "operation_failed",
+                    "Blender did not retain the requested image metadata",
+                )
+            return image_summary(image)
+        except Exception:
+            for owner, key, old, _new in reversed(changes):
+                setattr(owner, key, old)
+            raise
+
+    def shader_inspect(self, arguments: ShaderInspectArguments) -> ShaderGraphSummary:
+        main_thread()
+        bpy.context.view_layer.update()
+        return shader.graph_summary(find_material(arguments.material_name))
+
+    def shader_create(self, arguments: NodeCreateArguments) -> NodeSummary:
+        data_mutation_context()
+        tree = shader.editable_tree(find_material(arguments.material_name))
+        return shader.create_node(
+            tree, arguments, bpy.data.images, bpy.context.view_layer.update
+        )
+
+    def shader_configure(self, arguments: NodeConfigureArguments) -> NodeSummary:
+        data_mutation_context()
+        tree = shader.editable_tree(find_material(arguments.material_name))
+        return shader.configure_node(
+            shader.find_node(tree, arguments.node_name),
+            arguments,
+            bpy.data.images,
+            bpy.context.view_layer.update,
+        )
+
+    def shader_delete(self, arguments: NodeDeleteArguments) -> NodeDeleteResult:
+        data_mutation_context()
+        tree = shader.editable_tree(find_material(arguments.material_name))
+        return shader.delete_node(tree, arguments)
+
+    def shader_connect(self, arguments: ConnectArguments) -> LinkSummary:
+        data_mutation_context()
+        tree = shader.editable_tree(find_material(arguments.material_name))
+        return shader.connect(tree, arguments, bpy.context.view_layer.update)
+
+    def shader_disconnect(self, arguments: DisconnectArguments) -> DisconnectResult:
+        data_mutation_context()
+        tree = shader.editable_tree(find_material(arguments.material_name))
+        return shader.disconnect(tree, arguments)
 
     def material_inspect(self) -> MaterialInspectResult:
         main_thread()
@@ -1064,6 +1289,7 @@ _handlers = (
 def register() -> None:
     global _enabled, _status
     main_thread()
+    require_blender(bpy.app.version)
     if _enabled:
         return
     for cls in _classes:

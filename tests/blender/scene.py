@@ -126,3 +126,23 @@ def prepare_material_scene() -> None:
         1,
     )
     scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.3
+
+
+def prepare_shader_scene() -> None:
+    """Front-facing UV plane under fixed neutral studio illumination."""
+    prepare_material_scene()
+    scene = bpy.context.scene
+    bpy.data.objects.remove(bpy.data.objects["RenderSubject"], do_unlink=True)
+    bpy.ops.mesh.primitive_plane_add(size=4, location=(0, 0, 1))
+    bpy.context.object.name = "RenderSubject"
+    assert bpy.context.object.data.uv_layers.active is not None
+    scene.camera.location = (0, 0, 7)
+    scene.camera.rotation_euler = (0, 0, 0)
+    light = next(obj for obj in scene.objects if obj.type == "LIGHT")
+    light.location = (-2, -3, 6)
+    light.rotation_euler = (
+        (Vector((0, 0, 1)) - light.location).to_track_quat("-Z", "Y").to_euler()
+    )
+    light.data.size = 5
+    light.data.energy = 400
+    scene.cycles.samples = 32
