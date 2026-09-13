@@ -94,6 +94,15 @@ class BlenderTests(unittest.TestCase):
     def test_render_failure_restores_settings_and_removes_file(self) -> None:
         scene_helpers.prepare_scene()
         render = bpy.context.scene.render
+        cycles = bpy.context.scene.cycles
+        render.engine = "BLENDER_EEVEE"
+        old_cycles = (
+            cycles.device,
+            cycles.samples,
+            cycles.use_denoising,
+            cycles.use_layer_samples,
+            cycles.use_sample_subset,
+        )
         saved = render.resolution_x, render.resolution_y, render.resolution_percentage
         spool = adapter._runtime.worker.spool
         render_module = importlib.import_module(extension.__name__ + ".render")
@@ -106,6 +115,12 @@ class BlenderTests(unittest.TestCase):
             self.assertTrue(output.mute)
             self.assertEqual(render.resolution_x, 128)
             self.assertEqual(render.resolution_percentage, 100)
+            self.assertEqual(render.engine, "CYCLES")
+            self.assertEqual(cycles.device, "CPU")
+            self.assertEqual(cycles.samples, 3)
+            self.assertFalse(cycles.use_denoising)
+            self.assertEqual(cycles.use_layer_samples, "IGNORE")
+            self.assertFalse(cycles.use_sample_subset)
             return {"CANCELLED"}
 
         # Replace only operator invocation; context, settings, and storage are real.
@@ -122,7 +137,7 @@ class BlenderTests(unittest.TestCase):
                     type="operation.request",
                     request_id="failed",
                     operation="blender.render.image",
-                    arguments={"width": 128},
+                    arguments={"width": 128, "cycles": {"samples": 3}},
                 ),
             )
         self.assertIsInstance(response, OperationFailure)
@@ -134,6 +149,53 @@ class BlenderTests(unittest.TestCase):
             saved,
             (render.resolution_x, render.resolution_y, render.resolution_percentage),
         )
+        self.assertEqual(list(spool.root.iterdir()), [])
+        self.assertEqual(render.engine, "BLENDER_EEVEE")
+        self.assertEqual(
+            old_cycles,
+            (
+                cycles.device,
+                cycles.samples,
+                cycles.use_denoising,
+                cycles.use_layer_samples,
+                cycles.use_sample_subset,
+            ),
+        )
+
+    def test_cycles_override_renders_and_restores_scene_settings(self) -> None:
+        scene_helpers.prepare_scene()
+        scene = bpy.context.scene
+        scene.render.engine = "BLENDER_EEVEE"
+        scene.cycles.device = "GPU"
+        scene.cycles.samples = 73
+        scene.cycles.use_denoising = False
+        scene.cycles.use_layer_samples = "USE"
+        scene.cycles.use_sample_subset = True
+        spool = adapter._runtime.worker.spool
+        response = operations.execute(
+            adapter.BlenderBackend(spool),
+            OperationRequest(
+                type="operation.request",
+                request_id="cycles",
+                operation="blender.render.image",
+                arguments={
+                    "width": 128,
+                    "height": 128,
+                    "cycles": {"device": "cpu", "samples": 4, "denoise": True},
+                },
+            ),
+        )
+        self.assertIsInstance(response, OperationSuccess)
+        data = (spool.root / (response.artifacts[0].artifact_id + ".png")).read_bytes()
+        self.assertEqual(png_helpers.inspect_png(data), (128, 128))
+        png_helpers.assert_image_variation(data)
+        self.assertEqual(scene.render.engine, "BLENDER_EEVEE")
+        self.assertEqual(scene.cycles.device, "GPU")
+        self.assertEqual(scene.cycles.samples, 73)
+        self.assertFalse(scene.cycles.use_denoising)
+        self.assertEqual(scene.cycles.use_layer_samples, "USE")
+        self.assertTrue(scene.cycles.use_sample_subset)
+        spool.release(response.artifacts)
         self.assertEqual(list(spool.root.iterdir()), [])
 
     def test_render_without_camera_is_structured_failure(self) -> None:

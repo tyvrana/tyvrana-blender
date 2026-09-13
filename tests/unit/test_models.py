@@ -100,6 +100,15 @@ def test_registration_is_canonical_and_optional_filepath_is_omitted() -> None:
         {"width": None},
         {"format": "jpeg"},
         {"path": "output.png"},
+        {"cycles": None},
+        {"cycles": {"device": "cuda"}},
+        {"cycles": {"device": None}},
+        {"cycles": {"samples": 0}},
+        {"cycles": {"samples": 513}},
+        {"cycles": {"samples": True}},
+        {"cycles": {"samples": "16"}},
+        {"cycles": {"denoise": 1}},
+        {"cycles": {"script": "anything"}},
     ],
 )
 def test_invalid_render_arguments(arguments: object) -> None:
@@ -116,5 +125,7 @@ def test_render_defaults_and_dimension_bounds() -> None:
         "width": 512,
         "height": 512,
         "format": "png",
+        "cycles": None,
     }
     assert RenderArguments(width=64, height=1024).height == 1024
+    assert RenderArguments.model_validate({"cycles": {}}).cycles is not None

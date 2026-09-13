@@ -121,7 +121,7 @@ Names are exact and are advertised in sorted order:
 | `blender.camera.create` | Optional name, projection, initial transform, optics, clipping, shifts, activation | Created camera summary |
 | `blender.camera.configure` | Required `name`; optional projection, optics, clipping, shifts | Updated camera summary |
 | `blender.camera.set_active` | Required `name` | Selected camera summary |
-| `blender.render.image` | Optional `width`, `height`, `format` | Render metadata and a typed PNG artifact |
+| `blender.render.image` | Optional dimensions, format and Cycles render options | Render metadata and a typed PNG artifact |
 | `blender.uv.inspect` | Object name | UV map summaries and active roles |
 | `blender.uv.create_map` | Object name; optional map name and activation flags | Updated UV inspection |
 | `blender.uv.set_active` | Object/map names; editing and render activation flags | Updated UV inspection |
@@ -2449,6 +2449,27 @@ All three fields are optional. Width and height default to 512 and each must be
 an integer from 64 through 1024, inclusive. Only `"png"` is supported. No camera is
 created automatically: a scene without one returns `no_camera`. An existing
 render job returns `invalid_context`. Rendering works in background and UI modes.
+
+An optional `cycles` object selects Cycles for this request without changing the
+saved scene configuration:
+
+```json
+{"width": 768, "height": 768, "cycles": {"device": "cpu", "samples": 16, "denoise": false}}
+```
+
+Its fields default to CPU, 16 samples and no denoising. `device` accepts `cpu` or
+`gpu`, `samples` is an integer from 1 through 512, and `denoise` is a boolean.
+GPU rendering uses the user's existing device configuration; it does not install
+or configure GPU backends. Denoising uses the existing native denoiser settings.
+Omit `cycles` to preserve the current engine and sampling choices; explicit null
+and unknown options are rejected. Per-layer sample overrides and sample subsets
+are temporarily disabled when these options are supplied, so the requested
+maximum sample count applies. Engine and all overridden settings are restored
+on success or failure. Other scene settings remain effective. These controls
+bound requested samples, not scene complexity or elapsed render time.
+
+The native settings follow Blender 5.2.1's
+[Cycles properties](https://github.com/blender/blender/blob/v5.2.1/intern/cycles/blender/addon/properties.py).
 
 The successful protocol response has this shape (IDs and hash shown schematically):
 

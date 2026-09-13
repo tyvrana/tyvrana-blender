@@ -59,10 +59,19 @@ def spooled_count(directory: Path) -> int:
 
 
 @pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
+@pytest.mark.parametrize(
+    "cycles", [False, True], ids=["scene-engine", "cycles-override"]
+)
 async def test_real_render_reaches_mcp_image_content(
-    profile: dict[str, str], tmp_path: Path, ui: bool, caplog: pytest.LogCaptureFixture
+    profile: dict[str, str],
+    tmp_path: Path,
+    ui: bool,
+    caplog: pytest.LogCaptureFixture,
+    cycles: bool,
 ) -> None:
     profile["TYVRANA_TEST_RENDER"] = "1"
+    if cycles:
+        profile["TYVRANA_TEST_CYCLES_OVERRIDE"] = "1"
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=ui):
@@ -73,7 +82,16 @@ async def test_real_render_reaches_mcp_image_content(
                 {
                     "adapter_id": registered.instance_id,
                     "operation": "blender.render.image",
-                    "arguments": {"width": 512, "height": 512, "format": "png"},
+                    "arguments": {
+                        "width": 512,
+                        "height": 512,
+                        "format": "png",
+                        **(
+                            {"cycles": {"samples": 8, "device": "cpu", "denoise": True}}
+                            if cycles
+                            else {}
+                        ),
+                    },
                 },
             )
             assert not result.is_error, result.content

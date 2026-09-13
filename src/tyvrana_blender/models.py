@@ -90,10 +90,24 @@ class DeleteResult(Model):
     deleted: str
 
 
+class CyclesRenderOptions(Model):
+    device: Literal["cpu", "gpu"] = "cpu"
+    samples: int = Field(default=16, ge=1, le=512)
+    denoise: bool = False
+
+
 class RenderArguments(Model):
     width: int = Field(default=512, ge=64, le=1024)
     height: int = Field(default=512, ge=64, le=1024)
     format: Literal["png"] = "png"
+    cycles: CyclesRenderOptions | None = None
+
+    @field_validator("cycles", mode="before")
+    @classmethod
+    def non_null_cycles(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Omit cycles to use scene settings; null is invalid")
+        return value
 
 
 class RenderResult(Model):

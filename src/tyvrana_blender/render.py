@@ -53,6 +53,21 @@ def render_image(
         (image, "color_mode", "RGBA"),
         (image, "color_depth", "8"),
     ]
+    if arguments.cycles is not None:
+        options = arguments.cycles
+        cycles = getattr(scene, "cycles", None)
+        if cycles is None:
+            raise OperationError("render_engine_unavailable", "Cycles is unavailable")
+        overrides.extend(
+            [
+                (render, "engine", "CYCLES"),
+                (cycles, "device", options.device.upper()),
+                (cycles, "samples", options.samples),
+                (cycles, "use_denoising", options.denoise),
+                (cycles, "use_layer_samples", "IGNORE"),
+                (cycles, "use_sample_subset", False),
+            ]
+        )
     # File Output nodes are side effects, not part of the requested PNG. Preserve
     # compositor image processing while preventing writes to user output paths.
     overrides.extend(

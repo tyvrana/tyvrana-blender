@@ -67,6 +67,9 @@ if "TYVRANA_TEST_FINISH" in os.environ:
         os.environ["TYVRANA_TEST_FINISH"]
     )
 deadline = time.monotonic() + 180
+if os.environ.get("TYVRANA_TEST_CYCLES_OVERRIDE") == "1":
+    bpy.context.scene.render.engine = "BLENDER_EEVEE"
+    bpy.context.scene.cycles.samples = 73
 
 
 def check() -> float | None:
@@ -89,6 +92,9 @@ def check() -> float | None:
             )
             (control / "ready.tmp").replace(control / "ready.json")
         if (control / "stop").exists():
+            if os.environ.get("TYVRANA_TEST_CYCLES_OVERRIDE") == "1":
+                assert bpy.context.scene.render.engine == "BLENDER_EEVEE"
+                assert bpy.context.scene.cycles.samples == 73
             worker = runtime.worker if runtime is not None else None
             if (
                 "TYVRANA_TEST_RETOPO" in os.environ
