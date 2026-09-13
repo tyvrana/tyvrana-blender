@@ -228,3 +228,41 @@ def prepare_modifier_scene(kind: str) -> None:
     camera.data.ortho_scale = 4.8
     scene.cycles.samples = 16
     scene.cycles.seed = 0
+
+
+def prepare_sculpt_scene(kind: str) -> None:
+    """Fixed studio with a quad sphere and an optional localized surface bump."""
+    import math
+
+    prepare_scene()
+    scene = bpy.context.scene
+    obj = bpy.data.objects["RenderCube"]
+    obj.name = "Surface"
+    bpy.context.view_layer.objects.active = obj
+    mod = obj.modifiers.new("Base", "SUBSURF")
+    mod.levels = 3
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    for vertex in obj.data.vertices:
+        vertex.co.normalize()
+        if kind == "smooth" and vertex.co.y < 0:
+            vertex.co.y -= 0.25 * math.exp(
+                -((vertex.co.x - 0.2) ** 2 + (vertex.co.z - 0.2) ** 2) / 0.035
+            )
+    for face in obj.data.polygons:
+        face.use_smooth = True
+    obj.data.update()
+    camera = scene.camera
+    camera.location = (0, -6, 1.6)
+    camera.rotation_euler = (
+        (Vector((0, 0, 1)) - camera.location).to_track_quat("-Z", "Y").to_euler()
+    )
+    camera.data.type = "ORTHO"
+    camera.data.ortho_scale = 3.6
+    light = next(o for o in scene.objects if o.type == "LIGHT")
+    light.location = (-3, -4, 6)
+    light.rotation_euler = (
+        (Vector((0, 0, 1)) - light.location).to_track_quat("-Z", "Y").to_euler()
+    )
+    light.data.size = 1.5
+    scene.cycles.samples = 24
+    scene.cycles.seed = 0

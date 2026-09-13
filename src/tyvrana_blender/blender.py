@@ -16,7 +16,7 @@ from tyvrana_protocol import (
     OperationRequest,
 )
 
-from . import mesh, modifiers, shader, uv
+from . import mesh, modifiers, multires, raycast, sculpt, shader, uv
 from .artifacts import ArtifactSpool
 from .camera_models import (
     CameraConfigureArguments,
@@ -98,6 +98,19 @@ from .modifier_models import (
 )
 from .operations import OperationError, execute, registration
 from .raster import RasterError, raster_size
+from .sculpt_models import (
+    MultiresConfigureArguments,
+    MultiresCreateArguments,
+    MultiresInspectArguments,
+    MultiresSubdivideArguments,
+    MultiresSummary,
+    RaycastArguments,
+    RaycastResult,
+    SculptInspectArguments,
+    SculptStrokeArguments,
+    SculptStrokeResult,
+    SculptSummary,
+)
 from .shader_models import (
     ConnectArguments,
     DisconnectArguments,
@@ -501,6 +514,42 @@ def validate_color_space(name: str) -> None:
 class BlenderBackend:
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
+
+    def scene_raycast(self, arguments: RaycastArguments) -> RaycastResult:
+        main_thread()
+        return raycast.cast(arguments)
+
+    def multires_inspect(self, arguments: MultiresInspectArguments) -> MultiresSummary:
+        main_thread()
+        return multires.inspect(modifiers.object_mesh(arguments.object_name))
+
+    def multires_create(self, arguments: MultiresCreateArguments) -> MultiresSummary:
+        main_thread()
+        return multires.create(modifiers.object_mesh(arguments.object_name), arguments)
+
+    def multires_subdivide(
+        self, arguments: MultiresSubdivideArguments
+    ) -> MultiresSummary:
+        main_thread()
+        return multires.subdivide(
+            modifiers.object_mesh(arguments.object_name), arguments
+        )
+
+    def multires_configure(
+        self, arguments: MultiresConfigureArguments
+    ) -> MultiresSummary:
+        main_thread()
+        return multires.configure(
+            modifiers.object_mesh(arguments.object_name), arguments
+        )
+
+    def sculpt_inspect(self, arguments: SculptInspectArguments) -> SculptSummary:
+        main_thread()
+        return sculpt.inspect(modifiers.object_mesh(arguments.object_name))
+
+    def sculpt_stroke(self, arguments: SculptStrokeArguments) -> SculptStrokeResult:
+        main_thread()
+        return sculpt.stroke(modifiers.object_mesh(arguments.object_name), arguments)
 
     def modifier_inspect(
         self, arguments: ModifierInspectArguments

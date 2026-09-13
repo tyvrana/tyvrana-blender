@@ -45,6 +45,11 @@ if "TYVRANA_TEST_MODIFIER" in os.environ:
     importlib.import_module("tests.blender.scene").prepare_modifier_scene(
         os.environ["TYVRANA_TEST_MODIFIER"]
     )
+if "TYVRANA_TEST_SCULPT" in os.environ:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    importlib.import_module("tests.blender.scene").prepare_sculpt_scene(
+        os.environ["TYVRANA_TEST_SCULPT"]
+    )
 deadline = time.monotonic() + 180
 
 

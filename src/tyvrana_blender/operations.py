@@ -89,6 +89,22 @@ from .modifier_models import (
     ModifierRemoveResult,
     ModifierSummary,
 )
+from .sculpt_models import (
+    RAYCAST,
+    CameraRayArguments,
+    MultiresConfigureArguments,
+    MultiresCreateArguments,
+    MultiresInspectArguments,
+    MultiresSubdivideArguments,
+    MultiresSummary,
+    RaycastArguments,
+    RaycastResult,
+    SculptInspectArguments,
+    SculptStrokeArguments,
+    SculptStrokeResult,
+    SculptSummary,
+    WorldRayArguments,
+)
 from .shader_models import (
     ConnectArguments,
     DisconnectArguments,
@@ -146,11 +162,18 @@ OPERATIONS = (
     "blender.modifier.inspect",
     "blender.modifier.move",
     "blender.modifier.remove",
+    "blender.multires.configure",
+    "blender.multires.create",
+    "blender.multires.inspect",
+    "blender.multires.subdivide",
     "blender.object.create_primitive",
     "blender.object.delete",
     "blender.object.set_transform",
     "blender.render.image",
     "blender.scene.inspect",
+    "blender.scene.raycast",
+    "blender.sculpt.inspect",
+    "blender.sculpt.stroke",
     "blender.shader.connect",
     "blender.shader.disconnect",
     "blender.shader.inspect",
@@ -184,6 +207,22 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def scene_raycast(self, arguments: RaycastArguments) -> RaycastResult: ...
+    def multires_inspect(
+        self, arguments: MultiresInspectArguments
+    ) -> MultiresSummary: ...
+    def multires_create(
+        self, arguments: MultiresCreateArguments
+    ) -> MultiresSummary: ...
+    def multires_subdivide(
+        self, arguments: MultiresSubdivideArguments
+    ) -> MultiresSummary: ...
+    def multires_configure(
+        self, arguments: MultiresConfigureArguments
+    ) -> MultiresSummary: ...
+    def sculpt_inspect(self, arguments: SculptInspectArguments) -> SculptSummary: ...
+    def sculpt_stroke(self, arguments: SculptStrokeArguments) -> SculptStrokeResult: ...
+
     def modifier_inspect(
         self, arguments: ModifierInspectArguments
     ) -> ModifierInspectResult: ...
@@ -270,7 +309,14 @@ def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure
 def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         arguments: (
-            InspectArguments
+            RaycastArguments
+            | MultiresInspectArguments
+            | MultiresCreateArguments
+            | MultiresSubdivideArguments
+            | MultiresConfigureArguments
+            | SculptInspectArguments
+            | SculptStrokeArguments
+            | InspectArguments
             | CreateArguments
             | TransformArguments
             | DeleteArguments
@@ -307,6 +353,20 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.scene.raycast":
+                arguments = RAYCAST.validate_python(request.arguments)
+            case "blender.multires.inspect":
+                arguments = MultiresInspectArguments.model_validate(request.arguments)
+            case "blender.multires.create":
+                arguments = MultiresCreateArguments.model_validate(request.arguments)
+            case "blender.multires.subdivide":
+                arguments = MultiresSubdivideArguments.model_validate(request.arguments)
+            case "blender.multires.configure":
+                arguments = MultiresConfigureArguments.model_validate(request.arguments)
+            case "blender.sculpt.inspect":
+                arguments = SculptInspectArguments.model_validate(request.arguments)
+            case "blender.sculpt.stroke":
+                arguments = SculptStrokeArguments.model_validate(request.arguments)
             case "blender.modifier.create":
                 arguments = CREATE.validate_python(request.arguments)
             case "blender.modifier.configure":
@@ -432,7 +492,21 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
-        if isinstance(arguments, InspectArguments):
+        if isinstance(arguments, (WorldRayArguments, CameraRayArguments)):
+            result = backend.scene_raycast(arguments)
+        elif isinstance(arguments, MultiresCreateArguments):
+            result = backend.multires_create(arguments)
+        elif isinstance(arguments, MultiresSubdivideArguments):
+            result = backend.multires_subdivide(arguments)
+        elif isinstance(arguments, MultiresConfigureArguments):
+            result = backend.multires_configure(arguments)
+        elif isinstance(arguments, MultiresInspectArguments):
+            result = backend.multires_inspect(arguments)
+        elif isinstance(arguments, SculptStrokeArguments):
+            result = backend.sculpt_stroke(arguments)
+        elif isinstance(arguments, SculptInspectArguments):
+            result = backend.sculpt_inspect(arguments)
+        elif isinstance(arguments, InspectArguments):
             if request.operation == "blender.image.inspect":
                 result = backend.image_inspect()
             elif request.operation == "blender.material.inspect":

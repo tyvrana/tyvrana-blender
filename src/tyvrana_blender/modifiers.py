@@ -412,7 +412,15 @@ def budget(
         if not value(mod, patch, "show_render" if render else "show_viewport"):
             continue
         kind = patch.get("type", mod.type if mod is not None else None)
-        if kind == "SUBSURF":
+        if kind == "MULTIRES":
+            from .multires import budget as multires_budget
+
+            multires_budget(obj, int(mod.total_levels))
+            level = int(
+                mod.render_levels if render else max(mod.levels, mod.sculpt_levels)
+            )
+            size *= 2 * 4**level if level else 1
+        elif kind == "SUBSURF":
             level = value(mod, patch, "render_levels" if render else "levels")
             if level > MAX_SUBDIVISION_LEVEL or value(
                 mod, patch, "use_adaptive_subdivision"
@@ -642,6 +650,11 @@ def move(obj: Any, name: str, index: int) -> ModifierInspectResult:
         raise OperationError(
             "invalid_arguments", "index must be less than modifier_count"
         )
+    if any(m.type == "MULTIRES" for m in obj.modifiers):
+        raise OperationError(
+            "invalid_context",
+            "Multires stack order is protected by its dedicated workflow",
+        )
     previous = list(obj.modifiers).index(mod)
     if previous == index:
         return inspect(obj)
@@ -669,6 +682,11 @@ def move(obj: Any, name: str, index: int) -> ModifierInspectResult:
 def remove(obj: Any, name: str) -> ModifierRemoveResult:
     mutable(obj)
     mod = find(obj, name)
+    if mod.type == "MULTIRES":
+        raise OperationError(
+            "invalid_context",
+            "Removing Multires can destroy sculpt displacement and is not exposed",
+        )
     planned: list[tuple[Any, dict[str, Any]]] = [
         (m, {}) for m in obj.modifiers if m != mod
     ]
@@ -742,6 +760,11 @@ def inspect_evaluated(obj: Any) -> EvaluatedMeshSummary:
 
 def apply(obj: Any, name: str) -> ModifierApplyResult:
     mutable(obj)
+    if any(m.type == "MULTIRES" for m in obj.modifiers):
+        raise OperationError(
+            "invalid_context",
+            "Applying modifiers on a Multires mesh can destroy sculpt displacement",
+        )
     mod = find(obj, name)
     if mod.type not in SEMANTIC_TYPES:
         raise OperationError(

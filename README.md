@@ -12,8 +12,9 @@ the minimum-version guard but require native and end-to-end testing before they
 are declared validated. One current adapter implementation serves supported hosts.
 
 The extension provides objects, cameras, lights, materials, generated and imported
-packed images, shader graphs, semantic mesh modeling, whole-mesh UV controls, and PNG scene renders
-delivered as MCP images.
+packed images, shader graphs, semantic mesh modeling, whole-mesh UV controls,
+modifier stacks, Multires sculpting, evaluated surface picking, and PNG scene
+renders delivered as MCP images.
 
 ## Install and connect
 
@@ -62,6 +63,13 @@ Names are exact and are advertised in sorted order:
 | Operation | Arguments | Result |
 | --- | --- | --- |
 | `blender.scene.inspect` | `{}` | Scene summary |
+| `blender.scene.raycast` | World origin/direction or normalized camera image coordinates | Evaluated surface hit or miss |
+| `blender.multires.inspect` | Object name | Base topology, levels and diagnostics |
+| `blender.multires.create` | Object name; optional modifier name | Created zero-level Multires state |
+| `blender.multires.subdivide` | Object name; optional level count/mode | Increased Multires levels |
+| `blender.multires.configure` | Object name; partial existing display/sculpt/render levels | Updated Multires state |
+| `blender.sculpt.inspect` | Object name | Sculpt context, resolution and scale summary |
+| `blender.sculpt.stroke` | Object, brush, local surface samples, radius, strength | Native sculpt result with snapped targets and bounds |
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
@@ -1237,7 +1245,8 @@ Creation appends to the stack. `blender.modifier.move` takes
 the **final** position and must be less than the stack size. Moving to the current
 index succeeds without a change. Order can materially change evaluated geometry.
 Creation and reordering reject pinned-last stacks rather than silently unpinning
-or accepting a different order. Explicit move/remove can address unsupported
+or accepting a different order. Except for protected Multires stacks, explicit
+move/remove can address unsupported
 native modifiers while preserving other entries and unexposed settings.
 
 `blender.modifier.remove` takes object and modifier names and returns
@@ -1332,6 +1341,261 @@ The contract follows the official [modifier workflow](https://docs.blender.org/m
 [dependency graph API](https://docs.blender.org/api/5.2/bpy.types.Depsgraph.html),
 [5.2.1 modifier RNA](https://github.com/blender/blender/blob/v5.2.1/source/blender/makesrna/intern/rna_modifier.cc)
 and [native application implementation](https://github.com/blender/blender/blob/v5.2.1/source/blender/editors/object/object_modifier.cc).
+
+## Surface picking
+
+`blender.scene.raycast` casts against the **current evaluated viewport scene**.
+It supports two disjoint argument shapes:
+
+```json
+{"mode": "world", "origin": [0, 0, 5], "direction": [0, 0, -1], "max_distance": 100}
+```
+
+```json
+{"mode": "camera", "u": 0.5, "v": 0.5, "width": 512, "height": 512}
+```
+
+World origins/directions are in world coordinates. Direction must be nonzero and
+is normalized internally; `max_distance` is a positive distance in Blender units,
+not a multiple of the supplied direction. Its default is 1,000,000.
+
+Camera mode uses normalized **uncropped image** coordinates: `u=0` is left,
+`u=1` is right, `v=0` is top and `v=1` is bottom. Both coordinates are in `[0,1]`.
+Optional `camera_name` selects a scene camera; omission uses the active camera.
+Optional `width` and `height` must be supplied together (1–65,536 each); omission
+uses the scene's render dimensions. **When picking from `blender.render.image`,
+pass that render's width and height**, because rendering temporarily overrides
+scene dimensions and then restores them. Pixel aspect remains scene state.
+
+Blender's evaluated camera projection matrix supplies perspective/orthographic
+projection, lens, sensor fit/size, image aspect and lens shift. The evaluated
+camera transform supplies its position/orientation. Camera scale does not change
+optics. Rays honor near/far clipping. For perspective rays, distance is measured
+from the camera origin; for orthographic rays, from the corresponding point on
+the camera's local `z=0` plane. `max_distance` further limits either ray.
+Panoramic/custom projections return `unsupported_projection`; a missing active
+camera returns `no_camera`. World mode does not require a camera.
+
+The result is:
+
+```text
+{
+  hit,
+  object_name, object_type,
+  location_world, normal_world,
+  location_object, normal_object,
+  distance,
+  evaluated_face_index
+}
+```
+
+A miss is normal: `hit=false` and every other field is `null`. Hit locations are
+finite vectors; both normals are normalized. Object-local conversion uses the
+actual hit transform, including instances and nonuniform scale. Names identify
+the original scene object. **`evaluated_face_index` is inspection-only, may be
+null, and must never be passed to an authored-mesh selector.** It is not a stable
+face identifier. A hit does not change selection or the active camera.
+
+This is a geometric surface pick, not image segmentation: alpha transparency,
+compositor image warps, depth of field and render-only visibility/detail can make
+a rendered pixel differ from the viewport's first geometric intersection. Match
+viewport/render detail and visibility for visual targeting, use an unwarped image,
+and inspect the returned object before sculpting. Picking supports Object/Sculpt
+Mode outside rendering and bounds visible Mesh evaluation with the existing
+geometry policy and a 256-object view-layer limit.
+
+## Multiresolution
+
+Multires is dedicated sculpt-displacement state, managed only through:
+
+| Operation | Arguments | Result |
+| --- | --- | --- |
+| `blender.multires.inspect` | `object_name` | `MultiresSummary` |
+| `blender.multires.create` | `object_name`; optional `name` | `MultiresSummary` |
+| `blender.multires.subdivide` | `object_name`; optional `modifier_name`, `levels`, `mode` | `MultiresSummary` |
+| `blender.multires.configure` | `object_name`; optional `modifier_name`, `viewport_level`, `sculpt_level`, `render_level` | `MultiresSummary` |
+
+Inspection returns:
+
+```text
+{
+  object_name, present, modifier_name,
+  total_levels, viewport_level, sculpt_level, render_level,
+  base_mesh: {
+    vertex_count, edge_count, face_count,
+    quad_face_count, non_quad_face_count, non_manifold_edge_count
+  },
+  diagnostics: [{code, severity, message}]
+}
+```
+
+Without Multires, `present=false` and the modifier/level fields are null. Base
+counts remain available. Diagnostics distinguish `warning` from `blocker` and
+report non-quads, boundary/non-manifold edges, shape keys, unapplied scale,
+other modifiers and stored levels beyond the safety policy. Inspection does not
+reject a mesh merely for imperfect topology. Ambiguous multiple Multires
+modifiers are outside this single-modifier workflow.
+
+Creation adds one modifier with zero subdivision levels. The initial dedicated
+workflow requires an otherwise empty stack: explicitly resolve any existing
+Mirror, Subdivision Surface or other modifier before creating Multires. It never
+applies, removes or reorders another modifier automatically. This conservative
+contract is narrower than every stack Blender can represent and avoids sculpt
+coordinates whose relation to the authored cage requires deformation mapping.
+
+Subdivision adds `levels` levels, default one. Supported modes are
+`catmull_clark` (default; smooth subdivision), `simple` (unsmoothed base edges),
+and `linear` (linear interpolation of existing sculpt displacement). There are
+at most **six total levels**, and a conservative growth estimate must also fit
+the existing **2,000,000 vertices + edges + faces + corners** work bound. Sculpt
+grid allocation is checked separately. A small maximum level is not permission
+to subdivide an already large mesh. Empty/degenerate faces and edges shared by
+more than two faces are rejected; ordinary triangles and open boundaries are
+permitted with diagnostics.
+
+Configuration only switches existing levels: each supplied level is between
+zero and `total_levels`. It validates the complete patch before writing and
+preserves omitted fields. It does not subdivide or delete higher detail. Edits
+require Object Mode and local editable, unanimated object/Mesh data. Shape keys,
+authored custom normals, external displacement files and Sculpt Base Mesh mode
+require separate workflows and are protected.
+
+Prefer clean production quads, sensible pole placement and manifold surfaces
+where appropriate. Sculpt broad forms at low levels, add finer detail at higher
+levels, and switch levels to inspect or refine the form. The base topology
+remains authored Mesh data; higher detail lives in native Multires displacement.
+Subdivision isolates a Mesh shared by other objects before native displacement
+writes. Native UV maps, material slots/indices, seams, float attributes and
+vertex-group weights are preserved in the supported tests. Level switching and
+higher-level strokes preserve the authored topology and its coordinates.
+
+Multires remains visible as `type: "multires", supported: false` in generic
+modifier inspection, with settings managed by these dedicated operations.
+Generic Multires removal, any reordering of a Multires stack, and modifier
+application on a Multires object are blocked. Existing direct mesh topology and
+coordinate edits remain blocked by their modifier guard. Never rebuild topology
+underneath sculpted detail. Delete-higher-level, reshape, apply-base, baking and
+Multires removal are deliberately not exposed yet.
+
+Native subdivision is not a persistent transaction: an unexpected failure may
+leave successfully added levels in place. `multires_failed` reports whether
+mutation was possible; reinspect before retrying. User-authored displacement is
+never deliberately discarded as a recovery shortcut.
+
+## Controlled sculpt strokes
+
+`blender.sculpt.inspect` takes `object_name` and returns:
+
+```text
+{
+  object_name, object_mode, object_scale, scale_applied,
+  multires: MultiresSummary,
+  effective_sculpt_level, sculpt_vertex_count,
+  symmetry: {x, y, z}, view3d_available,
+  mask_present, hidden_geometry
+}
+```
+
+`sculpt_vertex_count` counts native grid points at a Multires sculpt level,
+including duplicated grid boundaries; otherwise it counts base vertices. It is
+not the unique evaluated Mesh vertex count. `mask_present` and `hidden_geometry`
+inspect authored mask/visibility state only; they do not claim to summarize
+private higher-level grid masks or hidden grid points.
+
+`blender.sculpt.stroke` takes:
+
+```json
+{
+  "object_name": "Surface",
+  "brush": "draw",
+  "samples": [{"location": [0, 0, 1], "pressure": 1}],
+  "radius": 0.2,
+  "strength": 0.4,
+  "invert": false,
+  "symmetry": {"x": false, "y": false, "z": false}
+}
+```
+
+Required fields are `object_name`, `brush`, `samples`, `radius`, and `strength`.
+There are 1–256 samples. Every location is **object-local**, normally taken from
+`scene.raycast.location_object`. Before execution, all samples are snapped to
+the nearest surface at the sculpt level only when the distance is no greater
+than `radius`; an out-of-range sample rejects the whole request before a brush
+runs. The result reports the actual snapped locations and maximum snap distance.
+It does not expose evaluated vertex IDs or guessed affected-vertex counts.
+
+Radius is in Blender object units, not viewport pixels. Unit local and inherited
+scale (tolerance `1e-5`, without shear/reflection) is required so these are also
+world Blender units. Unapplied scale returns `sculpt_unapplied_scale`; transforms
+are never automatically applied. Radius is 0.0005–1,000,000, matching Blender's
+minimum 0.001-unit brush **diameter**. Scene Simplify must be disabled for Multires
+strokes so Object Mode sampling and Sculpt Mode detail agree.
+
+Strength is Blender's `[0,1]` brush strength. Pressure defaults to one, is in
+`[0,1]`, and uses the native Essentials strength-pressure response; radius pressure
+is disabled. Zero strength/pressure can produce `changed=false`. The adapter uses
+explicit native dabs: it does not interpolate extra samples or reinterpret brush
+spacing as a distance along the path. Supply an appropriately sampled path;
+repeated locations build repeated dabs for brushes supporting stationary input.
+Work is bounded to 64 million sculpt-point × sample × mirror-pass combinations.
+
+| Brush | Essentials asset | Behavior |
+| --- | --- | --- |
+| `draw` | Draw | Add volume along the sampled surface normal |
+| `smooth` | Smooth | Average local geometry to reduce surface irregularity |
+| `inflate` | Inflate/Deflate | Expand along local vertex normals |
+| `clay` | Clay | Build local volume toward the brush plane |
+| `crease` | Crease Polish | Cut and pinch a groove |
+| `flatten` | Flatten/Contrast | Move the surface toward an averaged plane |
+
+`invert=true` uses the native inverse behavior, including subtract/deflate,
+Smooth's detail enhancement and Flatten's increased contrast. **Flatten requires
+a moving path with distinct surface locations and tangential motion**; stationary
+dabs cannot initialize its Plane behavior. The adapter derives its viewport
+motion from those 3D samples, with the initial view aligned to the first sampled
+surface normal. No public mouse-event dictionaries or arbitrary pixel radii are
+used. Draw Sharp/Pinch remain outside this initial validated set. Grab and Clay
+Strips need deliberate drag/directional contracts; Snake Hook, Pose, cloth and
+paint brushes are not exposed.
+
+Symmetry uses local mesh X/Y/Z axes. Omission deterministically disables all three
+for that stroke; a partial symmetry object defaults omitted axes to false. Native
+symmetry feathering is enabled, radial repetition and tiling are disabled, and
+prior mesh symmetry is restored afterward. Existing masks and hidden geometry
+are respected; automatic masking, gravity and axis locks do not silently alter
+the requested stroke. Full mask/Face Set editing is a later regional-control layer.
+
+Actual strokes require a normal interactive Blender window with a View3D region.
+Background strokes return `invalid_context`; raycasting, Multires management and
+inspection remain usable headlessly. The target must be a visible, selectable,
+local single-user Mesh, in Object Mode or already the active Sculpt Mode object.
+Finish other editing modes first. Other modifiers, animation, constraints,
+shape keys, authored custom normals and Dyntopo are protected. Multires strokes
+require enabled internal displacement at a positive sculpt level, with Sculpt
+Base Mesh disabled. Ordinary meshes without Multires can also be sculpted.
+
+The adapter temporarily uses a fresh local Essentials brush, an isolated scene
+for paint settings, and a deterministic View3D orientation. The actual object and
+Mesh are sculpted by `bpy.ops.sculpt.brush_stroke`; no direct vertex deformation
+stands in for sculpting. It restores the original scene, active object, selection,
+mode, viewport, brush/tool state and mesh symmetry. A private temporary library
+copy avoids Blender reusing an already linked, possibly modified brush. Temporary
+brush data/library files are removed. No asset library, startup preference or
+workspace configuration is saved.
+
+The result includes `object_name`, `brush`, `sample_count`, `radius`, `strength`,
+`invert`, `symmetry`, `multires_level`, `snapped_locations`, `max_snap_distance`,
+`bounds_before_min/max`, `bounds_after_min/max`, and `changed`. Bounds and change
+detection compare evaluated local geometry at the sculpt level, independently of
+the restored viewport display level.
+
+**A native sculpt stroke is not transactional.** All inputs, resource limits and
+surface samples are checked first, and UI restoration runs in `finally`. If an
+unexpected error occurs during or after native execution, `sculpt_failed` reports
+`mutation_possible: true`; inspect the geometry before retrying. This is not a
+claim of rollback or a replacement for future undo/history support. Dyntopo,
+voxel remeshing and retopology have different destructive topology/data semantics
+and are not part of this layer.
 
 ## Cameras
 
@@ -1696,3 +1960,11 @@ float32 limits, coherent partial updates, failure rollback, shared and linked
 camera data, active selection, and camera deletion. Real background and UI MCP
 tests compare decoded PNG subject bounds at different focal lengths, switch
 active viewpoints, and verify orthographic configuration changes the render.
+
+Sculpt tests exercise all six native brushes in real UI mode, scene-unit radius,
+pressure/inversion, per-stroke symmetry, mask preservation, user brush/tool/mode
+restoration, failure reporting and Multires detail persistence across levels.
+Raycast tests cover camera projection, shifts, aspect ratio, evaluated geometry,
+clipping, world/local normals and misses. MCP tests render, pick a visible surface,
+perform a native Multires stroke and rerender while checking unchanged authored
+geometry, object transforms, cameras, lights and materials.

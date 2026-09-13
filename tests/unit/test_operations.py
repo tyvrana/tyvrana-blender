@@ -78,6 +78,21 @@ from tyvrana_blender.modifier_models import (
     ModifierSummary,
 )
 from tyvrana_blender.operations import OperationError, execute
+from tyvrana_blender.sculpt_models import (
+    BaseTopology,
+    MultiresConfigureArguments,
+    MultiresCreateArguments,
+    MultiresInspectArguments,
+    MultiresSubdivideArguments,
+    MultiresSummary,
+    RaycastArguments,
+    RaycastResult,
+    SculptInspectArguments,
+    SculptStrokeArguments,
+    SculptStrokeResult,
+    SculptSummary,
+    Symmetry,
+)
 from tyvrana_blender.shader_models import (
     ConnectArguments,
     DisconnectArguments,
@@ -104,6 +119,85 @@ from tyvrana_blender.uv_models import (
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def scene_raycast(self, arguments: RaycastArguments) -> RaycastResult:
+        self.calls.append("scene_raycast")
+        return RaycastResult(hit=False)
+
+    def multires_inspect(self, arguments: MultiresInspectArguments) -> MultiresSummary:
+        self.calls.append("multires_inspect")
+        return MultiresSummary(
+            object_name=arguments.object_name,
+            present=False,
+            modifier_name=None,
+            total_levels=None,
+            viewport_level=None,
+            sculpt_level=None,
+            render_level=None,
+            base_mesh=BaseTopology(
+                vertex_count=8,
+                edge_count=12,
+                face_count=6,
+                quad_face_count=6,
+                non_quad_face_count=0,
+                non_manifold_edge_count=0,
+            ),
+            diagnostics=[],
+        )
+
+    def multires_create(self, arguments: MultiresCreateArguments) -> MultiresSummary:
+        self.calls.append("multires_create")
+        return self.multires_inspect(arguments)
+
+    def multires_subdivide(
+        self, arguments: MultiresSubdivideArguments
+    ) -> MultiresSummary:
+        self.calls.append("multires_subdivide")
+        return self.multires_inspect(arguments)
+
+    def multires_configure(
+        self, arguments: MultiresConfigureArguments
+    ) -> MultiresSummary:
+        self.calls.append("multires_configure")
+        return self.multires_inspect(arguments)
+
+    def sculpt_inspect(self, arguments: SculptInspectArguments) -> SculptSummary:
+        self.calls.append("sculpt_inspect")
+        return SculptSummary(
+            object_name=arguments.object_name,
+            object_mode="object",
+            object_scale=[1, 1, 1],
+            scale_applied=True,
+            multires=self.multires_inspect(
+                MultiresInspectArguments(object_name=arguments.object_name)
+            ),
+            effective_sculpt_level=0,
+            sculpt_vertex_count=8,
+            symmetry=Symmetry(),
+            view3d_available=False,
+            mask_present=False,
+            hidden_geometry=False,
+        )
+
+    def sculpt_stroke(self, arguments: SculptStrokeArguments) -> SculptStrokeResult:
+        self.calls.append("sculpt_stroke")
+        return SculptStrokeResult(
+            object_name=arguments.object_name,
+            brush=arguments.brush,
+            sample_count=len(arguments.samples),
+            radius=arguments.radius,
+            strength=arguments.strength,
+            invert=arguments.invert,
+            symmetry=arguments.symmetry,
+            multires_level=0,
+            snapped_locations=[s.location for s in arguments.samples],
+            max_snap_distance=0,
+            bounds_before_min=[-1, -1, -1],
+            bounds_before_max=[1, 1, 1],
+            bounds_after_min=[-1, -1, -1],
+            bounds_after_max=[1, 1, 1],
+            changed=False,
+        )
 
     def modifier_inspect(
         self, arguments: ModifierInspectArguments

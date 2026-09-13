@@ -1,0 +1,182 @@
+"""Public sculpt contracts reject ambiguous, unbounded and coercible input."""
+
+from typing import Any
+
+import pytest
+from tyvrana_protocol import OperationFailure, OperationRequest, OperationSuccess
+
+from tyvrana_blender.operations import OPERATIONS, execute
+from tyvrana_blender.sculpt_models import (
+    RAYCAST,
+    CameraRayArguments,
+    SculptStrokeArguments,
+    WorldRayArguments,
+)
+
+from .test_operations import Backend
+
+VALID: dict[str, dict[str, Any]] = {
+    "scene.raycast": {"mode": "camera", "u": 0.5, "v": 0.5},
+    "multires.inspect": {"object_name": "Surface"},
+    "multires.create": {"object_name": "Surface"},
+    "multires.subdivide": {"object_name": "Surface", "levels": 2},
+    "multires.configure": {"object_name": "Surface", "sculpt_level": 1},
+    "sculpt.inspect": {"object_name": "Surface"},
+    "sculpt.stroke": {
+        "object_name": "Surface",
+        "brush": "draw",
+        "samples": [{"location": [0, 0, 1]}],
+        "radius": 0.3,
+        "strength": 0.5,
+    },
+}
+
+
+def response(operation: str, arguments: dict[str, Any], backend: Backend) -> Any:
+    return execute(
+        backend,
+        OperationRequest.model_construct(
+            type="operation.request",
+            request_id="sculpt",
+            operation="blender." + operation,
+            arguments=arguments,
+        ),
+    )
+
+
+@pytest.mark.parametrize("operation", VALID)
+def test_dispatch_reaches_exact_typed_backend(operation: str) -> None:
+    backend = Backend()
+    result = response(operation, VALID[operation], backend)
+    assert isinstance(result, OperationSuccess), result
+    assert backend.calls[0] == operation.replace(".", "_")
+    assert "blender." + operation in OPERATIONS
+    assert tuple(sorted(OPERATIONS)) == OPERATIONS
+
+
+@pytest.mark.parametrize("operation", VALID)
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"unexpected": 1},
+        {"object_name": None},
+        {"object_name": "bad\x00name"},
+        {"object_name": "\ud800"},
+        {"object_name": " "},
+    ],
+)
+def test_invalid_fields_never_reach_backend(
+    operation: str, patch: dict[str, Any]
+) -> None:
+    backend = Backend()
+    result = response(operation, {**VALID[operation], **patch}, backend)
+    assert isinstance(result, OperationFailure)
+    assert result.error.code == "invalid_arguments"
+    assert not backend.calls
+
+
+@pytest.mark.parametrize("field", ["u", "v"])
+@pytest.mark.parametrize(
+    "value", [-0.1, 1.1, True, "0.5", None, float("nan"), float("inf")]
+)
+def test_camera_coordinate_validation(field: str, value: object) -> None:
+    with pytest.raises(ValueError):
+        RAYCAST.validate_python({"mode": "camera", "u": 0.5, "v": 0.5, field: value})
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"direction": [0, 0, 0]},
+        {"direction": [True, 0, 1]},
+        {"origin": [0, 0]},
+        {"max_distance": 0},
+        {"max_distance": float("inf")},
+        {"camera_name": "Camera"},
+    ],
+)
+def test_world_ray_invalid_values(patch: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        RAYCAST.validate_python(
+            {"mode": "world", "origin": [0, 0, 0], "direction": [0, 0, -1], **patch}
+        )
+
+
+def test_dimensions_pair_and_unscaled_direction() -> None:
+    with pytest.raises(ValueError):
+        CameraRayArguments(mode="camera", u=0.5, v=0.5, width=512)
+    assert WorldRayArguments(
+        mode="world", origin=[0, 0, 0], direction=[0, 0, -20]
+    ).direction == [0, 0, -20]
+
+
+@pytest.mark.parametrize(
+    "operation,field",
+    [
+        ("multires.subdivide", "levels"),
+        ("multires.configure", "viewport_level"),
+        ("multires.configure", "sculpt_level"),
+        ("multires.configure", "render_level"),
+    ],
+)
+@pytest.mark.parametrize("value", [-1, 7, 1000000, 1.2, "2", True, None])
+def test_level_bounds_before_host_access(
+    operation: str, field: str, value: Any
+) -> None:
+    backend = Backend()
+    result = response(operation, {**VALID[operation], field: value}, backend)
+    assert isinstance(result, OperationFailure)
+    assert not backend.calls
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"brush": "flatten"},
+        {"brush": "grab"},
+        {"brush": "snake_hook"},
+        {"brush": "pose"},
+        {"brush": "paint"},
+        {"radius": 0},
+        {"radius": 0.0001},
+        {"radius": 1e20},
+        {"radius": True},
+        {"radius": "1"},
+        {"strength": -1},
+        {"strength": 1.01},
+        {"strength": "0.5"},
+        {"strength": True},
+        {"invert": 1},
+        {"symmetry": {"x": 1}},
+        {"samples": []},
+        {"samples": [{"location": [0, 0, 0]}] * 257},
+        *[
+            {"samples": [{"location": [0, 0, 0], "pressure": v}]}
+            for v in [-0.1, 1.1, True, "1", None, float("nan")]
+        ],
+        {"samples": [{"location": [float("inf"), 0, 0]}]},
+        {"samples": [{"location": [0, 0, 0], "mouse": [0, 0]}]},
+    ],
+)
+def test_stroke_validation(patch: dict[str, Any]) -> None:
+    backend = Backend()
+    result = response("sculpt.stroke", {**VALID["sculpt.stroke"], **patch}, backend)
+    assert isinstance(result, OperationFailure)
+    assert result.error.code == "invalid_arguments"
+    assert not backend.calls
+
+
+@pytest.mark.parametrize(
+    "brush", ["draw", "smooth", "inflate", "clay", "crease", "flatten"]
+)
+def test_six_brushes_deterministic_defaults(brush: str) -> None:
+    args = SculptStrokeArguments.model_validate(
+        {
+            **VALID["sculpt.stroke"],
+            "brush": brush,
+            "samples": [{"location": [0, 0, 1]}, {"location": [0.1, 0, 1]}],
+        }
+    )
+    assert args.symmetry.model_dump() == {"x": False, "y": False, "z": False}
+    assert args.samples[0].pressure == 1
+    assert not args.invert
