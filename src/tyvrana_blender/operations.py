@@ -56,6 +56,7 @@ from .mesh_models import (
     MeshQueryResult,
     MeshSeamArguments,
     MeshSelectionArguments,
+    MeshShadingArguments,
     MeshSubdivideArguments,
     MeshSummary,
     MeshTransformArguments,
@@ -196,6 +197,7 @@ OPERATIONS = (
     "blender.mesh.merge_vertices",
     "blender.mesh.query",
     "blender.mesh.recalculate_normals",
+    "blender.mesh.set_shading",
     "blender.mesh.subdivide_edges",
     "blender.mesh.transform",
     "blender.modifier.apply",
@@ -572,6 +574,8 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 arguments = MeshMergeArguments.model_validate(request.arguments)
             case "blender.mesh.mark_seam":
                 arguments = MeshSeamArguments.model_validate(request.arguments)
+            case "blender.mesh.set_shading":
+                arguments = MeshShadingArguments.model_validate(request.arguments)
             case "blender.mesh.recalculate_normals":
                 arguments = MeshNormalsArguments.model_validate(request.arguments)
             case "blender.uv.inspect":

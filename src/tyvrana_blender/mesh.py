@@ -32,6 +32,7 @@ from .mesh_models import (
     MeshQueryResult,
     MeshSeamArguments,
     MeshSelectionArguments,
+    MeshShadingArguments,
     MeshSubdivideArguments,
     MeshSummary,
     MeshTransformArguments,
@@ -177,6 +178,7 @@ def query(obj: Any, arguments: MeshQueryArguments) -> MeshQueryResult:
                                 normal=list(element.normal),
                                 area=float(element.calc_area()),
                                 material_index=element.material_index,
+                                smooth=bool(element.smooth),
                             )
                         )
         except SelectionError as exc:
@@ -360,6 +362,7 @@ def edit(
         region: list[Any] | None = None
         transformed: int | None = None
         changed_edges: int | None = None
+        changed_faces: int | None = None
         size = work_size(bm)
         candidate = None
         try:
@@ -463,6 +466,12 @@ def edit(
                 changed_edges = sum(edge.seam != arguments.seam for edge in selected)
                 for edge in selected:
                     edge.seam = arguments.seam
+            elif isinstance(arguments, MeshShadingArguments):
+                changed_faces = sum(
+                    face.smooth != arguments.smooth for face in selected
+                )
+                for face in selected:
+                    face.smooth = arguments.smooth
             else:
                 assert isinstance(arguments, MeshNormalsArguments)
                 bmesh.ops.recalc_face_normals(bm, faces=selected)
@@ -553,6 +562,7 @@ def edit(
                 region_faces=region_result,
                 transformed_vertices=transformed,
                 changed_edges=changed_edges,
+                changed_faces=changed_faces,
             )
             # All operations and result validation finish before the single object
             # data-pointer commit. Other users retain the original datablock.

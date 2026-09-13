@@ -204,6 +204,10 @@ class MeshSeamArguments(EdgeArguments):
     seam: bool
 
 
+class MeshShadingArguments(FaceArguments):
+    smooth: bool
+
+
 class MeshNormalsArguments(MeshInspectArguments):
     inside: bool = False
 
@@ -255,6 +259,7 @@ class FaceDetail(Model):
     normal: Vector
     area: Float32
     material_index: int
+    smooth: bool
 
 
 class QueryBase(Model):
@@ -311,3 +316,4 @@ class MeshEditResult(Model):
         default=None, exclude_if=lambda v: v is None
     )
     changed_edges: int | None = Field(default=None, exclude_if=lambda v: v is None)
+    changed_faces: int | None = Field(default=None, exclude_if=lambda v: v is None)

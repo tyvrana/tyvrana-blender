@@ -27,6 +27,7 @@ from tyvrana_blender.mesh_models import (
     MeshQueryArguments,
     MeshQueryResult,
     MeshSeamArguments,
+    MeshShadingArguments,
     MeshSubdivideArguments,
     MeshSummary,
     MeshTransformArguments,
@@ -123,6 +124,18 @@ CASES = [
     ),
     (MeshSeamArguments, "mark_seam", {"selector": EDGE, "seam": True}, "mesh_edit"),
     (MeshNormalsArguments, "recalculate_normals", {"inside": True}, "mesh_edit"),
+    (
+        MeshShadingArguments,
+        "set_shading",
+        {"selector": FACE, "smooth": True},
+        "mesh_edit",
+    ),
+    (
+        MeshShadingArguments,
+        "set_shading",
+        {"selector": FACE, "smooth": False},
+        "mesh_edit",
+    ),
 ]
 
 
@@ -216,6 +229,12 @@ def test_argument_contracts_and_registered_dispatch(
     "model,data",
     [
         (MeshTransformArguments, {"selector": VERTEX}),
+        (MeshShadingArguments, {"selector": EDGE, "smooth": True}),
+        (MeshShadingArguments, {"selector": FACE}),
+        *[
+            (MeshShadingArguments, {"selector": FACE, "smooth": value})
+            for value in [0, 1, "true"]
+        ],
         (
             MeshTransformArguments,
             {"selector": VERTEX, "translation": [0, 0, 1], "pivot": "cursor"},
@@ -383,6 +402,7 @@ def test_summary_and_query_serialization() -> None:
                     normal=[0, 0, 1],
                     area=0.5,
                     material_index=0,
+                    smooth=False,
                 )
             ],
         ),

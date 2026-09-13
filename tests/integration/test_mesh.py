@@ -23,7 +23,7 @@ def test_native_mesh_operations_safety_and_seam_unwrap(
     )
     (tmp_path / "mesh-native.log").write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_MESH_TESTS_PASSED 40" in result.stdout
+    assert "BLENDER_MESH_TESTS_PASSED 42" in result.stdout
     assert "Traceback" not in result.stdout + result.stderr
     assert "Warning:" not in result.stdout + result.stderr
     assert "WARNING" not in result.stdout + result.stderr

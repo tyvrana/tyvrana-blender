@@ -34,6 +34,7 @@ MUTATIONS: list[tuple[str, dict[str, Any]]] = [
     ),
     ("mark_seam", {"selector": ALL_EDGES, "seam": True}),
     ("recalculate_normals", {}),
+    ("set_shading", {"selector": ALL_FACES, "smooth": True}),
 ]
 
 
@@ -589,6 +590,62 @@ class MeshTests(unittest.TestCase):
             self.assertEqual(discontinuities(), 12)
             self.assertEqual(connected, 7)
             self.assertTrue(all(e.use_seam for e in self.obj.data.edges))
+
+    def test_face_shading_preserves_geometry_data_and_shared_sibling(self) -> None:
+        original = self.obj.data
+        original.edges[0].use_edge_sharp = True
+        original.edges[1].use_seam = True
+        original.polygons[0].select = False
+        original.polygons[0].hide = True
+        attr = original.attributes.new("Region", "INT", "FACE")
+        for i, item in enumerate(attr.data):
+            item.value = i + 4
+        material = bpy.data.materials.new("Override")
+        original.materials.append(material)
+        self.obj.material_slots[0].link = "OBJECT"
+        self.obj.material_slots[0].material = material
+        sibling = bpy.data.objects.new("Sibling", original)
+        bpy.context.collection.objects.link(sibling)
+        before = state(original)
+        top = next(f.index for f in original.polygons if f.normal.z > 0.99)
+        result = self.call("set_shading", selector=TOP, smooth=True)
+        self.assertEqual(result["changed_faces"], 1)
+        self.assertEqual(result["created"], dict(vertices=0, edges=0, faces=0))
+        self.assertEqual(result["removed"], dict(vertices=0, edges=0, faces=0))
+        self.assertEqual(state(sibling.data), before)
+        after = state(self.obj.data)
+        self.assertEqual(after[:2], before[:2])
+        self.assertEqual(after[3:5], before[3:5])
+        self.assertEqual(
+            [item.value for item in self.obj.data.attributes["Region"].data],
+            list(range(4, 10)),
+        )
+        self.assertEqual(self.obj.material_slots[0].link, "OBJECT")
+        self.assertEqual(self.obj.material_slots[0].material, material)
+        for i, (old, new) in enumerate(zip(before[2], after[2], strict=True)):
+            self.assertEqual(new, (*old[:2], i == top, *old[3:]))
+        queried = self.call("query", selector=ALL_FACES)["elements"]
+        self.assertEqual([f["smooth"] for f in queried], [i == top for i in range(6)])
+        self.assertEqual(
+            self.call("set_shading", selector=TOP, smooth=True)["changed_faces"], 0
+        )
+        self.assertEqual(
+            self.call("set_shading", selector=ALL_FACES, smooth=False)["changed_faces"],
+            1,
+        )
+        self.assertEqual(state(self.obj.data)[:5], before[:5])
+
+    def test_shading_result_failure_is_atomic(self) -> None:
+        original = self.obj.data
+        before = state(original)
+        mesh_count = len(bpy.data.meshes)
+        with patch.object(mesh_api, "MeshEditResult", side_effect=ValueError("result")):
+            self.error(
+                "set_shading", "operation_failed", selector=ALL_FACES, smooth=True
+            )
+        self.assertEqual(self.obj.data, original)
+        self.assertEqual(state(original), before)
+        self.assertEqual(len(bpy.data.meshes), mesh_count)
 
     def test_normals_repair_consistency_and_inside_orientation(self) -> None:
         with mesh_api.snapshot(self.obj) as bm:

@@ -16,7 +16,7 @@ from .test_e2e import core_client, discover, operation
 
 @pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
 @pytest.mark.parametrize(
-    "edit", ["extrude", "bevel", "inset_extrude", "regional_transform"]
+    "edit", ["extrude", "bevel", "inset_extrude", "regional_transform", "shading"]
 )
 async def test_modeling_changes_real_render_over_mcp(
     profile: dict[str, str], tmp_path: Path, ui: bool, edit: str
@@ -60,6 +60,9 @@ async def test_modeling_changes_real_render_over_mcp(
                     1,
                 ]
                 before = await render(client, identifier)
+                vertices = await mesh(
+                    "query", selector={"domain": "vertex", "mode": "all"}
+                )
                 top: JsonValue = {
                     "domain": "face",
                     "mode": "normal",
@@ -96,6 +99,14 @@ async def test_modeling_changes_real_render_over_mcp(
                         "extrude_faces", selector=inner, offset=[0, 0, 0.8]
                     )
                     expected = (16, 28, 14)
+                elif edit == "shading":
+                    result = await mesh(
+                        "set_shading",
+                        selector={"domain": "face", "mode": "all"},
+                        smooth=True,
+                    )
+                    expected = (8, 12, 6)
+                    assert MeshEditResult.model_validate(result).changed_faces == 6
                 else:
                     result = await mesh(
                         "transform",
@@ -129,9 +140,31 @@ async def test_modeling_changes_real_render_over_mcp(
                     assert (
                         current.bounds_max is not None and current.bounds_max[2] > 1.7
                     )
-                elif edit == "bevel":
+                elif edit in {"bevel", "shading"}:
                     assert current.bounds_min == original.bounds_min
                     assert current.bounds_max == original.bounds_max
+                    if edit == "shading":
+                        # Color thresholds change with lighting interpolation;
+                        # compare actual geometry rather than a red pixel box.
+                        assert (
+                            await mesh(
+                                "query", selector={"domain": "vertex", "mode": "all"}
+                            )
+                            == vertices
+                        )
+                        await mesh(
+                            "set_shading",
+                            selector={"domain": "face", "mode": "all"},
+                            smooth=False,
+                        )
+                        restored = await render(client, identifier)
+                        # PNG metadata includes render timing; compare pixels.
+                        assert (
+                            await loop.run_in_executor(
+                                executor, mean_pixel_difference, before, restored
+                            )
+                            == 0
+                        )
                 else:
                     assert after_box[2] > before_box[2] + 10
                     assert (

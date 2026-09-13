@@ -144,6 +144,7 @@ Names are exact and are advertised in sorted order:
 | `blender.mesh.delete_elements` | Object name, selector; optional face deletion mode | Deleted element counts and summary |
 | `blender.mesh.merge_vertices` | Object name, vertex selector; optional center mode | Merge result |
 | `blender.mesh.mark_seam` | Object name, edge selector, seam boolean | Changed seam count and summary |
+| `blender.mesh.set_shading` | Object name, face selector, smooth boolean | Changed face count and summary |
 | `blender.mesh.recalculate_normals` | Object name; optional inside boolean | Whole-mesh normal repair result |
 
 Arguments must be objects with no unexpected fields. Vectors contain exactly
@@ -1038,6 +1039,7 @@ requires an explicit `selector`. A mutation matching nothing returns
 | `delete_elements` | Any selector domain. Vertices remove incident edges/faces; edges remove adjacent faces while retaining vertices. Face deletion defaults to `face_mode: "faces_only"`, retaining edges/vertices. `"faces_and_unused"` also removes edges/vertices made unused by those faces. `face_mode` is valid only for a face selector. |
 | `merge_vertices` | Vertex selector with at least two matches. `mode` is `"center"` (default). Welds selected vertices to their arithmetic mean; averages vertex custom data through native point-merge semantics. It does not perform distance-based deduplication or implicitly weld UV seams. |
 | `mark_seam` | Edge selector and required boolean `seam`. Sets or clears seam flags; idempotent calls report zero changed edges. Use followed by `blender.uv.unwrap` with `angle_based` or `conformal`. |
+| `set_shading` | Face selector and required boolean `smooth`. Sets native face shading; false restores flat shading. Reports `changed_faces`, including zero for idempotent calls. Face queries expose `smooth`. Preserves positions, connectivity, winding, edge sharpness, UVs, materials and supported attributes; this does not smooth geometry or clear sharp edges. Uses the same staged edit and shared-Mesh isolation policy, including rejection of custom normals, modifiers and shape keys. |
 | `recalculate_normals` | No selector. `inside` defaults to false. Recalculates whole-mesh face winding with native connected-region logic; true reverses the result. Closed orientable shells support outside/inside interpretation; open, degenerate or non-manifold surfaces have no guaranteed outward direction. |
 
 `mesh.transform` changes vertex coordinates while `object.set_transform` changes
