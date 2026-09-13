@@ -24,6 +24,7 @@ from .camera_models import (
 from .image_models import (
     ImageConfigureArguments,
     ImageCreateArguments,
+    ImageFromArtifactArguments,
     ImageInspectResult,
     ImageSummary,
 )
@@ -66,6 +67,14 @@ from .shader_models import (
     ShaderGraphSummary,
     ShaderInspectArguments,
 )
+from .uv_models import (
+    UVCreateArguments,
+    UVInspectArguments,
+    UVInspectResult,
+    UVPackArguments,
+    UVSetActiveArguments,
+    UVUnwrapArguments,
+)
 
 logger = logging.getLogger(__name__)
 OPERATIONS = (
@@ -74,6 +83,7 @@ OPERATIONS = (
     "blender.camera.inspect",
     "blender.camera.set_active",
     "blender.image.configure",
+    "blender.image.create_from_artifact",
     "blender.image.create_generated",
     "blender.image.inspect",
     "blender.light.configure",
@@ -94,6 +104,11 @@ OPERATIONS = (
     "blender.shader.node.configure",
     "blender.shader.node.create",
     "blender.shader.node.delete",
+    "blender.uv.create_map",
+    "blender.uv.inspect",
+    "blender.uv.pack_islands",
+    "blender.uv.set_active",
+    "blender.uv.unwrap",
 )
 type Response = OperationSuccess | OperationFailure
 
@@ -116,8 +131,16 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def uv_inspect(self, arguments: UVInspectArguments) -> UVInspectResult: ...
+    def uv_create(self, arguments: UVCreateArguments) -> UVInspectResult: ...
+    def uv_set_active(self, arguments: UVSetActiveArguments) -> UVInspectResult: ...
+    def uv_unwrap(self, arguments: UVUnwrapArguments) -> UVInspectResult: ...
+    def uv_pack(self, arguments: UVPackArguments) -> UVInspectResult: ...
     def image_inspect(self) -> ImageInspectResult: ...
     def image_create(self, arguments: ImageCreateArguments) -> ImageSummary: ...
+    def image_from_artifact(
+        self, arguments: ImageFromArtifactArguments, request: OperationRequest
+    ) -> ImageSummary: ...
     def image_configure(self, arguments: ImageConfigureArguments) -> ImageSummary: ...
     def shader_inspect(
         self, arguments: ShaderInspectArguments
@@ -181,6 +204,7 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MaterialConfigureArguments
             | MaterialAssignArguments
             | ImageCreateArguments
+            | ImageFromArtifactArguments
             | ImageConfigureArguments
             | ShaderInspectArguments
             | NodeCreateArguments
@@ -188,12 +212,29 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | NodeDeleteArguments
             | ConnectArguments
             | DisconnectArguments
+            | UVInspectArguments
+            | UVCreateArguments
+            | UVSetActiveArguments
+            | UVUnwrapArguments
+            | UVPackArguments
         )
         match request.operation:
+            case "blender.uv.inspect":
+                arguments = UVInspectArguments.model_validate(request.arguments)
+            case "blender.uv.create_map":
+                arguments = UVCreateArguments.model_validate(request.arguments)
+            case "blender.uv.set_active":
+                arguments = UVSetActiveArguments.model_validate(request.arguments)
+            case "blender.uv.unwrap":
+                arguments = UVUnwrapArguments.model_validate(request.arguments)
+            case "blender.uv.pack_islands":
+                arguments = UVPackArguments.model_validate(request.arguments)
             case "blender.image.inspect":
                 arguments = InspectArguments.model_validate(request.arguments)
             case "blender.image.create_generated":
                 arguments = ImageCreateArguments.model_validate(request.arguments)
+            case "blender.image.create_from_artifact":
+                arguments = ImageFromArtifactArguments.model_validate(request.arguments)
             case "blender.image.configure":
                 arguments = ImageConfigureArguments.model_validate(request.arguments)
             case "blender.shader.inspect":
@@ -278,8 +319,20 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 result = backend.camera_inspect()
             else:
                 result = backend.inspect()
+        elif isinstance(arguments, UVCreateArguments):
+            result = backend.uv_create(arguments)
+        elif isinstance(arguments, UVSetActiveArguments):
+            result = backend.uv_set_active(arguments)
+        elif isinstance(arguments, UVUnwrapArguments):
+            result = backend.uv_unwrap(arguments)
+        elif isinstance(arguments, UVPackArguments):
+            result = backend.uv_pack(arguments)
+        elif isinstance(arguments, UVInspectArguments):
+            result = backend.uv_inspect(arguments)
         elif isinstance(arguments, ImageCreateArguments):
             result = backend.image_create(arguments)
+        elif isinstance(arguments, ImageFromArtifactArguments):
+            result = backend.image_from_artifact(arguments, request)
         elif isinstance(arguments, ImageConfigureArguments):
             result = backend.image_configure(arguments)
         elif isinstance(arguments, ShaderInspectArguments):

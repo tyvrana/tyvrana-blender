@@ -30,7 +30,7 @@ class ArtifactSpool:
 
     @contextmanager
     def reserve(self) -> Iterator[tuple[str, Path]]:
-        if len(list(self.root.iterdir())) >= MAX_SPOOLED_RENDERS:
+        if len(list(self.root.glob("*.png"))) >= MAX_SPOOLED_RENDERS:
             raise SpoolFull("Too many renders await transfer")
         artifact_id = uuid4().hex
         path = self.root / (artifact_id + ".png")

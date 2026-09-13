@@ -19,6 +19,7 @@ from tyvrana_blender.camera_models import (
 from tyvrana_blender.image_models import (
     ImageConfigureArguments,
     ImageCreateArguments,
+    ImageFromArtifactArguments,
     ImageInspectResult,
     ImageSummary,
 )
@@ -61,11 +62,49 @@ from tyvrana_blender.shader_models import (
     ShaderGraphSummary,
     ShaderInspectArguments,
 )
+from tyvrana_blender.uv_models import (
+    UVCreateArguments,
+    UVInspectArguments,
+    UVInspectResult,
+    UVPackArguments,
+    UVSetActiveArguments,
+    UVUnwrapArguments,
+)
 
 
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def uv_inspect(self, arguments: UVInspectArguments) -> UVInspectResult:
+        self.calls.append("uv_inspect")
+        return UVInspectResult(
+            object_name=arguments.object_name,
+            active_map=None,
+            active_render_map=None,
+            mesh_users=1,
+            maps=[],
+        )
+
+    def uv_create(self, arguments: UVCreateArguments) -> UVInspectResult:
+        result = self.uv_inspect(arguments)
+        self.calls[-1] = "uv_create"
+        return result
+
+    def uv_set_active(self, arguments: UVSetActiveArguments) -> UVInspectResult:
+        result = self.uv_inspect(arguments)
+        self.calls[-1] = "uv_set_active"
+        return result
+
+    def uv_unwrap(self, arguments: UVUnwrapArguments) -> UVInspectResult:
+        result = self.uv_inspect(arguments)
+        self.calls[-1] = "uv_unwrap"
+        return result
+
+    def uv_pack(self, arguments: UVPackArguments) -> UVInspectResult:
+        result = self.uv_inspect(arguments)
+        self.calls[-1] = "uv_pack"
+        return result
 
     def image_inspect(self) -> ImageInspectResult:
         self.calls.append("image_inspect")
@@ -73,6 +112,12 @@ class Backend:
 
     def image_create(self, arguments: ImageCreateArguments) -> ImageSummary:
         self.calls.append("image_create")
+        return image_summary(arguments.name or "Image")
+
+    def image_from_artifact(
+        self, arguments: ImageFromArtifactArguments, request: OperationRequest
+    ) -> ImageSummary:
+        self.calls.append("image_from_artifact")
         return image_summary(arguments.name or "Image")
 
     def image_configure(self, arguments: ImageConfigureArguments) -> ImageSummary:

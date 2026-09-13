@@ -3,6 +3,7 @@
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
+from tyvrana_protocol import ArtifactId
 
 from .models import Model, ObjectName
 from .numeric import Float32
@@ -77,4 +78,18 @@ class ImageConfigureArguments(Model):
     def reject_null(cls, value: object) -> object:
         if value is None:
             raise ValueError("Omit an unchanged property; null is invalid")
+        return value
+
+
+class ImageFromArtifactArguments(Model):
+    artifact_id: ArtifactId
+    name: ObjectName | None = None
+    color_space: ObjectName | None = None
+    alpha_mode: AlphaMode | None = None
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def reject_null(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Omit an optional property; null is invalid")
         return value

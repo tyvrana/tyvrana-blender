@@ -30,9 +30,11 @@ class WorkerProcess:
         # Blender supplies extension-managed wheel paths. The isolated child uses
         # those exact paths and its bundled interpreter, never a global install.
         bootstrap = (
-            "import runpy,sys; sys.path[:0]=sys.argv[1:-3]; "
+            "import pathlib,runpy,sys; sys.path[:0]=sys.argv[1:-3]; "
             "sys.argv=sys.argv[-3:]; "
-            "runpy.run_path(sys.argv[0],run_name='__main__')"
+            "module=pathlib.Path(sys.argv[0]); "
+            "sys.path.insert(0,str(module.parent.parent)); "
+            "runpy.run_module(module.parent.name+'.worker',run_name='__main__')"
         )
         try:
             self.process = subprocess.Popen(

@@ -18,6 +18,13 @@ if "TYVRANA_TEST_PORT" in os.environ:
 if os.environ.get("TYVRANA_TEST_EMPTY") == "1":
     for obj in list(bpy.data.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
+if os.environ.get("TYVRANA_TEST_CPU_RENDER") == "1":
+    # Keep raster/UV verification independent of software GPU shader compilation.
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 16
+    scene.cycles.use_denoising = False
 if os.environ.get("TYVRANA_TEST_RENDER") == "1":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     importlib.import_module("tests.blender.scene").prepare_scene()

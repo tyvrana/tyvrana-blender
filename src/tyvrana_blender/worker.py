@@ -19,6 +19,7 @@ from tyvrana_protocol import (
     ArtifactAbort,
     ArtifactAccepted,
     ArtifactBegin,
+    ArtifactChunk,
     ArtifactComplete,
     ArtifactReady,
     CancelRequest,
@@ -27,12 +28,15 @@ from tyvrana_protocol import (
     OperationRequest,
     OperationSuccess,
     ProtocolError,
+    decode_artifact_chunk,
     decode_message,
     encode_artifact_chunk,
     encode_message,
 )
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
+
+from .incoming import InputError, InputStore
 
 logger = logging.getLogger(__name__)
 MAX_FRAME = 1024 * 1024
@@ -103,6 +107,7 @@ class NetworkClient:
         self.socket: ClientConnection | None = None
         self.pending: set[str] = set()
         self.spool = spool
+        self.inputs = InputStore(spool)
         self._tasks: set[asyncio.Task[None]] = set()
         self._transfers: dict[
             str,
@@ -120,6 +125,7 @@ class NetworkClient:
 
     def cancel_request(self, request_id: str) -> None:
         self.pending.discard(request_id)
+        self.inputs.discard_request(request_id)
         for transfer_id, (related, queue) in self._transfers.items():
             if related == request_id:
                 if not queue.empty():
@@ -141,6 +147,7 @@ class NetworkClient:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self._transfers.clear()
+        self.inputs.clear()
 
     def release(self, response: OperationSuccess | OperationFailure) -> None:
         if isinstance(response, OperationSuccess):
@@ -249,7 +256,94 @@ class NetworkClient:
                     pass  # Connection loop performs disconnect cleanup.
         finally:
             self.pending.discard(response.request_id)
+            self.inputs.discard_request(response.request_id)
             self.release(response)
+
+    async def input_message(
+        self,
+        socket: ClientConnection,
+        message: ArtifactBegin | ArtifactChunk | ArtifactComplete | ArtifactAbort,
+    ) -> None:
+        transfer_id = message.transfer_id
+        if transfer_id in self._transfers:
+            raise ValueError("Transfer ID conflicts with an output transfer")
+        request_id = self.inputs.request_for(transfer_id)
+        try:
+            if isinstance(message, ArtifactBegin):
+                if request_id is not None:
+                    raise ValueError("Input transfer ID collision")
+                request_id = message.request_id
+                if request_id in self.pending:
+                    raise InputError("Operation already started")
+                self.inputs.begin(message)
+                await self.send(
+                    socket,
+                    encode_message(
+                        ArtifactReady(type="artifact.ready", transfer_id=transfer_id)
+                    ).decode(),
+                )
+            elif isinstance(message, ArtifactChunk):
+                self.inputs.write(message)
+            elif isinstance(message, ArtifactComplete):
+                self.inputs.complete(transfer_id)
+                await self.send(
+                    socket,
+                    encode_message(
+                        ArtifactAccepted(
+                            type="artifact.accepted", transfer_id=transfer_id
+                        )
+                    ).decode(),
+                )
+            else:
+                if request_id is not None:
+                    self.cancel_request(request_id)
+                    await self.output.send(
+                        CancelRequest(type="operation.cancel", request_id=request_id)
+                    )
+        except InputError as exc:
+            if request_id is not None:
+                self.cancel_request(request_id)
+                await self.output.send(
+                    CancelRequest(type="operation.cancel", request_id=request_id)
+                )
+            await self.send(
+                socket,
+                encode_message(
+                    ArtifactAbort(
+                        type="artifact.abort",
+                        transfer_id=transfer_id,
+                        error=ProtocolError(
+                            code="artifact_transfer_failed", message=str(exc)
+                        ),
+                    )
+                ).decode(),
+            )
+
+    async def expire_inputs(self) -> None:
+        while True:
+            await asyncio.sleep(0.5)
+            socket = self.socket
+            if socket is None:
+                continue
+            for request_id, transfer_id in self.inputs.expired(time.monotonic()):
+                self.cancel_request(request_id)
+                try:
+                    await self.send(
+                        socket,
+                        encode_message(
+                            ArtifactAbort(
+                                type="artifact.abort",
+                                transfer_id=transfer_id,
+                                error=ProtocolError(
+                                    code="artifact_transfer_failed",
+                                    message="Input admission timed out",
+                                ),
+                            )
+                        ).decode(),
+                    )
+                except (OSError, TimeoutError, ConnectionClosed):
+                    socket.transport.abort()
+                    break
 
     def completed(self, task: asyncio.Task[None]) -> None:
         self._tasks.discard(task)
@@ -286,13 +380,17 @@ class NetworkClient:
                     await self.output.state("connected")
                     async for data in websocket:
                         try:
-                            if not isinstance(data, str):
-                                raise ValueError("Core controls must be text messages")
+                            if isinstance(data, bytes):
+                                await self.input_message(
+                                    websocket, decode_artifact_chunk(data)
+                                )
+                                continue
                             message = decode_message(data.encode())
                             if isinstance(message, OperationRequest):
                                 if message.request_id in self.pending:
                                     raise ValueError("Duplicate pending request ID")
                                 if len(self.pending) >= MAX_PENDING:
+                                    self.inputs.discard_request(message.request_id)
                                     await self.send(
                                         websocket,
                                         encode_message(
@@ -307,11 +405,31 @@ class NetworkClient:
                                         ).decode(),
                                     )
                                     continue
+                                try:
+                                    self.inputs.claim(message)
+                                except InputError as exc:
+                                    self.inputs.discard_request(message.request_id)
+                                    await self.send(
+                                        websocket,
+                                        encode_message(
+                                            OperationFailure(
+                                                type="operation.failure",
+                                                request_id=message.request_id,
+                                                error=ProtocolError(
+                                                    code="artifact_transfer_failed",
+                                                    message=str(exc),
+                                                ),
+                                            )
+                                        ).decode(),
+                                    )
+                                    continue
                                 self.pending.add(message.request_id)
                                 await self.output.send(message)
                             elif isinstance(message, CancelRequest):
                                 self.cancel_request(message.request_id)
                                 await self.output.send(message)
+                            elif isinstance(message, (ArtifactBegin, ArtifactComplete)):
+                                await self.input_message(websocket, message)
                             elif isinstance(
                                 message,
                                 (ArtifactReady, ArtifactAccepted, ArtifactAbort),
@@ -324,6 +442,8 @@ class NetworkClient:
                                             "Unexpected artifact acknowledgement"
                                         )
                                     queue.put_nowait(message)
+                                elif isinstance(message, ArtifactAbort):
+                                    await self.input_message(websocket, message)
                             else:
                                 raise ValueError("Unsupported core message direction")
                         except (ValueError, RecursionError) as exc:
@@ -355,6 +475,9 @@ class NetworkClient:
             message = decode_message(line)
             if not isinstance(message, (OperationSuccess, OperationFailure)):
                 raise ValueError("Unsupported parent message direction")
+            # Main-thread execution is finished; input files are no longer needed,
+            # even if output artifacts still await network acknowledgement.
+            self.inputs.discard_request(message.request_id)
             if message.request_id not in self.pending:
                 self.release(message)
                 continue  # Cancelled, disconnected, or completed in an earlier session.
@@ -384,6 +507,7 @@ async def run(uri: str, spool: Path) -> None:
         tasks = [
             asyncio.create_task(client.connections()),
             asyncio.create_task(client.responses(reader)),
+            asyncio.create_task(client.expire_inputs()),
         ]
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

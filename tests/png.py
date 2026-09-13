@@ -4,6 +4,36 @@ import struct
 import zlib
 
 
+def checker_png(width: int = 128, height: int = 128) -> bytes:
+    """Generate an external raster fixture without a binary repository asset."""
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack("!I", len(payload))
+            + kind
+            + payload
+            + struct.pack("!I", zlib.crc32(kind + payload))
+        )
+
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)
+        for x in range(width):
+            if x % 16 == 0 or y % 16 == 0:
+                color = (220, 40, 30, 255)
+            elif (x // 16 + y // 16) % 2:
+                color = (225, 235, 245, 255)
+            else:
+                color = (20, 45, 90, 255)
+            rows.extend(color)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack("!2I5B", width, height, 8, 6, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+
+
 def inspect_png(data: bytes) -> tuple[int, int]:
     assert data.startswith(b"\x89PNG\r\n\x1a\n")
     offset = 8

@@ -11,8 +11,9 @@ The extension manifest and runtime guard reject older hosts. Newer versions pass
 the minimum-version guard but require native and end-to-end testing before they
 are declared validated. One current adapter implementation serves supported hosts.
 
-The extension provides objects, cameras, lights, materials, generated images,
-shader graph controls, and PNG scene renders delivered as MCP images.
+The extension provides objects, cameras, lights, materials, generated and imported
+packed images, shader graphs, whole-mesh UV controls, and PNG scene renders
+delivered as MCP images.
 
 ## Install and connect
 
@@ -70,6 +71,7 @@ Names are exact and are advertised in sorted order:
 | `blender.material.assign` | Object/material names; optional slot index | Assigned slot and ordered slots |
 | `blender.image.inspect` | `{}` | Sorted image resources |
 | `blender.image.create_generated` | Width/height; optional name, generation and color settings | Created image summary |
+| `blender.image.create_from_artifact` | Attached artifact ID; optional name, color space and alpha mode | Packed image summary |
 | `blender.image.configure` | Name; optional color space and alpha mode | Updated image summary |
 | `blender.shader.inspect` | Material name | One shader graph summary |
 | `blender.shader.node.create` | Material name, supported node type; optional name and typed settings | Created node summary |
@@ -85,6 +87,11 @@ Names are exact and are advertised in sorted order:
 | `blender.camera.configure` | Required `name`; optional projection, optics, clipping, shifts | Updated camera summary |
 | `blender.camera.set_active` | Required `name` | Selected camera summary |
 | `blender.render.image` | Optional `width`, `height`, `format` | Render metadata and a typed PNG artifact |
+| `blender.uv.inspect` | Object name | UV map summaries and active roles |
+| `blender.uv.create_map` | Object name; optional map name and activation flags | Updated UV inspection |
+| `blender.uv.set_active` | Object/map names; editing and render activation flags | Updated UV inspection |
+| `blender.uv.unwrap` | Object name, method; optional map and applicable settings | Updated UV inspection |
+| `blender.uv.pack_islands` | Object name; optional map, margin, rotation and scaling | Updated UV inspection |
 
 Arguments must be objects with no unexpected fields. Vectors contain exactly
 three finite numbers. Rotation uses XYZ Euler angles in radians; transforms are
@@ -471,8 +478,9 @@ objects return `object_not_found`; invalid names/indices return
 Alpha changes only the Principled Alpha socket. It does not configure material
 surface-render methods, transparency/shadow settings, or guarantee identical
 transparency across render engines and modes. Generated image resources and typed
-shader graph controls are described below. UV editing, displacement authoring,
-baking, and face-material-index editing remain future capabilities. Material tests
+shader graph controls are described below. Whole-mesh UV controls are a separate
+layer; displacement authoring, baking, and face-material-index editing remain
+future capabilities. Material tests
 verify actual renders for color, roughness highlights, metallic, emission, and
 slot reassignment.
 
@@ -557,9 +565,63 @@ by alpha-mode pixel conversion.
 
 Linked/read-only image mutation is rejected. Missing resources use
 `image_not_found`; ambiguous names across libraries use `invalid_arguments`.
-Unassigned resources follow native orphan lifetime; no image delete, persistence,
-packing, external filesystem image import, URL downloading, or inbound pixel
-upload operation is provided.
+Unassigned resources follow native orphan lifetime; assign the image to a material
+before saving if it must survive a save/reload. Image deletion, persistence flags,
+URL downloading, and pixel painting are not exposed.
+
+### Images from input artifacts
+
+`blender.image.create_from_artifact` requires `artifact_id`. Optional fields are
+`name`, `color_space`, and `alpha_mode` (the same four modes described above).
+The artifact must also be attached to the operation through core's
+`tyvrana_execute_operation.artifact_ids`. Nulls, unknown fields, duplicate explicit
+image names, and unavailable OCIO color spaces are rejected.
+
+Supported inputs are deliberately limited to **PNG** (`image/png`) and **JPEG**
+(`image/jpeg`, 8-bit baseline/extended sequential or progressive DCT). Header
+signatures must match the declared type. Dimensions must be 1–4096 on each axis;
+headers and terminal markers are checked before Blender decodes the image.
+PNG header integrity is checked, and JPEG header scanning is bounded. Blender
+must then supply a valid decoded buffer with matching dimensions. Corrupt or
+unsupported images fail without leaving a newly created image resource.
+
+The worker receives and verifies each input in a private request-scoped file.
+The handler loads it and immediately calls native `Image.pack()`. The resulting
+summary truthfully reports `source: "file"`, `packed: true`, and
+`generated_type: null`. Omitted names use Blender's clean unique `Image` naming.
+Image and packed-file filepath properties are cleared after packing. Encoded
+packed bytes survive buffer reload and saving/reopening an assigned image in a
+`.blend` file. The original source file and adapter transfer file are no longer
+dependencies. Image inspection never returns a filepath.
+
+Failures include `artifact_not_attached`, `artifact_not_found`,
+`unsupported_artifact_media_type`, and `artifact_decode_failed`. Image creation
+requires the same editable Object Mode context as generated-image creation.
+
+For an external texture workflow:
+
+1. Call core's `tyvrana_import_artifact` with
+   `{"path": "textures/checker.png", "name": "Checker"}`.
+2. Use its opaque descriptor ID in both the attachment list and the image operation:
+
+   ```json
+   {
+     "adapter_id": "<connected Blender instance>",
+     "operation": "blender.image.create_from_artifact",
+     "arguments": {"artifact_id": "00112233445566778899aabbccddeeff", "name": "Checker"},
+     "artifact_ids": ["00112233445566778899aabbccddeeff"]
+   }
+   ```
+
+3. Assign `Checker` to an Image Texture node, connect Texture Coordinate `UV`
+   to its `Vector`, and connect its `Color` to the Principled `Base Color`.
+4. Create/select and unwrap the object's UV map as needed, then render.
+5. Release the core import with `tyvrana_release_artifact` when no more operations
+   need it. The packed Blender image remains usable.
+
+The local path exists exclusively at core's local ingestion boundary. Core copies
+the file into its own storage; Blender receives only opaque descriptors and binary
+bytes. No source path is an adapter argument or a cross-component transport.
 
 ### Inspecting shader trees
 
@@ -643,7 +705,8 @@ space; empty uses the native active UV choice. A tangent normal map's coordinate
 must match that UV map, and its image should use Non-Color. Other native normal-map
 settings are preserved. Bump strength/distance use native numeric socket units;
 physical use normally uses nonnegative values. `invert` reverses the bump direction.
-No UV editing, normal-map generation, or displacement authoring is implied.
+UV editing is provided by the separate operations below. Normal-map generation
+and displacement authoring are not exposed.
 
 ### Explicit connections and deletion
 
@@ -713,6 +776,102 @@ Behavior is checked against native Blender 5.2.1 and official
 [image texture workflow](https://docs.blender.org/manual/en/5.2/render/shader_nodes/textures/image.html),
 [mapping workflow](https://docs.blender.org/manual/en/5.2/render/shader_nodes/utilities/vector/mapping.html),
 and [shader link validation](https://github.com/blender/blender/blob/v5.2.1/source/blender/nodes/shader/node_shader_tree.cc).
+
+## Whole-mesh UV maps
+
+UV maps belong to mesh datablocks. These operations target one named mesh object
+and its complete authored mesh, including hidden/unselected faces. They do not
+operate on evaluated modifier output or expose raw face/edge/vertex indices.
+All return `UVInspectResult`:
+
+```text
+{
+  object_name: string,
+  active_map: string | null,
+  active_render_map: string | null,
+  mesh_users: integer,
+  maps: [{
+    name: string, active: boolean, active_render: boolean,
+    loop_count: integer, uv_min: [u, v] | null, uv_max: [u, v] | null,
+    out_of_unit_square_count: integer, pinned_count: integer
+  }, ...]
+}
+```
+
+Maps are sorted by name. Empty maps have null bounds. Collapsed maps have equal
+minimum/maximum coordinates; no raw per-loop coordinates are returned. Unit-square
+counts use a `1e-6` tolerance for native packing roundoff. Inspection reads live
+BMesh UVs in Edit Mode and reports the number of **object users** of the mesh,
+excluding non-object references and fake users. It does not mutate the UV maps.
+
+`blender.uv.inspect` requires `object_name`.
+
+`blender.uv.create_map` requires `object_name`; optional `name` uses native unique
+`UVMap` naming. Explicit duplicate names are rejected. `set_active` defaults to
+true. Omitted `set_render` preserves the current render map, selecting the new map
+only if none exists; true explicitly selects it. The first map necessarily becomes
+both editing and render-active, even if false flags were supplied. New maps use
+Blender's initialized coordinates, copying the current map where one exists.
+
+`blender.uv.set_active` requires `object_name` and map `name`. `set_active` and
+`set_render` both default to true; at least one must be true. False preserves that
+role's existing map. This selects editing and rendering roles independently,
+without rewriting coordinates. Standard shader Texture Coordinate `UV` uses the
+render-active map; an explicitly named UV/normal-map node can choose another map.
+
+`blender.uv.unwrap` requires `object_name` and `method`. Optional `uv_map` selects
+the map to modify; omission uses the editing-active map. A map must already exist.
+The operation preserves the previously active editing/render map choices. Common
+`correct_aspect` defaults to true and uses Blender's material-associated image
+aspect correction. Set false to work without that correction.
+
+| Method | Additional optional settings and behavior |
+| --- | --- |
+| `angle_based`, `conformal` | Existing seams/pins; `margin` default 0.001, `fill_holes` default false |
+| `smart_project` | `angle_limit` default about 1.15191734 radians, `island_margin` default 0, `area_weight` default 0, `scale_to_bounds` default false |
+| `cube_project` | Object-local axes around the mesh bounds center; optional `cube_size`, otherwise fitted to mesh bounds; `scale_to_bounds` default false |
+| `cylinder_project`, `sphere_project` | Fixed object-local Z pole/X orientation around the mesh bounds center; native pinched poles and existing seam-separated islands; `scale_to_bounds` default false |
+
+All six methods run native production UV operators. Sphere/cylinder direction is
+fixed to `ALIGN_TO_OBJECT`; viewport-directed projection is not exposed. Projection
+can create overlapping islands or coordinates outside the unit square; inspect
+and pack when appropriate. Angle/conformal methods need suitable topology and
+existing seams; they do not invent cuts. Native solver warnings and the resulting
+layout still require inspection and render verification. Pin flags are preserved;
+seam-aware solvers respect pins, while projection replaces the full map layout.
+
+Margins and `area_weight` use `[0, 1]`; smart angle uses `[0, 1.5707963705062866]`
+radians. Cube size uses `[0, 3.4028234663852886e38]`; explicitly supplied zero has
+Blender's native unit-size behavior. Numeric strings/booleans, non-finite numbers,
+float32 overflow/underflow, nulls, and settings irrelevant to the chosen method
+are rejected. Margin settings use native `FRACTION`, a fraction of final UV space.
+
+`blender.uv.pack_islands` requires `object_name`; optional `uv_map` chooses the map
+without changing its active roles. `margin` defaults to 0.001 (`[0, 1]`), `rotate`
+and `scale` default to true. It packs all islands to the origin unit tile using
+fractional margins, native concave island shapes, and unrestricted rotation when
+enabled. Overlapping islands remain separate. Pin flags remain set but packing
+moves all islands, including pinned ones. Turning scaling off can prevent a large
+layout from fitting the tile; inspect returned bounds.
+
+Mutations require a visible, selectable, editable local mesh in the current view
+layer, with no active render job. Linked data and library overrides are rejected.
+If more than one object
+uses the mesh, the target receives its own mesh copy before mutation; siblings
+retain their data and UVs. Failures restore UV coordinates/map roles and discard a
+failed shared-data copy. Empty meshes can have maps but cannot unwrap or pack.
+
+Operations support Object Mode or single-object Edit Mode on the target. Other
+modes and another object's or multi-object Edit Mode return `invalid_context`.
+They restore mode, active object, object selection, mesh/UV selection, hidden
+flags, and selection history. Operators run synchronously with no UV-editor or
+viewport context. Errors include `object_not_mesh`, `uv_map_not_found`, and
+`uv_unwrap_failed`, alongside normal argument/context errors.
+
+This is a whole-mesh UV layer. Deliberate seam authoring requires a future mesh
+selection/topology model; no fragile edge-index seam API is provided. Behavior is
+checked against Blender's [UV operator source](https://github.com/blender/blender/blob/v5.2.1/source/blender/editors/uvedit/uvedit_unwrap_ops.cc)
+and [BMesh selection API](https://docs.blender.org/api/5.2/bmesh.types.html).
 
 ## Cameras
 
@@ -922,6 +1081,23 @@ and extension bundle pinned to the same current protocol revision.
 
 ## Execution and lifecycle
 
+For operation inputs the worker reserves storage before `artifact.ready`, receives
+the same canonical binary chunks used by render output, checks sequential offsets,
+exact byte size and SHA-256, then replies `artifact.accepted`. Only after all
+attachments are complete and their descriptors match does it forward the
+`OperationRequest` to Blender. Binary input bytes never pass through the main-thread
+timer queue. Main-thread file lookup uses only validated opaque IDs and private
+request correlation; no path is added to the application protocol.
+
+Input storage permits 128 MiB per artifact, 512 MiB total reserved/completed bytes,
+128 entries, four active transfers, and eight attachments per request. Separate
+requests can use the same core artifact concurrently, with independent files.
+Transfers and accepted files waiting for an operation expire after 30 seconds
+without request input activity. Request completion/failure, cancellation, abort,
+disconnect, worker shutdown, extension disable and Blender exit clean the input
+files. Core's original import remains reusable until explicitly released or core
+shuts down. The adapter's separate 64 MiB render spool bound still applies.
+
 Blender owns all `bpy`/`mathutils` execution on its main thread. The official
 [threading guidance](https://docs.blender.org/api/5.2/info_gotchas_threading.html)
 warns against long-lived Python threads, so networking runs in a small subprocess
@@ -1026,6 +1202,16 @@ verify actual PNG structure, dimensions, content variation, byte count and SHA-2
 and prove real background and UI renders reach the official MCP client as image
 content. A separate real-render test cancels during binary transfer and verifies
 cleanup and continued adapter operation. No image-analysis service is used.
+
+Input tests cover worker-side quota/integrity checks, admission ordering, reuse,
+concurrency, cancellation at each stage, and complete cleanup. Native image tests
+decode and pack PNG/JPEG, reject malformed content, and retain pixels after buffer
+reload and saving/reopening a packed image with all transfer files removed. Native
+UV tests exercise map roles, all six methods, packing, pins, shared mesh isolation,
+linked-data rejection, context/selection restoration and rollback. Background and
+real UI-timer tests import an external checker through MCP, observe actual binary
+frames, build the material and UV workflow, delete the original source and core
+copy, and verify the packed texture in a real render.
 
 Camera checks cover projection normalization, data/transform separation,
 float32 limits, coherent partial updates, failure rollback, shared and linked

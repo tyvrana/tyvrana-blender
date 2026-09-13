@@ -16,7 +16,7 @@ from tyvrana_protocol import (
     OperationRequest,
 )
 
-from . import shader
+from . import shader, uv
 from .artifacts import ArtifactSpool
 from .camera_models import (
     CameraConfigureArguments,
@@ -35,9 +35,11 @@ from .image_models import (
     ALPHA_MODES,
     ImageConfigureArguments,
     ImageCreateArguments,
+    ImageFromArtifactArguments,
     ImageInspectResult,
     ImageSummary,
 )
+from .incoming import input_path
 from .light_models import (
     COMMON_FIELDS,
     LIGHT_TYPES,
@@ -72,6 +74,7 @@ from .models import (
     TransformArguments,
 )
 from .operations import OperationError, execute, registration
+from .raster import RasterError, raster_size
 from .shader_models import (
     ConnectArguments,
     DisconnectArguments,
@@ -86,6 +89,14 @@ from .shader_models import (
     ShaderInspectArguments,
 )
 from .transport import WorkerProcess
+from .uv_models import (
+    UVCreateArguments,
+    UVInspectArguments,
+    UVInspectResult,
+    UVPackArguments,
+    UVSetActiveArguments,
+    UVUnwrapArguments,
+)
 
 logger = logging.getLogger(__name__)
 INSTANCE_ID = f"blender-{uuid4()}"
@@ -468,6 +479,26 @@ class BlenderBackend:
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
 
+    def uv_inspect(self, arguments: UVInspectArguments) -> UVInspectResult:
+        main_thread()
+        return uv.inspect(uv.mesh_object(arguments.object_name))
+
+    def uv_create(self, arguments: UVCreateArguments) -> UVInspectResult:
+        main_thread()
+        return uv.create(uv.mesh_object(arguments.object_name), arguments)
+
+    def uv_set_active(self, arguments: UVSetActiveArguments) -> UVInspectResult:
+        main_thread()
+        return uv.set_active(uv.mesh_object(arguments.object_name), arguments)
+
+    def uv_unwrap(self, arguments: UVUnwrapArguments) -> UVInspectResult:
+        main_thread()
+        return uv.unwrap(uv.mesh_object(arguments.object_name), arguments)
+
+    def uv_pack(self, arguments: UVPackArguments) -> UVInspectResult:
+        main_thread()
+        return uv.pack(uv.mesh_object(arguments.object_name), arguments)
+
     def image_inspect(self) -> ImageInspectResult:
         main_thread()
         return ImageInspectResult(
@@ -476,6 +507,90 @@ class BlenderBackend:
                 for image in sorted(bpy.data.images, key=lambda image: image.name)
             ]
         )
+
+    def image_from_artifact(
+        self, arguments: ImageFromArtifactArguments, request: OperationRequest
+    ) -> ImageSummary:
+        data_mutation_context()
+        descriptor = next(
+            (
+                item
+                for item in request.artifacts
+                if item.artifact_id == arguments.artifact_id
+            ),
+            None,
+        )
+        if descriptor is None:
+            raise OperationError(
+                "artifact_not_attached", "Image artifact is not attached"
+            )
+        if descriptor.media_type not in {"image/png", "image/jpeg"}:
+            raise OperationError(
+                "unsupported_artifact_media_type",
+                "Only PNG and JPEG images are supported",
+            )
+        if self.spool is None:
+            raise OperationError("artifact_not_found", "Input artifact is unavailable")
+        path = input_path(self.spool.root, request.request_id, descriptor.artifact_id)
+        if not path.is_file():
+            raise OperationError("artifact_not_found", "Input artifact is unavailable")
+        if arguments.name is not None and any(
+            image.name == arguments.name for image in bpy.data.images
+        ):
+            raise OperationError("invalid_arguments", "Image name already exists")
+        if arguments.color_space is not None:
+            validate_color_space(arguments.color_space)
+        image = None
+        try:
+            size = raster_size(path, descriptor.media_type)
+            image = bpy.data.images.load(str(path), check_existing=False)
+            if (
+                tuple(image.size) not in {size, tuple(reversed(size))}
+                or not image.has_data
+                or len(image.pixels) < 4
+            ):
+                raise RasterError("Blender could not decode the input image")
+            image.name = arguments.name or "Image"
+            if arguments.name is not None and image.name != arguments.name:
+                raise OperationError(
+                    "invalid_arguments",
+                    "Blender cannot store the requested image name exactly",
+                )
+            image.pack()
+            if not image.packed_files:
+                raise RasterError("Blender could not pack the input image")
+            # Empty paths cannot accidentally reload another local file. Packed
+            # bytes remain authoritative through buffer reload and .blend saving.
+            image.filepath_raw = ""
+            for packed in image.packed_files:
+                packed.filepath = ""
+            if arguments.color_space is not None:
+                image.colorspace_settings.name = arguments.color_space
+            if arguments.alpha_mode is not None:
+                image.alpha_mode = ALPHA_MODES[arguments.alpha_mode]
+            result = image_summary(image)
+            if (
+                not result.packed
+                or result.source != "file"
+                or not result.width
+                or not result.height
+            ):
+                raise RasterError("Blender did not retain a packed input image")
+            return result
+        except OperationError:
+            if image is not None:
+                bpy.data.images.remove(image, do_unlink=True)
+            raise
+        except (RasterError, RuntimeError, OSError, ValueError) as exc:
+            if image is not None:
+                bpy.data.images.remove(image, do_unlink=True)
+            raise OperationError(
+                "artifact_decode_failed", "Cannot decode and pack the input image"
+            ) from exc
+        except BaseException:
+            if image is not None:
+                bpy.data.images.remove(image, do_unlink=True)
+            raise
 
     def image_create(self, arguments: ImageCreateArguments) -> ImageSummary:
         data_mutation_context()
