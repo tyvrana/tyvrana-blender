@@ -22,6 +22,7 @@ from . import (
     multires,
     raycast,
     remesh,
+    retopo,
     sculpt,
     sculpt_regions,
     shader,
@@ -113,6 +114,14 @@ from .remesh_models import (
     VoxelRemeshInspectArguments,
     VoxelRemeshResult,
     VoxelRemeshSummary,
+)
+from .retopo_models import (
+    RetopoCreateArguments,
+    RetopoCreateResult,
+    RetopoEditArguments,
+    RetopoEditResult,
+    RetopoInspectArguments,
+    RetopoSummary,
 )
 from .sculpt_models import (
     FaceSetsAssignArguments,
@@ -571,6 +580,20 @@ class BlenderBackend:
         return multires.configure(
             modifiers.object_mesh(arguments.object_name), arguments
         )
+
+    def retopo_create_target(
+        self, arguments: RetopoCreateArguments
+    ) -> RetopoCreateResult:
+        main_thread()
+        return retopo.create_target(arguments)
+
+    def retopo_inspect(self, arguments: RetopoInspectArguments) -> RetopoSummary:
+        main_thread()
+        return retopo.inspect(arguments)
+
+    def retopo_edit(self, arguments: RetopoEditArguments) -> RetopoEditResult:
+        main_thread()
+        return retopo.execute(arguments)
 
     def sculpt_voxel_remesh_inspect(
         self, arguments: VoxelRemeshInspectArguments

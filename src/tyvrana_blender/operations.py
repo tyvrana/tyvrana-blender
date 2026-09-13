@@ -95,6 +95,19 @@ from .remesh_models import (
     VoxelRemeshResult,
     VoxelRemeshSummary,
 )
+from .retopo_models import (
+    RetopoBridgeArguments,
+    RetopoCreateArguments,
+    RetopoCreateResult,
+    RetopoEditArguments,
+    RetopoEditResult,
+    RetopoExtrudeArguments,
+    RetopoInspectArguments,
+    RetopoProjectArguments,
+    RetopoRelaxArguments,
+    RetopoSeedArguments,
+    RetopoSummary,
+)
 from .sculpt_models import (
     RAYCAST,
     CameraRayArguments,
@@ -189,6 +202,13 @@ OPERATIONS = (
     "blender.object.delete",
     "blender.object.set_transform",
     "blender.render.image",
+    "blender.retopo.bridge_loops",
+    "blender.retopo.create_target",
+    "blender.retopo.extrude_boundary",
+    "blender.retopo.inspect",
+    "blender.retopo.project",
+    "blender.retopo.relax",
+    "blender.retopo.seed_patch",
     "blender.scene.inspect",
     "blender.scene.raycast",
     "blender.sculpt.face_sets.assign",
@@ -275,6 +295,11 @@ class SceneBackend(Protocol):
     def sculpt_voxel_remesh(
         self, arguments: VoxelRemeshArguments
     ) -> VoxelRemeshResult: ...
+    def retopo_create_target(
+        self, arguments: RetopoCreateArguments
+    ) -> RetopoCreateResult: ...
+    def retopo_inspect(self, arguments: RetopoInspectArguments) -> RetopoSummary: ...
+    def retopo_edit(self, arguments: RetopoEditArguments) -> RetopoEditResult: ...
     def sculpt_inspect(self, arguments: SculptInspectArguments) -> SculptSummary: ...
     def sculpt_stroke(self, arguments: SculptStrokeArguments) -> SculptStrokeResult: ...
 
@@ -369,6 +394,9 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MultiresCreateArguments
             | MultiresSubdivideArguments
             | MultiresConfigureArguments
+            | RetopoCreateArguments
+            | RetopoInspectArguments
+            | RetopoEditArguments
             | VoxelRemeshArguments
             | VoxelRemeshInspectArguments
             | MaskInspectArguments
@@ -418,6 +446,20 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.retopo.bridge_loops":
+                arguments = RetopoBridgeArguments.model_validate(request.arguments)
+            case "blender.retopo.create_target":
+                arguments = RetopoCreateArguments.model_validate(request.arguments)
+            case "blender.retopo.extrude_boundary":
+                arguments = RetopoExtrudeArguments.model_validate(request.arguments)
+            case "blender.retopo.inspect":
+                arguments = RetopoInspectArguments.model_validate(request.arguments)
+            case "blender.retopo.project":
+                arguments = RetopoProjectArguments.model_validate(request.arguments)
+            case "blender.retopo.relax":
+                arguments = RetopoRelaxArguments.model_validate(request.arguments)
+            case "blender.retopo.seed_patch":
+                arguments = RetopoSeedArguments.model_validate(request.arguments)
             case "blender.scene.raycast":
                 arguments = RAYCAST.validate_python(request.arguments)
             case "blender.multires.inspect":
@@ -593,6 +635,18 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             result = backend.multires_inspect(arguments)
         elif isinstance(arguments, SculptStrokeArguments):
             result = backend.sculpt_stroke(arguments)
+        elif isinstance(
+            arguments,
+            RetopoSeedArguments
+            | RetopoProjectArguments
+            | RetopoExtrudeArguments
+            | RetopoBridgeArguments,
+        ):
+            result = backend.retopo_edit(arguments)
+        elif isinstance(arguments, RetopoInspectArguments):
+            result = backend.retopo_inspect(arguments)
+        elif isinstance(arguments, RetopoCreateArguments):
+            result = backend.retopo_create_target(arguments)
         elif isinstance(arguments, VoxelRemeshInspectArguments):
             result = backend.sculpt_voxel_remesh_inspect(arguments)
         elif isinstance(arguments, VoxelRemeshArguments):

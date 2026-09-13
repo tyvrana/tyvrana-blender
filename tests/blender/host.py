@@ -53,6 +53,13 @@ if "TYVRANA_TEST_SCULPT" in os.environ:
 if os.environ.get("TYVRANA_TEST_REMESH") == "1":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     importlib.import_module("tests.blender.remesh_scene").prepare_scene()
+if "TYVRANA_TEST_RETOPO" in os.environ:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    retopo_scene = importlib.import_module("tests.blender.retopo_scene")
+    if os.environ["TYVRANA_TEST_RETOPO"] == "tube":
+        retopo_scene.prepare_tube_scene()
+    else:
+        retopo_scene.prepare_scene(patch=os.environ["TYVRANA_TEST_RETOPO"] == "patch")
 deadline = time.monotonic() + 180
 
 
@@ -77,6 +84,8 @@ def check() -> float | None:
             (control / "ready.tmp").replace(control / "ready.json")
         if (control / "stop").exists():
             worker = runtime.worker if runtime is not None else None
+            if "TYVRANA_TEST_RETOPO" in os.environ:
+                retopo_scene.clear_display()
             adapter.unregister()
             assert not bpy.app.timers.is_registered(adapter.pump)
             if worker is not None:

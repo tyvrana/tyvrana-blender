@@ -10,6 +10,7 @@ from tyvrana_protocol import (
 )
 
 from tyvrana_blender import remesh_models as voxel
+from tyvrana_blender import retopo_models as retopology
 from tyvrana_blender import sculpt_models as regional
 from tyvrana_blender.camera_models import (
     CameraConfigureArguments,
@@ -41,6 +42,7 @@ from tyvrana_blender.material_models import (
     MaterialSummary,
 )
 from tyvrana_blender.mesh_models import (
+    BoundedIndices,
     EdgeQueryResult,
     ElementCounts,
     ElementSelection,
@@ -121,6 +123,122 @@ from tyvrana_blender.uv_models import (
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def retopo_create_target(
+        self, arguments: retopology.RetopoCreateArguments
+    ) -> retopology.RetopoCreateResult:
+        self.calls.append("retopo_create_target")
+        return retopology.RetopoCreateResult(
+            source_object=arguments.source_object,
+            target_object=arguments.name,
+            target_mesh="Mesh",
+            matrix_world=[
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            mesh=self.mesh_inspect(MeshInspectArguments(object_name=arguments.name)),
+        )
+
+    def retopo_inspect(
+        self, arguments: retopology.RetopoInspectArguments
+    ) -> retopology.RetopoSummary:
+        self.calls.append("retopo_inspect")
+        blank = voxel.Distribution(
+            min=0, max=0, mean=0, variance=0, coefficient_of_variation=0
+        )
+        distance = retopology.DistanceSummary(
+            sample_count=0,
+            mean_distance=0,
+            rms_distance=0,
+            max_distance=0,
+            p95_distance=0,
+        )
+        correspondence = retopology.Correspondence(
+            vertices=distance, face_centers=distance, face_normal_dot=blank
+        )
+        quality = retopology.RetopoQuality.model_validate(
+            {
+                "mesh": self.mesh_inspect(
+                    MeshInspectArguments(object_name=arguments.target_object)
+                ),
+                **{
+                    k: 0
+                    for k in [
+                        "quad_count",
+                        "triangle_count",
+                        "ngon_count",
+                        "boundary_edge_count",
+                        "boundary_loop_count",
+                        "boundary_chain_count",
+                        "branched_boundary_count",
+                        "non_manifold_edge_count",
+                        "inconsistent_winding_edge_count",
+                        "loose_vertex_count",
+                        "loose_edge_count",
+                        "degenerate_face_count",
+                        "extreme_aspect_ratio_count",
+                    ]
+                },
+                "valence": {k: 0 for k in retopology.ValenceSummary.model_fields},
+                "edge_length": blank,
+                "face_area": blank,
+                "quad_aspect_ratio": blank,
+                "boundaries": [],
+                "boundaries_truncated": False,
+            }
+        )
+        source = retopology.EvaluatedSurfaceSummary(
+            object_name=arguments.source_object,
+            vertex_count=0,
+            edge_count=0,
+            face_count=0,
+            triangle_count=0,
+            bounds_min_world=None,
+            bounds_max_world=None,
+        )
+        return retopology.RetopoSummary(
+            source_object=arguments.source_object,
+            target_object=arguments.target_object,
+            source=source,
+            target=quality,
+            target_modifiers=[],
+            evaluated_target=source.model_copy(
+                update={"object_name": arguments.target_object}
+            ),
+            authored_correspondence=correspondence,
+            evaluated_correspondence=correspondence,
+            blockers=[],
+        )
+
+    def retopo_edit(
+        self, arguments: retopology.RetopoEditArguments
+    ) -> retopology.RetopoEditResult:
+        self.calls.append(type(arguments).__name__)
+        state = self.retopo_inspect(
+            retopology.RetopoInspectArguments(
+                source_object=arguments.source_object,
+                target_object=arguments.target_object,
+            )
+        )
+        topology = not isinstance(arguments, retopology.RetopoProjectArguments)
+        return retopology.RetopoEditResult(
+            source_object=arguments.source_object,
+            target_object=arguments.target_object,
+            topology_changed=topology,
+            indices_invalidated=topology,
+            mesh_isolated=False,
+            selected_count=0,
+            moved_count=0,
+            created=ElementCounts(vertices=0, edges=0, faces=0),
+            created_faces=BoundedIndices(indices=[], total=0, truncated=False),
+            projection=state.authored_correspondence.vertices,
+            before=state.target,
+            after=state.target,
+            correspondence_before=state.authored_correspondence,
+            correspondence_after=state.authored_correspondence,
+        )
 
     def sculpt_voxel_remesh_inspect(
         self, arguments: voxel.VoxelRemeshInspectArguments

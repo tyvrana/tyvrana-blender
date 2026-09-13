@@ -14,7 +14,8 @@ are declared validated. One current adapter implementation serves supported host
 The extension provides objects, cameras, lights, materials, generated and imported
 packed images, shader graphs, semantic mesh modeling, whole-mesh UV controls,
 modifier stacks, Multires sculpting, regional masks and Face Sets, native sculpt
-filters, explicit voxel-remesh blockout, evaluated surface picking, and PNG scene renders delivered as MCP images.
+filters, explicit voxel-remesh blockout, surface-conforming retopology, evaluated
+surface picking, and PNG scene renders delivered as MCP images.
 
 ## Install and connect
 
@@ -80,6 +81,13 @@ Names are exact and are advertised in sorted order:
 | `blender.sculpt.filter` | Object, type, strength; optional iterations/axes/orientation | Native masked refinement and geometry bounds |
 | `blender.sculpt.voxel_remesh.inspect` | Object; proposed remesh settings | Blockers, data consequences, topology metrics and grid estimate |
 | `blender.sculpt.voxel_remesh` | Object and voxel size; explicit native settings | Staged destructive blockout topology replacement |
+| `blender.retopo.create_target` | Source; optional target name | Empty separate aligned target |
+| `blender.retopo.inspect` | Explicit source/target | Authored quality and authored/evaluated surface correspondence |
+| `blender.retopo.seed_patch` | Source/target, center, tangent, dimensions | Oriented projected quad grid |
+| `blender.retopo.project` | Source/target, vertex selector | Surface-conforming authored positions |
+| `blender.retopo.relax` | Source/target, vertex selector, bounded smoothing | Reprojected relaxation with optional boundary lock |
+| `blender.retopo.extrude_boundary` | Source/target, boundary selector, offset | Projected quad strip |
+| `blender.retopo.bridge_loops` | Source/target, two equal closed loops | Validated projected quad bands |
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
@@ -1926,7 +1934,206 @@ are invalid**, even if a new element happens to have the same number. Reinspect
 and query after remeshing, raycast the new surface, continue controlled sculpting,
 and rerender to verify form. High-detail Multires and destructive blockout remesh
 remain separate branches; there is no automatic bake or detail-transfer bridge.
-Dyntopo and production retopology remain deferred to their own workflows.
+Dyntopo remains deferred. Separate-source retopology is described below.
+
+## Surface-conforming retopology
+
+Retopology reads an explicit **high-resolution source** and edits a separate
+**low-poly authored target**. It does not reduce, duplicate, remesh or modify the
+source. The target has independently authored topology; correspondence measures
+spatial distance, never a source-to-target vertex map. Quad counts alone cannot
+establish anatomical edge flow, pole placement or deformation quality. Those
+require deliberate loop planning and visual/deformation review.
+
+The construction workflow follows Blender's [Poly Build](https://docs.blender.org/manual/en/5.2/modeling/meshes/tools/poly_build.html),
+[surface snapping](https://docs.blender.org/manual/en/5.2/editors/3dview/controls/snapping.html)
+and [bridge loops](https://docs.blender.org/manual/en/5.2/modeling/meshes/editing/edge/bridge_edge_loops.html)
+concepts, using native BMesh construction, edge extrusion, bridging and smoothing.
+Grid Fill, vertex/edge sliding and topology cleanup remain distinct later tools;
+no automatic quad-remeshing library or generic mesh primitive is added here.
+
+### Source and target ownership
+
+`blender.retopo.create_target` takes `source_object` and optional `name`
+(default `Retopology`). It validates the evaluated source, creates an empty
+independent Mesh object, and copies its current world alignment without parenting
+or a persistent relationship. Native name collision suffixes are returned.
+The result contains `source_object`, `target_object`, `target_mesh`, `matrix_world`,
+empty authored `mesh: MeshSummary`, and workflow `guidance`. No geometry, UVs,
+materials, sculpt data, modifiers or rigging are copied. Source world shear that
+cannot be represented by an independent object transform is rejected.
+
+Every other retopology operation requires both `source_object` and `target_object`.
+They must be distinct Mesh objects in the current view layer. Operations require
+Object Mode outside rendering and run on Blender's main thread.
+
+The source is the **current viewport dependency-graph result**, including current
+Subdivision, Multires detail, shape-key values and other bounded supported source
+modifiers. Viewport detail can differ from render detail. Source UVs, weights,
+materials, shape keys and sculpt attributes are read-only reference state, not
+mutation blockers. Invalid/empty/degenerate evaluated surfaces, singular transforms,
+unsupported/unbounded evaluation and a source that depends on the target are
+rejected. Evaluated Mesh extraction always calls `to_mesh_clear()` in `finally`.
+Each operation builds its own world-space BVH and releases it on success/failure;
+there is no persistent surface cache or evaluated edit-index exposure.
+
+Targets must be local editable data. Mutations reject linked/override data, shape
+keys, object/Mesh animation, constraints and unsafe deformation/vertex-parenting
+relationships, custom normals, hidden geometry, UV maps, vertex groups/weights and
+unsupported attributes. Structural Mesh attributes, selection/hide flags, material
+indices, sharp flags and seams are allowed. Material slots and native supported
+selection/custom data are preserved. Inspection reports mutation `blockers` while
+still providing useful geometry diagnostics when safe evaluation is possible.
+Generic mesh-edit modifier guards remain unchanged.
+
+Every target edit uses detached BMesh staging, validates the entire result, creates
+and checks a replacement Mesh, and publishes it only on success. Shared target
+Mesh users retain their original data; the edited object receives an isolated
+replacement. Failure discards staged geometry and preserves the original target.
+This is operation-local safety, not a persistent undo/history system.
+
+### Inspection and correspondence
+
+`blender.retopo.inspect` returns:
+
+```text
+{
+  source_object, target_object, guidance,
+  source: EvaluatedSurfaceSummary,
+  target: RetopoQuality,
+  target_modifiers: [ModifierSummary, ...],
+  evaluated_target: EvaluatedSurfaceSummary,
+  authored_correspondence: Correspondence,
+  evaluated_correspondence: Correspondence,
+  blockers: [code, ...]
+}
+```
+
+`EvaluatedSurfaceSummary` contains object name, vertex/edge/face/triangle counts
+and world bounds. Its triangle count describes evaluated tessellation, not the
+number of triangular polygons. `RetopoQuality` contains authored `mesh: MeshSummary`
+and:
+
+- `quad_count` (four corners), `triangle_count` (three), `ngon_count` (more than four).
+- Boundary edge, closed-loop, open-chain and branched-component counts;
+  `non_manifold_edge_count` counts edges with **more than two** faces. Boundaries
+  and loose edges are reported separately. The nested generic MeshSummary retains
+  its broader native non-manifold classification. Inconsistent two-face winding,
+  loose vertices/edges and degenerate faces are also counted.
+- `valence`: edge-degree counts `valence_0` through `valence_5`, `valence_6_plus`
+  and `max_valence`. Boundary valence naturally differs from interior quad flow.
+- World-space `edge_length`, `face_area`, and `quad_aspect_ratio` distributions:
+  min/max/mean, population variance and coefficient of variation. Empty samples
+  yield zeros. Quad aspect is **longest edge squared / face area**, a measurement
+  sensitive to both elongation and skew, not a deformation-quality score.
+  `extreme_aspect_ratio_count` uses a documented threshold of **10**.
+- `boundaries`: up to 64 components, each with snapshot-local `loop_index`,
+  edge/vertex counts, `kind` (`closed`, `open`, `branched`), world perimeter,
+  target-local bounds and bounded edge/vertex indices. Each index list includes
+  `total`/`truncated`; at most 128 indices are returned. Component truncation is
+  explicit. Branched boundaries are diagnostics, not valid construction selectors.
+
+Each `Correspondence` contains separate `vertices` and `face_centers` summaries:
+`sample_count`, `mean_distance`, `rms_distance`, `max_distance`, `p95_distance`.
+Distances are unsigned world-space distances to the nearest evaluated source
+triangle. P95 uses nearest rank. `face_normal_dot` is a distribution comparing
+world geometric face normals with the nearest source triangle normal. Face-center
+error can remain nonzero when all corners are projected exactly: a coarse flat
+quad is a chord across a curved surface. Nearby wrong regions can have small
+spatial distance; the metrics do not establish semantic correspondence.
+Authored and evaluated target results are separate so live modifiers cannot hide
+an off-surface authored cage.
+
+### Construction, projection and relaxation
+
+All five editing operations accept `surface_offset` in `[-1, 1]` (default zero)
+and `max_projection_distance` in `(0, 1000]` (default one), in world scene units.
+The distance cap applies to each input point's nearest-source search **before**
+adding the offset. Offset is signed along the evaluated triangle's world geometric
+normal; positive follows source winding. This differs from Shrinkwrap's native
+smooth-normal/projection-line offset modes. It is not a collision guarantee.
+
+| Operation | Additional arguments | Behavior |
+| --- | --- | --- |
+| `blender.retopo.seed_patch` | Required source-local `center`, source-local nonzero `tangent_direction`, world `width`/`height`; `u_segments`, `v_segments` default 1 | Snap center, project transformed tangent into its source tangent plane, derive orthogonal tangent, build and project an oriented quad grid |
+| `blender.retopo.project` | Required vertex `selector`; `mode: "nearest_surface"` | Project selected authored vertices; unselected coordinates and element ordering remain unchanged |
+| `blender.retopo.relax` | Vertex `selector`, nearest-surface mode; `iterations: 1..50` default 5, `factor: (0,1]` default 0.5, `preserve_boundary: true` | Native neighbor smoothing followed by reprojection after every iteration |
+| `blender.retopo.extrude_boundary` | Edge `selector`; nonzero target-local `offset` of length at most 1000 | Extrude one edge or one connected nonbranching boundary chain/loop into a quad strip and project only new vertices |
+| `blender.retopo.bridge_loops` | Edge selectors `loop_a`, `loop_b`; `twist` default 0, `segments: 1..16` default 1 | Bridge two disjoint equal-count closed boundary loops, optionally subdivide connecting edges into bands and project new vertices |
+
+Selectors use the existing explicit authored mesh selector union. Seed width and
+height are approximately `0.0001..1000`; each segment count is `1..16`. A parallel
+or degenerate tangent fails explicitly. Returned `patch` contains the snapped
+source/world center, world normal and actual world tangent basis. The orientation
+is never guessed from a hidden axis.
+
+Boundary preservation in relaxation locks vertices on the **actual Mesh boundary**,
+not every edge of the selected region. Unselected vertices remain fixed. Turning
+it off permits selected boundary vertices to move. Projection and relaxation
+preserve topology and index ordering. Seed/extrude/bridge change topology and
+invalidate snapshot references: inspect/query again after each successful edit.
+
+Bridging uses native surrounding-face winding and nearest total connector-length
+rotation in target-local coordinates. Equally close rotations are rejected as
+ambiguous. `twist` is native integer loop offset, bounded to `[-127, 127]` and
+strictly smaller in absolute value than the loop count; it does not bypass
+validation. Shared or spatially intersecting loops, open/branched chains,
+internal edges and unequal counts are rejected. Construction checks distinct
+quad faces, manifoldness, winding, positive area, local convex corners, triangle
+folds of at least 90 degrees across either quad diagonal, and agreement with
+source normals. These are conservative local checks, **not** a general global
+self-intersection solver or an automatic loop-flow planner.
+
+Edit results contain names, `topology_changed`, `indices_invalidated`,
+`mesh_isolated`, `selected_count`, `moved_count` for existing vertices moving more
+than `1e-7` in target-local distance,
+`created: {vertices, edges, faces}`, bounded `created_faces`, pre-offset
+`projection` distance statistics, `before`/`after` RetopoQuality,
+`correspondence_before`/`correspondence_after`, and `patch` (null except seed).
+Relaxation projection statistics aggregate all moved samples over all iterations;
+final correspondence measures the published cage. Original vertices stay fixed
+for extrusion and bridging. A one-band bridge creates faces without new vertices,
+so its projection sample count is zero; inspect its face-center error and add bands
+when curvature requires them.
+
+### Target modifier policy and budgets
+
+Supported target stacks are empty, one Mirror, one Shrinkwrap, or **Mirror followed
+by Shrinkwrap**. They remain object-owned, unapplied, and retain their settings.
+
+- Mirror: exactly one local axis, target-origin plane, no external mirror object,
+  no bisect, no Edit Mode clipping, merge threshold `0..0.1`. Authored geometry must
+  remain on one side of the plane; an entire coplanar patch is rejected. Native
+  merging is allowed. Clipping is an Edit Mode transform constraint and is not
+  silently emulated by these staged Object Mode edits.
+- Shrinkwrap: exact explicit source target, `NEAREST_SURFACEPOINT`, `ON_SURFACE` or
+  `ABOVE_SURFACE`, no vertex group/auxiliary target/internal subdivision, offset
+  `[-1,1]`. Explicit retopo projection changes authored positions and leaves this
+  helper intact. Evaluated inspection shows the helper's actual result.
+
+The existing **2,000,000 total geometry-element** evaluated work budget remains
+in force, including conservative modifier growth estimates. View-layer/dependency
+traversal is limited to 256 objects. Authored targets are limited to 100,000 total
+vertices + edges + faces + loops, 32 attributes, and a conservative eight-million
+byte attribute estimate (16 bytes per attribute-domain element). Vertex selections
+are limited to 4096, boundary selections to 128 edges per loop, and relaxation to
+100,000 selected-vertex iterations. Local/world coordinates must be finite and
+within one million. Construction has a conservative preallocation estimate and
+checks actual staged results before publication. Unsupported/unbounded dependency
+stacks, including Geometry Nodes, are rejected instead of evaluated speculatively.
+
+A minimal workflow (replace names/geometry with inspected scene values):
+
+```json
+{"operation":"blender.retopo.create_target","arguments":{"source_object":"Sculpt","name":"Cage"}}
+{"operation":"blender.retopo.seed_patch","arguments":{"source_object":"Sculpt","target_object":"Cage","center":[0,0,1],"tangent_direction":[1,0,0],"width":0.6,"height":0.6,"u_segments":3,"v_segments":3}}
+{"operation":"blender.retopo.inspect","arguments":{"source_object":"Sculpt","target_object":"Cage"}}
+{"operation":"blender.retopo.relax","arguments":{"source_object":"Sculpt","target_object":"Cage","selector":{"mode":"all","domain":"vertex"},"preserve_boundary":true}}
+```
+
+Render before and after, examine the actual cage, query current boundaries, and
+extend deliberately. Final deformation topology still needs anatomical loop-flow
+and pole review before UVs, detail transfer and rigging.
 
 ## Cameras
 
@@ -2314,3 +2521,10 @@ Voxel-remesh tests cover native background/UI execution, strict allocation guard
 attribute reprojection/loss, protected production data, shared-mesh isolation,
 staged failure cleanup and remesh-to-sculpt integration. Render tests compare
 density distributions and bounds as well as actual image changes.
+
+Retopology tests exercise separate empty target creation, explicit tangent grids,
+selection-limited projection, boundary-preserving relaxation, native extrusion and
+subdivided loop bridges. Native checks cover source production data/current
+Multires, target data guards, shared Mesh isolation, staged failures, evaluated
+resource/BVH cleanup, quality diagnostics and live Mirror/Shrinkwrap behavior.
+MCP render tests inspect visible quad cages and bridge growth on curved sources.
