@@ -175,3 +175,56 @@ def prepare_mesh_scene() -> None:
     light.data.size = 3
     scene.cycles.samples = 16
     scene.cycles.seed = 0
+
+
+def prepare_modifier_scene(kind: str) -> None:
+    """Fixed studio fixtures for reversible form, shell and Boolean renders."""
+    prepare_scene()
+    scene = bpy.context.scene
+    subject = bpy.data.objects["RenderCube"]
+    subject.name = "Surface"
+    if kind == "mirror":
+        import bmesh  # type: ignore[import-not-found]
+
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(subject.data)
+            for vertex in bm.verts:
+                vertex.co.x = max(0, vertex.co.x)
+            center = [face for face in bm.faces if all(v.co.x == 0 for v in face.verts)]
+            bmesh.ops.delete(bm, geom=center, context="FACES_ONLY")
+            bm.to_mesh(subject.data)
+        finally:
+            bm.free()
+    elif kind == "subdivision_surface":
+        for face in subject.data.polygons:
+            face.use_smooth = True
+    elif kind == "solidify":
+        old = subject.data
+        sheet = bpy.data.meshes.new("Sheet")
+        sheet.from_pydata(
+            [(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)], [], [(0, 1, 2, 3)]
+        )
+        sheet.materials.append(old.materials[0])
+        subject.data = sheet
+        if old.users == 0:
+            bpy.data.meshes.remove(old)
+    elif kind == "boolean":
+        bpy.ops.mesh.primitive_cylinder_add(
+            vertices=32, radius=0.7, depth=3, location=(0.4, -1, 1)
+        )
+        operand = bpy.context.object
+        operand.name = "Operand"
+        operand.hide_render = True
+    else:
+        raise ValueError("Unknown modifier fixture")
+    subject.data.update()
+    camera = scene.camera
+    camera.location = (4, -7, 4)
+    camera.rotation_euler = (
+        (Vector((0, 0, 1)) - camera.location).to_track_quat("-Z", "Y").to_euler()
+    )
+    camera.data.type = "ORTHO"
+    camera.data.ortho_scale = 4.8
+    scene.cycles.samples = 16
+    scene.cycles.seed = 0

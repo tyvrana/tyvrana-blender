@@ -71,6 +71,24 @@ from .models import (
     SceneSummary,
     TransformArguments,
 )
+from .modifier_models import (
+    CONFIGURE,
+    CREATE,
+    ConfigureBase,
+    CreateBase,
+    EvaluatedMeshArguments,
+    EvaluatedMeshSummary,
+    ModifierApplyArguments,
+    ModifierApplyResult,
+    ModifierConfigureArguments,
+    ModifierCreateArguments,
+    ModifierInspectArguments,
+    ModifierInspectResult,
+    ModifierMoveArguments,
+    ModifierRemoveArguments,
+    ModifierRemoveResult,
+    ModifierSummary,
+)
 from .shader_models import (
     ConnectArguments,
     DisconnectArguments,
@@ -115,12 +133,19 @@ OPERATIONS = (
     "blender.mesh.extrude_faces",
     "blender.mesh.inset_faces",
     "blender.mesh.inspect",
+    "blender.mesh.inspect_evaluated",
     "blender.mesh.mark_seam",
     "blender.mesh.merge_vertices",
     "blender.mesh.query",
     "blender.mesh.recalculate_normals",
     "blender.mesh.subdivide_edges",
     "blender.mesh.transform",
+    "blender.modifier.apply",
+    "blender.modifier.configure",
+    "blender.modifier.create",
+    "blender.modifier.inspect",
+    "blender.modifier.move",
+    "blender.modifier.remove",
     "blender.object.create_primitive",
     "blender.object.delete",
     "blender.object.set_transform",
@@ -159,6 +184,28 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def modifier_inspect(
+        self, arguments: ModifierInspectArguments
+    ) -> ModifierInspectResult: ...
+    def modifier_create(
+        self, arguments: ModifierCreateArguments
+    ) -> ModifierSummary: ...
+    def modifier_configure(
+        self, arguments: ModifierConfigureArguments
+    ) -> ModifierSummary: ...
+    def modifier_move(
+        self, arguments: ModifierMoveArguments
+    ) -> ModifierInspectResult: ...
+    def modifier_remove(
+        self, arguments: ModifierRemoveArguments
+    ) -> ModifierRemoveResult: ...
+    def modifier_apply(
+        self, arguments: ModifierApplyArguments
+    ) -> ModifierApplyResult: ...
+    def mesh_inspect_evaluated(
+        self, arguments: EvaluatedMeshArguments
+    ) -> EvaluatedMeshSummary: ...
+
     def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary: ...
     def mesh_query(self, arguments: MeshQueryArguments) -> MeshQueryResult: ...
     def mesh_edit(
@@ -250,9 +297,30 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | UVSetActiveArguments
             | UVUnwrapArguments
             | UVPackArguments
+            | ModifierCreateArguments
+            | ModifierConfigureArguments
+            | ModifierMoveArguments
+            | ModifierRemoveArguments
+            | ModifierApplyArguments
+            | ModifierInspectArguments
+            | EvaluatedMeshArguments
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.modifier.create":
+                arguments = CREATE.validate_python(request.arguments)
+            case "blender.modifier.configure":
+                arguments = CONFIGURE.validate_python(request.arguments)
+            case "blender.modifier.inspect":
+                arguments = ModifierInspectArguments.model_validate(request.arguments)
+            case "blender.modifier.move":
+                arguments = ModifierMoveArguments.model_validate(request.arguments)
+            case "blender.modifier.remove":
+                arguments = ModifierRemoveArguments.model_validate(request.arguments)
+            case "blender.modifier.apply":
+                arguments = ModifierApplyArguments.model_validate(request.arguments)
+            case "blender.mesh.inspect_evaluated":
+                arguments = EvaluatedMeshArguments.model_validate(request.arguments)
             case "blender.mesh.inspect":
                 arguments = MeshInspectArguments.model_validate(request.arguments)
             case "blender.mesh.query":
@@ -375,6 +443,20 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 result = backend.camera_inspect()
             else:
                 result = backend.inspect()
+        elif isinstance(arguments, CreateBase):
+            result = backend.modifier_create(arguments)
+        elif isinstance(arguments, ConfigureBase):
+            result = backend.modifier_configure(arguments)
+        elif isinstance(arguments, ModifierMoveArguments):
+            result = backend.modifier_move(arguments)
+        elif isinstance(arguments, ModifierRemoveArguments):
+            result = backend.modifier_remove(arguments)
+        elif isinstance(arguments, ModifierApplyArguments):
+            result = backend.modifier_apply(arguments)
+        elif isinstance(arguments, ModifierInspectArguments):
+            result = backend.modifier_inspect(arguments)
+        elif isinstance(arguments, EvaluatedMeshArguments):
+            result = backend.mesh_inspect_evaluated(arguments)
         elif isinstance(arguments, MeshQueryArguments):
             result = backend.mesh_query(arguments)
         elif isinstance(arguments, (MeshSelectionArguments, MeshNormalsArguments)):

@@ -63,6 +63,20 @@ from tyvrana_blender.models import (
     SceneSummary,
     TransformArguments,
 )
+from tyvrana_blender.modifier_models import (
+    EvaluatedMeshArguments,
+    EvaluatedMeshSummary,
+    ModifierApplyArguments,
+    ModifierApplyResult,
+    ModifierConfigureArguments,
+    ModifierCreateArguments,
+    ModifierInspectArguments,
+    ModifierInspectResult,
+    ModifierMoveArguments,
+    ModifierRemoveArguments,
+    ModifierRemoveResult,
+    ModifierSummary,
+)
 from tyvrana_blender.operations import OperationError, execute
 from tyvrana_blender.shader_models import (
     ConnectArguments,
@@ -90,6 +104,91 @@ from tyvrana_blender.uv_models import (
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def modifier_inspect(
+        self, arguments: ModifierInspectArguments
+    ) -> ModifierInspectResult:
+        self.calls.append("modifier_inspect")
+        return ModifierInspectResult(object_name=arguments.object_name, modifiers=[])
+
+    def modifier_create(self, arguments: ModifierCreateArguments) -> ModifierSummary:
+        self.calls.append("modifier_create")
+        return ModifierSummary(
+            name="Surface",
+            index=0,
+            type=arguments.type,
+            supported=True,
+            enabled_viewport=True,
+            enabled_render=True,
+            show_in_editmode=True,
+            show_on_cage=False,
+            settings=None,
+        )
+
+    def modifier_configure(
+        self, arguments: ModifierConfigureArguments
+    ) -> ModifierSummary:
+        self.calls.append("modifier_configure")
+        return ModifierSummary(
+            name="Surface",
+            index=0,
+            type=arguments.type,
+            supported=True,
+            enabled_viewport=True,
+            enabled_render=True,
+            show_in_editmode=True,
+            show_on_cage=False,
+            settings=None,
+        )
+
+    def modifier_move(self, arguments: ModifierMoveArguments) -> ModifierInspectResult:
+        self.calls.append("modifier_move")
+        return ModifierInspectResult(object_name=arguments.object_name, modifiers=[])
+
+    def modifier_remove(
+        self, arguments: ModifierRemoveArguments
+    ) -> ModifierRemoveResult:
+        self.calls.append("modifier_remove")
+        return ModifierRemoveResult(
+            object_name=arguments.object_name,
+            removed=arguments.modifier_name,
+            modifiers=[],
+        )
+
+    def modifier_apply(self, arguments: ModifierApplyArguments) -> ModifierApplyResult:
+        self.calls.append("modifier_apply")
+        return ModifierApplyResult(
+            object_name=arguments.object_name,
+            applied=arguments.modifier_name,
+            modifiers=[],
+            mesh=self.mesh_inspect(
+                MeshInspectArguments(object_name=arguments.object_name)
+            ),
+        )
+
+    def mesh_inspect_evaluated(
+        self, arguments: EvaluatedMeshArguments
+    ) -> EvaluatedMeshSummary:
+        self.calls.append("mesh_inspect_evaluated")
+        return EvaluatedMeshSummary(
+            object_name=arguments.object_name,
+            source_mesh_name="Mesh",
+            vertex_count=0,
+            edge_count=0,
+            face_count=0,
+            loop_count=0,
+            bounds_min=None,
+            bounds_max=None,
+            manifold_summary=ManifoldSummary(
+                boundary_edge_count=0,
+                manifold_edge_count=0,
+                non_manifold_edge_count=0,
+                loose_vertex_count=0,
+                loose_edge_count=0,
+            ),
+            modifier_count=0,
+            modifier_stack=[],
+        )
 
     def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary:
         self.calls.append("mesh_inspect")

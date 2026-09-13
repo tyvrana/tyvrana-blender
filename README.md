@@ -93,6 +93,13 @@ Names are exact and are advertised in sorted order:
 | `blender.uv.unwrap` | Object name, method; optional map and applicable settings | Updated UV inspection |
 | `blender.uv.pack_islands` | Object name; optional map, margin, rotation and scaling | Updated UV inspection |
 | `blender.mesh.inspect` | Object name | Bounded authored mesh summary |
+| `blender.mesh.inspect_evaluated` | Object name | Bounded current viewport result after the modifier stack |
+| `blender.modifier.inspect` | Object name | Ordered object-owned modifier stack |
+| `blender.modifier.create` | Object name, type, typed settings; optional name/common flags | Created modifier summary |
+| `blender.modifier.configure` | Object/modifier names, existing type, partial settings/common flags | Updated modifier summary |
+| `blender.modifier.move` | Object/modifier names, final index | Updated ordered stack |
+| `blender.modifier.remove` | Object/modifier names | Removed name and remaining stack; authored data retained |
+| `blender.modifier.apply` | Object/modifier names | Applied name, updated authored mesh and remaining stack |
 | `blender.mesh.query` | Object name, selector; optional limit | Bounded vertex, edge or face details |
 | `blender.mesh.transform` | Object name, selector; translation/rotation/scale and optional pivot | Regional geometry edit result |
 | `blender.mesh.extrude_faces` | Object name, face selector, offset; optional cap scale | Region extrusion result |
@@ -1089,7 +1096,7 @@ selectors or unsupported region geometry return `invalid_arguments`. Capacity
 and protected-data/context failures use `invalid_context`; unexpected native
 failures are sanitized as `operation_failed`.
 
-Hole fill, triangulation, individual face operations, shading controls, modifiers
+Hole fill, triangulation, individual face operations, shading controls
 and sculpting are deferred. Filling arbitrary boundary selections needs a
 deliberate loop/hole contract; no ambiguous catch-all fill operation is exposed.
 Semantics follow the official [BMesh API](https://docs.blender.org/api/5.2/bmesh.html),
@@ -1097,6 +1104,234 @@ Semantics follow the official [BMesh API](https://docs.blender.org/api/5.2/bmesh
 [region extrusion implementation](https://github.com/blender/blender/blob/v5.2.1/source/blender/bmesh/operators/bmo_extrude.cc),
 and [mesh conversion implementation](https://github.com/blender/blender/blob/v5.2.1/source/blender/bmesh/intern/bmesh_mesh_convert.cc),
 with native and real-render verification.
+
+## Modifier stacks and evaluated meshes
+
+Modifiers belong to objects. Creating, configuring, reordering or removing one
+does not replace or modify the authored Mesh, including when several objects
+share it. This is the reversible base-form workflow; application is a separate,
+explicit destructive operation. Direct `blender.mesh.*` topology edits retain
+their existing modifier/shape-key guards.
+
+`blender.modifier.inspect` takes `{"object_name": "Surface"}` and returns
+`{"object_name": "Surface", "modifiers": [...]}`. Each entry contains:
+
+```json
+{
+  "name": "Form",
+  "index": 0,
+  "type": "subdivision_surface",
+  "supported": true,
+  "enabled_viewport": true,
+  "enabled_render": true,
+  "show_in_editmode": true,
+  "show_on_cage": false,
+  "settings": {
+    "mode": "catmull_clark",
+    "levels": 1,
+    "render_levels": 2,
+    "uv_smooth": "preserve_boundaries",
+    "boundary_smooth": "all",
+    "use_creases": true,
+    "show_only_control_edges": true
+  }
+}
+```
+
+Order is top to bottom, with zero-based indices. Existing unsupported types,
+including Geometry Nodes, remain in this list with `supported: false`, their
+lowercase native type identifier and `settings: null`. No arbitrary RNA dump is
+returned. `supported` identifies a configured type, not a guarantee that every
+native mode or dependency on an existing modifier is supported for mutation.
+Inspection preserves incomplete/native state, including missing targets, disabled
+axes and subdivision levels above the input safety cap.
+
+Creation and configuration use a type-discriminated settings union. Configuration
+requires `type` to match the existing modifier; it cannot convert types. Omitted
+settings and common flags retain their native values. Explicit nulls, unknown
+fields, blank/NUL-containing names, numeric booleans/strings, non-finite numbers, float32 overflow
+and nonzero float32 underflow are rejected. Values are normalized to Blender's
+float32 representation. Explicit duplicate names are rejected within the object;
+omitting `name` allows native unique naming. Explicit names must fit Blender's
+63-byte UTF-8 limit and contain no NUL.
+
+The common writable flags are `enabled_viewport`, `enabled_render` and
+`show_in_editmode`, beside `settings`. Cage display is inspection-only: its native
+flag is returned for Mirror, Subdivision, Shrinkwrap and Solidify, otherwise null.
+Actual cage eligibility also depends on enable state, targets and preceding stack
+mapping support, so the flag alone does not promise an editable evaluated cage.
+
+### Supported settings
+
+| Type | Settings and native defaults |
+| --- | --- |
+| `mirror` | `axes: ["x"]`, `bisect_axes: []`, `bisect_flip_axes: []`, `clipping: false`, `merge: true`, `merge_threshold: 0.001`, optional `mirror_object` |
+| `subdivision_surface` | `mode: "catmull_clark"`, `levels: 1`, `render_levels: 2`, `uv_smooth: "preserve_boundaries"`, `boundary_smooth: "all"`, `use_creases: true`, `show_only_control_edges: true` |
+| `shrinkwrap` | Required creation `target`; `method: "nearest_surface"`, `mode: "on_surface"`, `offset: 0`; optional `projection` when method is `project` |
+| `boolean` | Required creation `operand_object`; `operation: "difference"`, `solver: "exact"` |
+| `solidify` | `thickness: 0.01`, `offset: -1`, `even_thickness: false`, `rim: true`, `rim_only: false`, `quality_normals: false` |
+
+Mirror axis lists use unique lowercase `x`, `y`, `z`; at least one main axis must
+be active. Bisect and flip flags are stored per axis and affect enabled axes.
+The default symmetry frame is the object's local origin; a named `mirror_object`
+provides a separate frame without moving either object. Configuration can clear
+that reference with `"clear_mirror_object": true`, mutually exclusive with a new
+name. Merge threshold is nonnegative. Existing UV mirroring/offset and vertex-group
+mirroring settings remain untouched.
+
+Subdivision `mode` is `catmull_clark` (round the form) or `simple` (subdivide without
+rounding). Both viewport and render levels are integers **0–6**. Blender permits
+0–11; the smaller range is an additional safety policy. `boundary_smooth` is `all`
+or `preserve_corners`. `uv_smooth` is `none`, `preserve_corners`,
+`preserve_corners_and_junctions`, `preserve_corners_junctions_and_concave`,
+`preserve_boundaries` or `smooth_all`. Native quality, limit-surface and other
+unexposed settings are preserved. Adaptive subdivision is outside this workflow.
+
+Shrinkwrap supports `nearest_surface`, `project` and `target_normal_project`.
+`mode` is `on_surface`, `inside`, `outside`, `outside_surface` or `above_surface`.
+Offset is signed. The above-surface offset follows the target's interpolated
+normal, which can differ from a flat face normal near corners. Nearest-vertex
+projection remains inspectable but is not configurable in this initial subset.
+Project settings are a nested partial object with `axes` (default empty, meaning
+source-normal projection), `positive: true`, `negative: false`, `cull_face: "off"`
+(`off`, `front`, `back`), `invert_cull: false` and `limit: 0` (unlimited).
+At least one direction must remain enabled. Invert-cull affects the negative
+direction's culling. Projection controls require the effective `project` method;
+switching away preserves the latent native projection settings. Vertex-group and
+auxiliary-target settings are preserved. Internal Shrinkwrap subdivision is
+outside the bounded evaluation policy.
+
+Boolean operates on another Mesh object, using `union`, `intersect` or `difference`.
+Blender 5.2 solvers map to `float`, `exact`, `manifold`; `exact` is the default.
+Float is unsuitable for overlapping coplanar faces. The Manifold solver is
+restricted here to closed, consistently oriented authored inputs without other
+modifiers on either input. General Boolean success does not guarantee a clean
+manifold result for arbitrary geometry; inspect the result. Collection operands
+are inspection-only. Operand objects are never hidden, deleted, moved or modified.
+Existing material mode, self-intersection and tolerance settings remain untouched.
+
+Solidify uses Blender's simple extrusion mode. Thickness and offset are signed
+finite float32 values; offset is not restricted to its UI soft range of -1 to 1.
+Thickness is local-space, so nonuniform object scale affects world-space thickness.
+`rim_only` requires `rim`: it creates boundary walls and retains the original
+surface while omitting the offset shell. Existing complex-mode modifiers are
+inspectable but not configurable or applicable. Material offsets, clamp and
+vertex-group controls are preserved.
+
+### Create, configure, move and remove
+
+```json
+{"object_name": "Surface", "type": "mirror", "name": "Symmetry", "settings": {"axes": ["x"], "clipping": true}}
+```
+
+```json
+{"object_name": "Surface", "type": "subdivision_surface", "name": "Form", "settings": {"levels": 2, "render_levels": 2}}
+```
+
+```json
+{"object_name": "Surface", "modifier_name": "Form", "type": "subdivision_surface", "settings": {"levels": 1}, "enabled_render": true}
+```
+
+Creation appends to the stack. `blender.modifier.move` takes
+`{"object_name": "Surface", "modifier_name": "Form", "index": 0}`; the index is
+the **final** position and must be less than the stack size. Moving to the current
+index succeeds without a change. Order can materially change evaluated geometry.
+Creation and reordering reject pinned-last stacks rather than silently unpinning
+or accepting a different order. Explicit move/remove can address unsupported
+native modifiers while preserving other entries and unexposed settings.
+
+`blender.modifier.remove` takes object and modifier names and returns
+`object_name`, `removed` and the ordered remaining `modifiers`. It never applies
+the modifier. Missing names return `modifier_not_found`. Configuration validates
+the proposed complete supported state before writing; unexpected write/result
+failures restore the changed fields.
+
+### Authored and evaluated inspection
+
+`blender.mesh.inspect` continues to describe the editable **authored** Mesh.
+`blender.mesh.inspect_evaluated` takes only `{"object_name": "Surface"}` and returns:
+
+- `object_name`, `source_mesh_name`, `evaluation: "viewport"`;
+- `vertex_count`, `edge_count`, `face_count`, `loop_count`;
+- object-local `bounds_min`/`bounds_max` (null for an empty mesh);
+- `manifold_summary`, with the same edge/loose-element counts as authored inspection;
+- `modifier_count` and `modifier_stack`, an ordered list of `{name, type}` entries.
+
+This is the current dependency-graph viewport result, including viewport enable
+state and viewport subdivision levels. Render levels can produce a different
+rendered mesh. No evaluated element indices, coordinates dump, RNA objects or
+temporary pointers are exposed. **Evaluated topology is inspection-only and cannot
+be used as authored topology indices in direct mesh edits.** The evaluated object's
+temporary `to_mesh()` output is always cleared in `finally`, including failures;
+it is never attached to a real scene object.
+
+### Explicit application and safety
+
+`blender.modifier.apply` takes
+`{"object_name": "Surface", "modifier_name": "Form"}` and returns `object_name`,
+`applied`, the updated authored `mesh` summary and remaining ordered `modifiers`.
+Only the named supported modifier is applied. Blender applies a nonfirst modifier
+to the authored input as if it were first; it does **not** bake preceding modifiers.
+Thus applying out of order can change the final form. Apply in stack order when
+preserving the evaluated appearance is the goal.
+
+Application uses Blender's native operator on a temporary object and independent
+Mesh copy, with an explicit context override and `use_selected_objects: false`.
+It disables the operator's optional extra UV merge. Result and data checks complete
+before the target's Mesh pointer changes and its named modifier is removed. Other
+modifier instances/settings/order are retained. Failures discard staging and
+preserve the original object/data/stack. Active object, selection and mode are
+preserved; temporary objects and unused Mesh copies are removed. Even single-user
+application replaces the authored datablock; reacquire external Mesh references
+and its returned name. Siblings keep the original shared Mesh unchanged.
+
+Native interpolation determines new UVs, seams, face material indices, weights
+and custom attributes. Representative Simple subdivision tests preserve both UV
+roles, material slots, constant point attributes/weights and subdivided seam edges.
+UV map names, existing material slots and group definitions are checked before
+commit. This is not a promise that every custom data layer has identical values
+after a topology-changing modifier; reinspect/unwrap as appropriate.
+
+Mutations require Object Mode, a local editable scene/object and no running render.
+Linked/override objects and animated object state are rejected. A local object may
+hold modifiers over a linked Mesh, but **application requires local editable Mesh
+data**. Shape-key meshes permit stack changes/evaluated inspection, but application
+returns `mesh_has_shape_keys`. Authored custom normals, mesh animation, constraints,
+object-linked material slots and topology-dependent parenting also protect apply.
+Remaining Armature modifiers are preserved rather than applied. These guards avoid
+inventing remapping/rigging workflows. Edit Mode requests fail without changing UI
+mode; stack inspection remains available.
+
+Object references must exist unambiguously in the current scene, be compatible,
+and not be self references. Names shared across linked libraries are rejected. Dependency checking follows parent links, native object/collection
+modifier pointers and constraint targets, with a 256-object traversal limit.
+Cycles, animated dependency chains and opaque Geometry Nodes dependencies are
+rejected rather than assumed safe. Target objects are read-only inputs.
+
+The work limit is **2,000,000 total vertices, edges, faces and corners**, with a
+maximum stack size of 128. Preflight estimates account for straightforward
+Subdivision growth and conservative Mirror/Solidify/Boolean factors, checking
+both viewport and render configurations without evaluating the scene on each edit.
+Unknown generators may remain in stack edits, but evaluated inspection/application
+reject enabled unsupported topology generators because their growth is unbounded.
+Evaluated output is checked before temporary extraction and again afterward;
+application also validates finite coordinates before commit. Boolean intersections
+are data-dependent, so their estimate is not a mathematical output bound. Blender
+evaluates the current view-layer dependency graph before its result can be counted;
+limits cannot prevent every native allocation, bound unrelated user-scene work or
+interrupt a synchronous native operation.
+
+Errors include `modifier_not_found`, `modifier_type_unsupported`,
+`modifier_dependency_invalid`, `modifier_apply_failed`, `mesh_has_shape_keys`,
+`object_not_found`, `object_not_mesh`, `invalid_arguments` and `invalid_context`.
+Unexpected non-application failures follow the sanitized `operation_failed`
+contract. No scene replacement, automatic apply, arbitrary RNA setter, script
+execution or persistent undo/history layer is introduced.
+
+The contract follows the official [modifier workflow](https://docs.blender.org/manual/en/5.2/modeling/modifiers/introduction.html),
+[dependency graph API](https://docs.blender.org/api/5.2/bpy.types.Depsgraph.html),
+[5.2.1 modifier RNA](https://github.com/blender/blender/blob/v5.2.1/source/blender/makesrna/intern/rna_modifier.cc)
+and [native application implementation](https://github.com/blender/blender/blob/v5.2.1/source/blender/editors/object/object_modifier.cc).
 
 ## Cameras
 
@@ -1446,6 +1681,15 @@ Seam tests verify that angle-based and conformal unwrapping split adjacent faces
 at authored cuts. Background and UI MCP tests compare real extrusion, bevel,
 inset/extrusion and asymmetric regional-transform renders while verifying
 unchanged object transforms, object count, cameras, lights and material resources.
+
+Modifier tests cover ordered supported/unsupported inspection, all five configured
+types, dependency cycles, native solver/method behavior, partial-write rollback,
+shared meshes, shape keys, linked data, UI context and failure cleanup. Repeated
+evaluated extraction checks include success, budget rejection and summary failure.
+Real MCP renders demonstrate mirrored form completion, smoother subdivision,
+shell thickness and Boolean cuts while preserving authored data and scene setup.
+Separate native and full-stack apply tests verify destructive baking, preserved
+remaining modifiers, sibling isolation and authored/evaluated consistency.
 
 Camera checks cover projection normalization, data/transform separation,
 float32 limits, coherent partial updates, failure rollback, shared and linked

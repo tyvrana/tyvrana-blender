@@ -40,6 +40,11 @@ if os.environ.get("TYVRANA_TEST_SHADER") == "1":
 if os.environ.get("TYVRANA_TEST_MESH") == "1":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     importlib.import_module("tests.blender.scene").prepare_mesh_scene()
+if "TYVRANA_TEST_MODIFIER" in os.environ:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    importlib.import_module("tests.blender.scene").prepare_modifier_scene(
+        os.environ["TYVRANA_TEST_MODIFIER"]
+    )
 deadline = time.monotonic() + 180
 
 

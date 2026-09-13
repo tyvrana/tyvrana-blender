@@ -16,7 +16,7 @@ from tyvrana_protocol import (
     OperationRequest,
 )
 
-from . import mesh, shader, uv
+from . import mesh, modifiers, shader, uv
 from .artifacts import ArtifactSpool
 from .camera_models import (
     CameraConfigureArguments,
@@ -81,6 +81,20 @@ from .models import (
     RenderResult,
     SceneSummary,
     TransformArguments,
+)
+from .modifier_models import (
+    EvaluatedMeshArguments,
+    EvaluatedMeshSummary,
+    ModifierApplyArguments,
+    ModifierApplyResult,
+    ModifierConfigureArguments,
+    ModifierCreateArguments,
+    ModifierInspectArguments,
+    ModifierInspectResult,
+    ModifierMoveArguments,
+    ModifierRemoveArguments,
+    ModifierRemoveResult,
+    ModifierSummary,
 )
 from .operations import OperationError, execute, registration
 from .raster import RasterError, raster_size
@@ -487,6 +501,52 @@ def validate_color_space(name: str) -> None:
 class BlenderBackend:
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
+
+    def modifier_inspect(
+        self, arguments: ModifierInspectArguments
+    ) -> ModifierInspectResult:
+        main_thread()
+        return modifiers.inspect(modifiers.object_mesh(arguments.object_name))
+
+    def modifier_create(self, arguments: ModifierCreateArguments) -> ModifierSummary:
+        main_thread()
+        return modifiers.create(modifiers.object_mesh(arguments.object_name), arguments)
+
+    def modifier_configure(
+        self, arguments: ModifierConfigureArguments
+    ) -> ModifierSummary:
+        main_thread()
+        return modifiers.configure(
+            modifiers.object_mesh(arguments.object_name), arguments
+        )
+
+    def modifier_move(self, arguments: ModifierMoveArguments) -> ModifierInspectResult:
+        main_thread()
+        return modifiers.move(
+            modifiers.object_mesh(arguments.object_name),
+            arguments.modifier_name,
+            arguments.index,
+        )
+
+    def modifier_remove(
+        self, arguments: ModifierRemoveArguments
+    ) -> ModifierRemoveResult:
+        main_thread()
+        return modifiers.remove(
+            modifiers.object_mesh(arguments.object_name), arguments.modifier_name
+        )
+
+    def modifier_apply(self, arguments: ModifierApplyArguments) -> ModifierApplyResult:
+        main_thread()
+        return modifiers.apply(
+            modifiers.object_mesh(arguments.object_name), arguments.modifier_name
+        )
+
+    def mesh_inspect_evaluated(
+        self, arguments: EvaluatedMeshArguments
+    ) -> EvaluatedMeshSummary:
+        main_thread()
+        return modifiers.inspect_evaluated(modifiers.object_mesh(arguments.object_name))
 
     def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary:
         main_thread()
