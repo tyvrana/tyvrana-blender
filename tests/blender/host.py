@@ -50,6 +50,9 @@ if "TYVRANA_TEST_SCULPT" in os.environ:
     importlib.import_module("tests.blender.scene").prepare_sculpt_scene(
         os.environ["TYVRANA_TEST_SCULPT"]
     )
+if os.environ.get("TYVRANA_TEST_REMESH") == "1":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    importlib.import_module("tests.blender.remesh_scene").prepare_scene()
 deadline = time.monotonic() + 180
 
 

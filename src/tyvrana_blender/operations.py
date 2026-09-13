@@ -89,6 +89,12 @@ from .modifier_models import (
     ModifierRemoveResult,
     ModifierSummary,
 )
+from .remesh_models import (
+    VoxelRemeshArguments,
+    VoxelRemeshInspectArguments,
+    VoxelRemeshResult,
+    VoxelRemeshSummary,
+)
 from .sculpt_models import (
     RAYCAST,
     CameraRayArguments,
@@ -195,6 +201,8 @@ OPERATIONS = (
     "blender.sculpt.mask.invert",
     "blender.sculpt.mask.stroke",
     "blender.sculpt.stroke",
+    "blender.sculpt.voxel_remesh",
+    "blender.sculpt.voxel_remesh.inspect",
     "blender.shader.connect",
     "blender.shader.disconnect",
     "blender.shader.inspect",
@@ -261,6 +269,12 @@ class SceneBackend(Protocol):
         self, arguments: FaceSetsInitializeArguments
     ) -> FaceSetsSummary: ...
     def sculpt_filter(self, arguments: SculptFilterArguments) -> SculptFilterResult: ...
+    def sculpt_voxel_remesh_inspect(
+        self, arguments: VoxelRemeshInspectArguments
+    ) -> VoxelRemeshSummary: ...
+    def sculpt_voxel_remesh(
+        self, arguments: VoxelRemeshArguments
+    ) -> VoxelRemeshResult: ...
     def sculpt_inspect(self, arguments: SculptInspectArguments) -> SculptSummary: ...
     def sculpt_stroke(self, arguments: SculptStrokeArguments) -> SculptStrokeResult: ...
 
@@ -355,6 +369,8 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MultiresCreateArguments
             | MultiresSubdivideArguments
             | MultiresConfigureArguments
+            | VoxelRemeshArguments
+            | VoxelRemeshInspectArguments
             | MaskInspectArguments
             | MaskClearArguments
             | MaskInvertArguments
@@ -412,6 +428,12 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 arguments = MultiresSubdivideArguments.model_validate(request.arguments)
             case "blender.multires.configure":
                 arguments = MultiresConfigureArguments.model_validate(request.arguments)
+            case "blender.sculpt.voxel_remesh.inspect":
+                arguments = VoxelRemeshInspectArguments.model_validate(
+                    request.arguments
+                )
+            case "blender.sculpt.voxel_remesh":
+                arguments = VoxelRemeshArguments.model_validate(request.arguments)
             case "blender.sculpt.mask.inspect":
                 arguments = MaskInspectArguments.model_validate(request.arguments)
             case "blender.sculpt.mask.clear":
@@ -571,6 +593,10 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             result = backend.multires_inspect(arguments)
         elif isinstance(arguments, SculptStrokeArguments):
             result = backend.sculpt_stroke(arguments)
+        elif isinstance(arguments, VoxelRemeshInspectArguments):
+            result = backend.sculpt_voxel_remesh_inspect(arguments)
+        elif isinstance(arguments, VoxelRemeshArguments):
+            result = backend.sculpt_voxel_remesh(arguments)
         elif isinstance(arguments, MaskInspectArguments):
             result = backend.sculpt_mask_inspect(arguments)
         elif isinstance(arguments, MaskClearArguments):

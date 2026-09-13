@@ -14,7 +14,7 @@ are declared validated. One current adapter implementation serves supported host
 The extension provides objects, cameras, lights, materials, generated and imported
 packed images, shader graphs, semantic mesh modeling, whole-mesh UV controls,
 modifier stacks, Multires sculpting, regional masks and Face Sets, native sculpt
-filters, evaluated surface picking, and PNG scene renders delivered as MCP images.
+filters, explicit voxel-remesh blockout, evaluated surface picking, and PNG scene renders delivered as MCP images.
 
 ## Install and connect
 
@@ -78,6 +78,8 @@ Names are exact and are advertised in sorted order:
 | `blender.sculpt.face_sets.assign` | Object, face selector; optional positive ID | Persistent region assignment |
 | `blender.sculpt.face_sets.initialize` | Object and initialization mode | Deterministic visible region organization |
 | `blender.sculpt.filter` | Object, type, strength; optional iterations/axes/orientation | Native masked refinement and geometry bounds |
+| `blender.sculpt.voxel_remesh.inspect` | Object; proposed remesh settings | Blockers, data consequences, topology metrics and grid estimate |
+| `blender.sculpt.voxel_remesh` | Object and voxel size; explicit native settings | Staged destructive blockout topology replacement |
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
@@ -1768,8 +1770,163 @@ strokes applies: a post-start failure reports `sculpt_failed` with
 `mutation_possible: true`; reinspect and rerender before retrying.
 
 Sphere, sharpen, random, detail enhancement, displacement erasure and Face Set
-boundary relaxation are not exposed in this layer. Dyntopo, voxel remeshing and
-retopology remain separate destructive topology workflows.
+boundary relaxation are not exposed in this layer. Dyntopo and production
+retopology remain separate workflows. Explicit voxel remeshing is documented below.
+
+## Voxel-remesh blockout
+
+Voxel remeshing is **destructive topology replacement for early organic blockout**:
+rebuild stretched/uneven sculpt density, inspect the new mesh, then continue
+sculpting. It is **not production retopology**, deformation-loop generation, or
+animation-ready topology. Final organic assets still need deliberate production
+retopology before final UVs, feather systems, and rigging. Small details, thin
+parts, disconnected regions and gaps can disappear or merge at voxel resolution.
+
+First call `blender.sculpt.voxel_remesh.inspect` with the intended settings:
+
+```json
+{
+  "object_name": "Surface",
+  "voxel_size": 0.05,
+  "adaptivity": 0,
+  "preserve_volume": true,
+  "fix_poles": true,
+  "preserve_attributes": true
+}
+```
+
+Inspection is read-only. Only `object_name` is required; omitted voxel size uses
+0.1, and the other defaults are shown above. It does not change the Mesh's saved
+native remesh settings. Its result contains:
+
+```text
+{
+  object_name, guidance,
+  mesh: MeshSummary + {edge_length: Distribution, face_area: Distribution},
+  settings: {voxel_size, adaptivity, preserve_volume, fix_poles, preserve_attributes},
+  effective_fix_poles,
+  grid: {dimensions, cells, cell_limit, padding_per_axis,
+         exceeds_limit, coordinate_limit_exceeded},
+  shared_mesh,
+  blockers: [{code, message}],
+  destructive_effects: [{code, behavior, names, message}],
+  preservable_data: [{code, behavior, names, message}]
+}
+```
+
+`Distribution` contains `min`, `max`, `mean`, `variance`, and
+`coefficient_of_variation` (standard deviation divided by mean). Empty samples
+report zeros. These are authored local-space density measurements, not claims
+about artistic quality. Effects distinguish `preserved`, `reprojected`,
+`discarded`, and `rebuilt`; reprojection is approximate, not preserved element
+correspondence. The returned `guidance` explains the blockout purpose, destruction
+boundary, inspection/reinspection requirements and visual verification workflow.
+
+`blender.sculpt.voxel_remesh` accepts the same properties but **requires an explicit
+voxel_size**. It repeats all analysis/guards immediately before native execution;
+a previous inspection never authorizes bypassing changed blockers. No broad data
+loss override or acknowledgement checkbox is provided. Deliberately setting
+`preserve_attributes: false` requests the documented attribute loss; protected
+production data still blocks execution.
+
+Settings use Blender's stored float32 precision:
+
+- `voxel_size`: approximately 0.0001 through 1000 Blender units, in object space.
+  The exact lower bound is float32(0.0001). Unit local and inherited scale without
+  shear is required; transforms are never applied automatically.
+- `adaptivity`: 0–1, default 0. Positive values simplify low-detail regions and can
+  introduce triangles/nonuniform density. They disable native pole fixing;
+  `effective_fix_poles` reports this even when `fix_poles` is true.
+- `preserve_volume`: default true; native offset/projection attempts to retain
+  source form and detail. This is not an exact volume or silhouette guarantee.
+- `fix_poles`: default true; native cleanup reduces poles when adaptivity is zero.
+- `preserve_attributes`: default true; native reprojection described below.
+
+The grid estimate uses authored bounds and the actual stored voxel size:
+`n_axis = ceil(extent_axis / voxel_size) + 8`, allowing padding on both sides.
+The product must not exceed **2,000,000 cells**, and no padded axis may exceed
+**4096 cells**. Oversized axes are rejected before multiplication; their reported
+dimensions/cells are null, not an overflowed or guessed number. Absolute local
+coordinates divided by voxel size must not exceed **1,000,000**. This guards
+native coordinate range/precision as well as density. The dense-box estimate is
+conservative for Blender's sparse grid, not an exact memory or output-face count.
+
+Input and staged output retain the existing **2,000,000 total geometry-element**
+limit (vertices + edges + faces + corners). Remeshing additionally permits at most
+**32 nonstructural attributes** and **8,000,000 stored attribute components** on
+input/output. Post-operation checks cannot undo native allocation, so the grid
+limit is enforced before Blender is called.
+
+The initial blockers are:
+
+| Code | Protected boundary |
+| --- | --- |
+| `object_mode_required`, `render_running` | Object Mode required; no active render |
+| `linked_data` | Local editable scene, object and Mesh; no library overrides |
+| `has_multires` | Any Multires modifier; no implicit apply/removal/detail loss |
+| `has_shape_keys` | Shape-key data; execution retains `mesh_has_shape_keys` error semantics |
+| `has_modifiers` | Any other modifier; resolve the stack explicitly first |
+| `nonunit_scale` | Local/inherited scale or shear |
+| `mesh_animation`, `deformation_relationship` | Animated Mesh/object, constraints, deformation parents/targets or vertex-parented children |
+| `has_uv_maps` | Any UV map, including a primitive's generated map; no inference that it is disposable |
+| `has_vertex_groups` | Any group definition, including empty groups; no approximate weight transfer |
+| `has_custom_normals` | Authored custom normals |
+| `dyntopo`, `hidden_geometry` | Dyntopo or hidden authored geometry; no implicit reveal |
+| `object_material_overrides` | Object-linked material slots |
+| `invalid_surface`, `non_manifold` | Empty/degenerate or open/nonmanifold surface, including loose geometry |
+| `voxel_grid_limit`, `voxel_coordinate_limit` | Allocation or coordinate budget |
+| `attribute_limit`, `unsupported_attribute`, `invalid_sculpt_regions` | Attribute capacity, unvalidated types, malformed masks/Face Sets |
+
+Inspection outside Edit Mode reports blockers together. Edit Mode and input
+inspection-capacity failures return errors instead of reporting stale mesh data.
+Coordinates beyond any supported voxel range are rejected before area/normal
+calculations. Otherwise blocked execution returns `voxel_remesh_blocked` with the
+analysis report in error details. There is no native allocation on blocked calls.
+
+Blender 5.2.1's actual data behavior is:
+
+| Data | Preserve attributes enabled | Disabled |
+| --- | --- | --- |
+| Mesh material-slot references | Retained | Retained |
+| Face material indices | Nearest-source-face sampling; regional layout approximate | All zero |
+| Sculpt mask | Barycentric point sampling; coverage changes with resolution | Removed; fully editable |
+| Face Sets | Nearest-source-face IDs; small sets can disappear | Removed; implicit default ID 1 |
+| Point colors/numeric attributes | Barycentric surface sampling | Removed |
+| Edge attributes, seam/sharp flags | Nearest-source-edge sampling; original edge paths are not preserved | Removed |
+| Face attributes and smooth/flat shading | Nearest-source-face sampling | Attributes removed; all faces use the first source face's shading |
+| Corner attributes/colors | Sampled to vertices, then expanded to corners; discontinuities lost | Removed |
+| Computed normals, selection correspondence | Rebuilt/resampled on new topology | Rebuilt |
+| Production UVs, groups/weights, custom normals | Blocked by Tyvrana | Blocked by Tyvrana |
+
+The validated transferable types are FLOAT, INT, INT8, BOOLEAN, FLOAT_VECTOR,
+FLOAT2, INT32_2D, FLOAT_COLOR and BYTE_COLOR on mesh domains. Other types are
+blocked. Attribute names/types/domains and material references are checked before
+publication. Native mask interpolation roundoff within 1e-6 of the valid range
+is normalized to [0,1]; larger invalid values reject the staged result.
+
+Native Blender can reproject UVs and weights, but UV corner discontinuities and
+weight correspondence do not survive exactly. Tyvrana deliberately protects them;
+it does not provide custom attribute-transfer machinery. Native behavior is
+verified against the [Blender 5.2.1 remesh operator](https://github.com/blender/blender/blob/v5.2.1/source/blender/editors/object/object_remesh.cc)
+and [attribute reprojection implementation](https://github.com/blender/blender/blob/v5.2.1/source/blender/blenkernel/intern/mesh_remesh_voxel.cc),
+not the operator's outdated blanket claim that all data layers are lost.
+
+Execution runs native `object.voxel_remesh` on a temporary object and complete Mesh
+copy, then checks geometry, data and resource limits before replacing the target's
+Mesh. Shared siblings retain their original Mesh and settings. Failure before
+publication preserves the original; staging objects and meshes are cleaned up.
+Object identity, transforms, mode, selection, tool/view state and unrelated scene
+resources are preserved. This Object Mode operation works in both background and
+interactive Blender; it needs no fabricated sculpt viewport context.
+
+The result contains `object_name`, `before`, `after`, `settings`,
+`effective_fix_poles`, `grid`, `isolated_shared_mesh`, `indices_invalidated: true`,
+`lost_or_rebuilt_data`, and `preserved_data`. **All old authored element indices
+are invalid**, even if a new element happens to have the same number. Reinspect
+and query after remeshing, raycast the new surface, continue controlled sculpting,
+and rerender to verify form. High-detail Multires and destructive blockout remesh
+remain separate branches; there is no automatic bake or detail-transfer bridge.
+Dyntopo and production retopology remain deferred to their own workflows.
 
 ## Cameras
 
@@ -2152,3 +2309,8 @@ relying only on operator completion: noise reduction, tangential redistribution,
 normal inflation, scaling, axis/orientation constraints, and preservation of a
 masked region. Full MCP tests exercise the regional operations and compare renders
 while preserving authored geometry and unrelated scene state.
+
+Voxel-remesh tests cover native background/UI execution, strict allocation guards,
+attribute reprojection/loss, protected production data, shared-mesh isolation,
+staged failure cleanup and remesh-to-sculpt integration. Render tests compare
+density distributions and bounds as well as actual image changes.

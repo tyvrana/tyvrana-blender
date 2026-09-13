@@ -9,6 +9,7 @@ from tyvrana_protocol import (
     OperationSuccess,
 )
 
+from tyvrana_blender import remesh_models as voxel
 from tyvrana_blender import sculpt_models as regional
 from tyvrana_blender.camera_models import (
     CameraConfigureArguments,
@@ -120,6 +121,53 @@ from tyvrana_blender.uv_models import (
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def sculpt_voxel_remesh_inspect(
+        self, arguments: voxel.VoxelRemeshInspectArguments
+    ) -> voxel.VoxelRemeshSummary:
+        self.calls.append("sculpt_voxel_remesh_inspect")
+        blank = voxel.Distribution(
+            min=0, max=0, mean=0, variance=0, coefficient_of_variation=0
+        )
+        geometry = voxel.VoxelMeshSummary(
+            **self.mesh_inspect(
+                MeshInspectArguments(object_name=arguments.object_name)
+            ).model_dump(),
+            edge_length=blank,
+            face_area=blank,
+        )
+        return voxel.VoxelRemeshSummary(
+            object_name=arguments.object_name,
+            mesh=geometry,
+            settings=voxel.VoxelRemeshSettings.model_validate(
+                arguments.model_dump(exclude={"object_name"})
+            ),
+            effective_fix_poles=arguments.fix_poles and arguments.adaptivity == 0,
+            grid=voxel.estimate_grid([0, 0, 0], [1, 1, 1], arguments.voxel_size),
+            shared_mesh=False,
+            blockers=[],
+            destructive_effects=[],
+            preservable_data=[],
+        )
+
+    def sculpt_voxel_remesh(
+        self, arguments: voxel.VoxelRemeshArguments
+    ) -> voxel.VoxelRemeshResult:
+        self.calls.append("sculpt_voxel_remesh")
+        analysis = self.sculpt_voxel_remesh_inspect(
+            voxel.VoxelRemeshInspectArguments.model_validate(arguments.model_dump())
+        )
+        return voxel.VoxelRemeshResult(
+            object_name=arguments.object_name,
+            before=analysis.mesh,
+            after=analysis.mesh,
+            settings=analysis.settings,
+            effective_fix_poles=analysis.effective_fix_poles,
+            grid=analysis.grid,
+            isolated_shared_mesh=False,
+            lost_or_rebuilt_data=[],
+            preserved_data=[],
+        )
 
     def scene_raycast(self, arguments: RaycastArguments) -> RaycastResult:
         self.calls.append("scene_raycast")

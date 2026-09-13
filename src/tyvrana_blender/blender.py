@@ -16,7 +16,17 @@ from tyvrana_protocol import (
     OperationRequest,
 )
 
-from . import mesh, modifiers, multires, raycast, sculpt, sculpt_regions, shader, uv
+from . import (
+    mesh,
+    modifiers,
+    multires,
+    raycast,
+    remesh,
+    sculpt,
+    sculpt_regions,
+    shader,
+    uv,
+)
 from .artifacts import ArtifactSpool
 from .camera_models import (
     CameraConfigureArguments,
@@ -98,6 +108,12 @@ from .modifier_models import (
 )
 from .operations import OperationError, execute, registration
 from .raster import RasterError, raster_size
+from .remesh_models import (
+    VoxelRemeshArguments,
+    VoxelRemeshInspectArguments,
+    VoxelRemeshResult,
+    VoxelRemeshSummary,
+)
 from .sculpt_models import (
     FaceSetsAssignArguments,
     FaceSetsAssignResult,
@@ -555,6 +571,16 @@ class BlenderBackend:
         return multires.configure(
             modifiers.object_mesh(arguments.object_name), arguments
         )
+
+    def sculpt_voxel_remesh_inspect(
+        self, arguments: VoxelRemeshInspectArguments
+    ) -> VoxelRemeshSummary:
+        main_thread()
+        return remesh.inspect(modifiers.object_mesh(arguments.object_name), arguments)
+
+    def sculpt_voxel_remesh(self, arguments: VoxelRemeshArguments) -> VoxelRemeshResult:
+        main_thread()
+        return remesh.execute(modifiers.object_mesh(arguments.object_name), arguments)
 
     def sculpt_mask_inspect(self, arguments: MaskInspectArguments) -> SculptMaskSummary:
         main_thread()
