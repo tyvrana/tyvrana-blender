@@ -12,7 +12,7 @@ the minimum-version guard but require native and end-to-end testing before they
 are declared validated. One current adapter implementation serves supported hosts.
 
 The extension provides objects, cameras, lights, materials, generated and imported
-packed images, shader graphs, whole-mesh UV controls, and PNG scene renders
+packed images, shader graphs, semantic mesh modeling, whole-mesh UV controls, and PNG scene renders
 delivered as MCP images.
 
 ## Install and connect
@@ -92,10 +92,21 @@ Names are exact and are advertised in sorted order:
 | `blender.uv.set_active` | Object/map names; editing and render activation flags | Updated UV inspection |
 | `blender.uv.unwrap` | Object name, method; optional map and applicable settings | Updated UV inspection |
 | `blender.uv.pack_islands` | Object name; optional map, margin, rotation and scaling | Updated UV inspection |
+| `blender.mesh.inspect` | Object name | Bounded authored mesh summary |
+| `blender.mesh.query` | Object name, selector; optional limit | Bounded vertex, edge or face details |
+| `blender.mesh.transform` | Object name, selector; translation/rotation/scale and optional pivot | Regional geometry edit result |
+| `blender.mesh.extrude_faces` | Object name, face selector, offset; optional cap scale | Region extrusion result |
+| `blender.mesh.inset_faces` | Object name, face selector, thickness; optional depth/even offset | Region inset result |
+| `blender.mesh.bevel_edges` | Object name, edge selector, width; optional segments/profile | Topology bevel result |
+| `blender.mesh.subdivide_edges` | Object name, edge selector; optional cuts/smooth | Subdivision result |
+| `blender.mesh.delete_elements` | Object name, selector; optional face deletion mode | Deleted element counts and summary |
+| `blender.mesh.merge_vertices` | Object name, vertex selector; optional center mode | Merge result |
+| `blender.mesh.mark_seam` | Object name, edge selector, seam boolean | Changed seam count and summary |
+| `blender.mesh.recalculate_normals` | Object name; optional inside boolean | Whole-mesh normal repair result |
 
 Arguments must be objects with no unexpected fields. Vectors contain exactly
-three finite numbers. Rotation uses XYZ Euler angles in radians; transforms are
-local to the object's parent. Creation defaults to location/rotation `[0, 0, 0]`
+three finite numbers. Rotation uses XYZ Euler angles in radians; object transforms
+are local to the object's parent. Creation defaults to location/rotation `[0, 0, 0]`
 and scale `[1, 1, 1]`. Transform fields may be omitted to retain their values;
 explicit null vectors are rejected. Object names must be nonblank.
 
@@ -868,10 +879,224 @@ flags, and selection history. Operators run synchronously with no UV-editor or
 viewport context. Errors include `object_not_mesh`, `uv_map_not_found`, and
 `uv_unwrap_failed`, alongside normal argument/context errors.
 
-This is a whole-mesh UV layer. Deliberate seam authoring requires a future mesh
-selection/topology model; no fragile edge-index seam API is provided. Behavior is
+This is a whole-mesh UV layer. Use `blender.mesh.mark_seam` with an explicit typed
+selector to author seams before angle-based or conformal unwrapping. Behavior is
 checked against Blender's [UV operator source](https://github.com/blender/blender/blob/v5.2.1/source/blender/editors/uvedit/uvedit_unwrap_ops.cc)
 and [BMesh selection API](https://docs.blender.org/api/5.2/bmesh.types.html).
+
+## Mesh inspection and modeling
+
+All mesh operations address an exact `object_name` in the current scene. They
+inspect or edit the authored Mesh, before modifiers and evaluated deformation.
+UI selection never supplies their geometry selection. Object location, rotation,
+scale, parenting, active object, and object selection are preserved.
+
+### Summary and query
+
+`blender.mesh.inspect` takes `{"object_name": "Surface"}` and returns:
+
+```text
+MeshSummary {
+  object_name: string, mesh_name: string, mesh_users: integer,
+  vertex_count: integer, edge_count: integer, face_count: integer,
+  loop_count: integer,
+  bounds_min: [x, y, z] | null, bounds_max: [x, y, z] | null,
+  material_slot_count: integer, uv_map_count: integer, has_shape_keys: boolean,
+  manifold_summary: {
+    boundary_edge_count: integer, manifold_edge_count: integer,
+    non_manifold_edge_count: integer, loose_vertex_count: integer,
+    loose_edge_count: integer
+  }
+}
+```
+
+Bounds enclose authored vertex coordinates in **object-local space**, and are
+null only when there are no vertices. `mesh_users` counts objects referencing the
+Mesh across the file, excluding fake users and other datablock references. Loops
+are face corners. Material slots count the Mesh's ordered slots. A boundary edge
+has exactly one face, a manifold edge exactly two, and a loose edge none.
+`non_manifold_edge_count` includes boundary and loose edges; it is total edges
+minus two-face edges. A loose vertex has no incident edges. These inexpensive
+counts do not certify watertightness, consistent winding, or a valid solid.
+
+`blender.mesh.query` requires `object_name` and `selector`; `limit` defaults to
+64 and accepts integers 1–256. It returns exactly one domain-specific shape:
+
+```text
+{
+  object_name: string, domain: "vertex" | "edge" | "face",
+  matched_count: integer, truncated: boolean, elements: [...]
+}
+vertex element: {index, co: [x, y, z]}
+edge element: {index, vertices: [index, index], seam, sharp, boundary, manifold}
+face element: {
+  index, vertices: [index, ...], vertex_count, vertices_truncated,
+  center: [x, y, z], normal: [x, y, z], area, material_index
+}
+```
+
+Results are ordered by current element index. Edge vertex indices are sorted;
+face vertex indices follow polygon winding. Face centers are the arithmetic mean
+of corner vertex coordinates, not area-weighted centroids. Coordinates, normals,
+and area are object-local. `matched_count` counts every match even when output is
+truncated. `truncated` means more matches exist than returned elements. A face's
+vertex list is separately capped at 128, with its full `vertex_count` and
+`vertices_truncated` flag. Empty queries return zero matches normally. Inspection
+and queries can read a copy of a live Edit Mode BMesh without changing it.
+
+### Explicit selectors
+
+One discriminated selector union is shared by querying and editing:
+
+| `mode` | `domain` | Additional required properties | Matches |
+| --- | --- | --- | --- |
+| `all` | `vertex`, `edge`, `face` | None | Every element in the domain |
+| `indices` | `vertex`, `edge`, `face` | `indices`: 1–4096 unique nonnegative integers | Exact current indices, canonicalized into ascending order |
+| `box` | `vertex`, `face` | `min`, `max`: three-number vectors | Vertex coordinate or face median center within inclusive bounds |
+| `normal` | `face` | Nonzero `direction` vector and `min_dot` in `[-1, 1]` | Unit face normal dot normalized direction is at least the threshold |
+| `boundary` | `edge` | None | Exactly one adjacent face |
+| `seam` | `edge` | `value`: boolean | Authored seam flag equals the requested value |
+
+All predicates use authored object-local geometry. Box minima must not exceed
+maxima on any axis; boxes do not test polygon intersection. Normal direction is
+normalized internally; degenerate faces with zero normals never match that
+selector. No selection expression language, implicit UI state, nearest-point
+selection, or boolean selector trees are accepted.
+
+**Indices are snapshot-local references, not persistent IDs.** Topology editing
+can delete or renumber elements. Reinspect/query after every topology edit before
+reusing indices from an earlier result. Returned region face indices belong to
+the completed edit's new snapshot. There is no fabricated revision or persistent
+element registry. Other Blender users/tools can also invalidate previous results.
+
+```json
+{
+  "object_name": "Surface",
+  "selector": {
+    "domain": "face", "mode": "normal",
+    "direction": [0, 0, 1], "min_dot": 0.99
+  },
+  "limit": 16
+}
+```
+
+### Geometry operations
+
+Every edit requires `object_name`. Every edit except normal recalculation also
+requires an explicit `selector`. A mutation matching nothing returns
+`mesh_selection_empty`; it never falls back to all geometry.
+
+| Operation suffix | Exact additional arguments and semantics |
+| --- | --- |
+| `transform` | Any selector domain. Optional `translation`, `rotation`, `scale` vectors; at least one is required. `pivot` defaults to `"median"`, or accepts `"origin"` or an explicit vector. |
+| `extrude_faces` | Face selector; required nonzero `offset` vector; optional positive three-component `scale`, default `[1,1,1]`. Region extrusion with connected walls; scales the new outer cap about its vertex median, then translates it. |
+| `inset_faces` | Face selector; required `thickness > 0`; `depth` defaults to 0 and may be negative; `even_offset` defaults to true. Insets a region with boundary edges, interpolating native corner data. |
+| `bevel_edges` | Edge selector; required `width > 0`; integer `segments` 1–16, default 1; `profile` in `[0,1]`, default 0.5. Native OFFSET width: distance from an original edge along adjacent faces, in local units. Overlap is clamped. |
+| `subdivide_edges` | Edge selector; integer `cuts` 1–32, default 1; `smooth` in `[0,1]`, default 0. Uses native grid fill and straight-cut quad corners, supporting single selected edges. |
+| `delete_elements` | Any selector domain. Vertices remove incident edges/faces; edges remove adjacent faces while retaining vertices. Face deletion defaults to `face_mode: "faces_only"`, retaining edges/vertices. `"faces_and_unused"` also removes edges/vertices made unused by those faces. `face_mode` is valid only for a face selector. |
+| `merge_vertices` | Vertex selector with at least two matches. `mode` is `"center"` (default). Welds selected vertices to their arithmetic mean; averages vertex custom data through native point-merge semantics. It does not perform distance-based deduplication or implicitly weld UV seams. |
+| `mark_seam` | Edge selector and required boolean `seam`. Sets or clears seam flags; idempotent calls report zero changed edges. Use followed by `blender.uv.unwrap` with `angle_based` or `conformal`. |
+| `recalculate_normals` | No selector. `inside` defaults to false. Recalculates whole-mesh face winding with native connected-region logic; true reverses the result. Closed orientable shells support outside/inside interpretation; open, degenerate or non-manifold surfaces have no guaranteed outward direction. |
+
+`mesh.transform` changes vertex coordinates while `object.set_transform` changes
+the object transform. For edge/face selectors, each unique incident vertex is
+transformed once. The mesh transform order is scale, XYZ Euler rotation in
+radians, then translation. Scale and rotation act about the selected unique
+vertices' arithmetic mean (`median`), the mesh origin, or the explicit local
+pivot. Identity transforms are permitted if supplied explicitly. Zero/negative
+scales follow Blender geometry semantics and can collapse or reflect geometry.
+No cursor, viewport, global orientation, or UI pivot influences the result.
+
+Extrusion/inset require a region with a boundary and reject incident edges having
+more than two faces; selecting an entire closed shell is rejected. Adjacent
+selected faces form regions, not independent face extrusions/insets. Extrusion
+replaces the old connected cap instead of leaving an internal duplicate face.
+Bevel requires consistently wound, two-face manifold edges. It uses native
+material inheritance, loop slide, and seam/sharp propagation, without adding a
+modifier or hardening custom normals. These operations do not guarantee freedom
+from self-intersections, collapsed faces, or poor topology for arbitrary inputs.
+
+Edits return:
+
+```text
+MeshEditResult {
+  object_name,
+  selected: {domain, count},
+  created: {vertices, edges, faces},
+  removed: {vertices, edges, faces},
+  mesh: MeshSummary,
+  region_faces?: {indices: [...], total, truncated},
+  transformed_vertices?: integer,
+  changed_edges?: integer
+}
+```
+
+`selected.count` counts input matches before editing. Created/removed counts
+track actual surviving BMesh elements, rather than assuming net count differences
+represent creation/deletion. Extrusion returns new outer cap `region_faces`;
+inset returns inner inset faces, useful for a following extrusion. Those lists
+contain at most 256 indices and report their full total and truncation separately.
+`transformed_vertices` appears for regional transforms and extrusion;
+`changed_edges` appears for seam changes. Other optional fields are omitted.
+
+### Mutation safety and data preservation
+
+Mutations require Object Mode and editable local objects/Mesh data in an editable
+scene, with no active render. Linked, read-only and library-override data remain
+inspectable but cannot be mutated or silently localized. Shape-key meshes are
+rejected by **all current mesh mutations**, including coordinate transforms,
+seams and normals, with `mesh_has_shape_keys`. Deliberate shape-key-aware editing
+is deferred. Authored custom split normals, any object modifiers, mesh animation,
+and vertex-parented children also return `invalid_context`; this initial layer
+does not apply modifiers or invent topology remapping for those relationships.
+
+Edits resolve selection, operate on a detached BMesh, refresh index tables and
+derived normals, and write to a temporary copy of the Mesh. The resulting summary
+and custom-data layout are validated before a single object data-pointer change
+commits the edit. An operation/writeback/result failure discards the candidate
+and leaves the original mesh pointer and geometry intact. A sibling sharing the
+original Mesh always keeps its original topology, materials, UVs and weights.
+Even single-user edits replace the Mesh datablock: its identity/name may change,
+and external Python references into the former datablock must be reacquired.
+An original with no remaining users is removed; other users and fake users retain
+it. This is operation-level staging, not a persistent undo/transaction service.
+Cancellation after main-thread execution starts follows the existing dispatcher
+contract and does not undo an already completed edit.
+
+Mesh copies retain material slots and vertex group definitions. BMesh carries
+vertex weights, supported custom attributes, face material/smooth flags, UV
+layers, pins and seams through native interpolation rules. Active editing/render
+UV roles are preserved. Tests cover constant weight/attribute interpolation and
+material inheritance through transform, extrusion, inset, bevel and subdivision,
+and unchanged bottom-face UVs through regional transform, extrusion and inset.
+New faces/corners use Blender's derived values; topology editing is not a promise
+of artistically correct new UVs. Reinspect and unwrap where needed. Unexpected
+loss of a named custom-data schema rejects the staged edit. Surviving element
+selection/visibility and UV selection flags are preserved; new elements start
+unselected, and deleted elements cannot remain selected.
+
+Arguments reject unknown fields, explicit nulls, numeric booleans/strings,
+non-finite values, float32 overflow and nonzero float32 underflow. Indices are
+range-checked against the entire current snapshot before any mutation. Queries
+and edits have a 2,000,000-element work bound, counting vertices, edges, faces and
+corners together; conservative operation-specific growth estimates can reject an
+edit before its actual result would reach that limit. Post-edit finite geometry
+and work limits are checked again before commit. These bounds limit work and
+output, but cannot make synchronous native geometry calls interruptible.
+
+Missing/non-mesh objects return `object_not_found`/`object_not_mesh`; malformed
+selectors or unsupported region geometry return `invalid_arguments`. Capacity
+and protected-data/context failures use `invalid_context`; unexpected native
+failures are sanitized as `operation_failed`.
+
+Hole fill, triangulation, individual face operations, shading controls, modifiers
+and sculpting are deferred. Filling arbitrary boundary selections needs a
+deliberate loop/hole contract; no ambiguous catch-all fill operation is exposed.
+Semantics follow the official [BMesh API](https://docs.blender.org/api/5.2/bmesh.html),
+[Blender 5.2.1 operation definitions](https://github.com/blender/blender/blob/v5.2.1/source/blender/bmesh/intern/bmesh_opdefines.cc),
+[region extrusion implementation](https://github.com/blender/blender/blob/v5.2.1/source/blender/bmesh/operators/bmo_extrude.cc),
+and [mesh conversion implementation](https://github.com/blender/blender/blob/v5.2.1/source/blender/bmesh/intern/bmesh_mesh_convert.cc),
+with native and real-render verification.
 
 ## Cameras
 
@@ -1212,6 +1437,15 @@ linked-data rejection, context/selection restoration and rollback. Background an
 real UI-timer tests import an external checker through MCP, observe actual binary
 frames, build the material and UV workflow, delete the original source and core
 copy, and verify the packed texture in a real render.
+
+Mesh tests cover semantic selectors, bounded queries, regional transforms, region
+extrusion/inset, bevel, subdivision, deletion, merge, seams and normal repair.
+Native checks exercise shared-data isolation, shape-key and linked-data guards,
+material/UV/weight preservation, staged failure cleanup and context preservation.
+Seam tests verify that angle-based and conformal unwrapping split adjacent faces
+at authored cuts. Background and UI MCP tests compare real extrusion, bevel,
+inset/extrusion and asymmetric regional-transform renders while verifying
+unchanged object transforms, object count, cameras, lights and material resources.
 
 Camera checks cover projection normalization, data/transform separation,
 float32 limits, coherent partial updates, failure rollback, shared and linked

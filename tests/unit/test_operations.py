@@ -38,6 +38,21 @@ from tyvrana_blender.material_models import (
     MaterialInspectResult,
     MaterialSummary,
 )
+from tyvrana_blender.mesh_models import (
+    EdgeQueryResult,
+    ElementCounts,
+    ElementSelection,
+    FaceQueryResult,
+    ManifoldSummary,
+    MeshEditResult,
+    MeshInspectArguments,
+    MeshNormalsArguments,
+    MeshQueryArguments,
+    MeshQueryResult,
+    MeshSelectionArguments,
+    MeshSummary,
+    VertexQueryResult,
+)
 from tyvrana_blender.models import (
     CreateArguments,
     DeleteArguments,
@@ -75,6 +90,73 @@ from tyvrana_blender.uv_models import (
 class Backend:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary:
+        self.calls.append("mesh_inspect")
+        return MeshSummary(
+            object_name=arguments.object_name,
+            mesh_name="Mesh",
+            mesh_users=1,
+            vertex_count=0,
+            edge_count=0,
+            face_count=0,
+            loop_count=0,
+            bounds_min=None,
+            bounds_max=None,
+            material_slot_count=0,
+            uv_map_count=0,
+            has_shape_keys=False,
+            manifold_summary=ManifoldSummary(
+                boundary_edge_count=0,
+                manifold_edge_count=0,
+                non_manifold_edge_count=0,
+                loose_vertex_count=0,
+                loose_edge_count=0,
+            ),
+        )
+
+    def mesh_query(self, arguments: MeshQueryArguments) -> MeshQueryResult:
+        self.calls.append("mesh_query")
+        match arguments.selector.domain:
+            case "vertex":
+                return VertexQueryResult(
+                    object_name=arguments.object_name,
+                    matched_count=0,
+                    truncated=False,
+                    elements=[],
+                )
+            case "edge":
+                return EdgeQueryResult(
+                    object_name=arguments.object_name,
+                    matched_count=0,
+                    truncated=False,
+                    elements=[],
+                )
+            case "face":
+                return FaceQueryResult(
+                    object_name=arguments.object_name,
+                    matched_count=0,
+                    truncated=False,
+                    elements=[],
+                )
+
+    def mesh_edit(
+        self, arguments: MeshSelectionArguments | MeshNormalsArguments
+    ) -> MeshEditResult:
+        state = self.mesh_inspect(arguments)
+        self.calls[-1] = "mesh_edit"
+        return MeshEditResult(
+            object_name=arguments.object_name,
+            selected=ElementSelection(
+                domain="face"
+                if isinstance(arguments, MeshNormalsArguments)
+                else arguments.selector.domain,
+                count=1,
+            ),
+            created=ElementCounts(vertices=0, edges=0, faces=0),
+            removed=ElementCounts(vertices=0, edges=0, faces=0),
+            mesh=state,
+        )
 
     def uv_inspect(self, arguments: UVInspectArguments) -> UVInspectResult:
         self.calls.append("uv_inspect")

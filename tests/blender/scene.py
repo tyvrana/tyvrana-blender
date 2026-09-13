@@ -146,3 +146,32 @@ def prepare_shader_scene() -> None:
     light.data.size = 5
     light.data.energy = 400
     scene.cycles.samples = 32
+
+
+def prepare_mesh_scene() -> None:
+    """Authored short box with room above it for regional modeling renders."""
+    prepare_scene()
+    scene = bpy.context.scene
+    subject = bpy.data.objects["RenderCube"]
+    subject.name = "Surface"
+    subject.location = (0, 0, 0)
+    for vertex in subject.data.vertices:
+        vertex.co.z = (vertex.co.z + 1) * 0.5
+    subject.data.update()
+    material = subject.data.materials[0]
+    material.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.25
+    camera = scene.camera
+    camera.location = (5, -7, 5)
+    camera.rotation_euler = (
+        (Vector((0, 0, 1.1)) - camera.location).to_track_quat("-Z", "Y").to_euler()
+    )
+    camera.data.type = "ORTHO"
+    camera.data.ortho_scale = 5
+    light = next(obj for obj in scene.objects if obj.type == "LIGHT")
+    light.location = (-3, -4, 6)
+    light.rotation_euler = (
+        (Vector((0, 0, 0.5)) - light.location).to_track_quat("-Z", "Y").to_euler()
+    )
+    light.data.size = 3
+    scene.cycles.samples = 16
+    scene.cycles.seed = 0

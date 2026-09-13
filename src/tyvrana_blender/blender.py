@@ -16,7 +16,7 @@ from tyvrana_protocol import (
     OperationRequest,
 )
 
-from . import shader, uv
+from . import mesh, shader, uv
 from .artifacts import ArtifactSpool
 from .camera_models import (
     CameraConfigureArguments,
@@ -61,6 +61,15 @@ from .material_models import (
     MaterialSummary,
     PrincipledSummary,
     Surface,
+)
+from .mesh_models import (
+    MeshEditResult,
+    MeshInspectArguments,
+    MeshNormalsArguments,
+    MeshQueryArguments,
+    MeshQueryResult,
+    MeshSelectionArguments,
+    MeshSummary,
 )
 from .models import (
     ConnectionConfig,
@@ -478,6 +487,20 @@ def validate_color_space(name: str) -> None:
 class BlenderBackend:
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
+
+    def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary:
+        main_thread()
+        return mesh.inspect(uv.mesh_object(arguments.object_name))
+
+    def mesh_query(self, arguments: MeshQueryArguments) -> MeshQueryResult:
+        main_thread()
+        return mesh.query(uv.mesh_object(arguments.object_name), arguments)
+
+    def mesh_edit(
+        self, arguments: MeshSelectionArguments | MeshNormalsArguments
+    ) -> MeshEditResult:
+        main_thread()
+        return mesh.edit(uv.mesh_object(arguments.object_name), arguments)
 
     def uv_inspect(self, arguments: UVInspectArguments) -> UVInspectResult:
         main_thread()

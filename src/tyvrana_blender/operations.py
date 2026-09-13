@@ -42,6 +42,23 @@ from .material_models import (
     MaterialInspectResult,
     MaterialSummary,
 )
+from .mesh_models import (
+    MeshBevelArguments,
+    MeshDeleteArguments,
+    MeshEditResult,
+    MeshExtrudeArguments,
+    MeshInsetArguments,
+    MeshInspectArguments,
+    MeshMergeArguments,
+    MeshNormalsArguments,
+    MeshQueryArguments,
+    MeshQueryResult,
+    MeshSeamArguments,
+    MeshSelectionArguments,
+    MeshSubdivideArguments,
+    MeshSummary,
+    MeshTransformArguments,
+)
 from .models import (
     CreateArguments,
     DeleteArguments,
@@ -93,6 +110,17 @@ OPERATIONS = (
     "blender.material.configure_principled",
     "blender.material.create_principled",
     "blender.material.inspect",
+    "blender.mesh.bevel_edges",
+    "blender.mesh.delete_elements",
+    "blender.mesh.extrude_faces",
+    "blender.mesh.inset_faces",
+    "blender.mesh.inspect",
+    "blender.mesh.mark_seam",
+    "blender.mesh.merge_vertices",
+    "blender.mesh.query",
+    "blender.mesh.recalculate_normals",
+    "blender.mesh.subdivide_edges",
+    "blender.mesh.transform",
     "blender.object.create_primitive",
     "blender.object.delete",
     "blender.object.set_transform",
@@ -131,6 +159,11 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary: ...
+    def mesh_query(self, arguments: MeshQueryArguments) -> MeshQueryResult: ...
+    def mesh_edit(
+        self, arguments: MeshSelectionArguments | MeshNormalsArguments
+    ) -> MeshEditResult: ...
     def uv_inspect(self, arguments: UVInspectArguments) -> UVInspectResult: ...
     def uv_create(self, arguments: UVCreateArguments) -> UVInspectResult: ...
     def uv_set_active(self, arguments: UVSetActiveArguments) -> UVInspectResult: ...
@@ -217,8 +250,31 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | UVSetActiveArguments
             | UVUnwrapArguments
             | UVPackArguments
+            | MeshInspectArguments
         )
         match request.operation:
+            case "blender.mesh.inspect":
+                arguments = MeshInspectArguments.model_validate(request.arguments)
+            case "blender.mesh.query":
+                arguments = MeshQueryArguments.model_validate(request.arguments)
+            case "blender.mesh.transform":
+                arguments = MeshTransformArguments.model_validate(request.arguments)
+            case "blender.mesh.extrude_faces":
+                arguments = MeshExtrudeArguments.model_validate(request.arguments)
+            case "blender.mesh.inset_faces":
+                arguments = MeshInsetArguments.model_validate(request.arguments)
+            case "blender.mesh.bevel_edges":
+                arguments = MeshBevelArguments.model_validate(request.arguments)
+            case "blender.mesh.subdivide_edges":
+                arguments = MeshSubdivideArguments.model_validate(request.arguments)
+            case "blender.mesh.delete_elements":
+                arguments = MeshDeleteArguments.model_validate(request.arguments)
+            case "blender.mesh.merge_vertices":
+                arguments = MeshMergeArguments.model_validate(request.arguments)
+            case "blender.mesh.mark_seam":
+                arguments = MeshSeamArguments.model_validate(request.arguments)
+            case "blender.mesh.recalculate_normals":
+                arguments = MeshNormalsArguments.model_validate(request.arguments)
             case "blender.uv.inspect":
                 arguments = UVInspectArguments.model_validate(request.arguments)
             case "blender.uv.create_map":
@@ -319,6 +375,12 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 result = backend.camera_inspect()
             else:
                 result = backend.inspect()
+        elif isinstance(arguments, MeshQueryArguments):
+            result = backend.mesh_query(arguments)
+        elif isinstance(arguments, (MeshSelectionArguments, MeshNormalsArguments)):
+            result = backend.mesh_edit(arguments)
+        elif isinstance(arguments, MeshInspectArguments):
+            result = backend.mesh_inspect(arguments)
         elif isinstance(arguments, UVCreateArguments):
             result = backend.uv_create(arguments)
         elif isinstance(arguments, UVSetActiveArguments):
