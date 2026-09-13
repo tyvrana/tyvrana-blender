@@ -758,6 +758,21 @@ def inspect_evaluated(obj: Any) -> EvaluatedMeshSummary:
         evaluated.to_mesh_clear()
 
 
+def material_slots(obj: Any) -> list[tuple[str, Any]]:
+    return [(slot.link, slot.material) for slot in obj.material_slots]
+
+
+def restore_material_slots(obj: Any, slots: list[tuple[str, Any]]) -> None:
+    if len(obj.material_slots) != len(slots):
+        raise OperationError("modifier_apply_failed", "Material slot count changed")
+    for slot, (link, material) in zip(obj.material_slots, slots, strict=True):
+        slot.link = link
+        if link == "OBJECT":
+            slot.material = material
+    if material_slots(obj) != slots:
+        raise OperationError("modifier_apply_failed", "Material slot state changed")
+
+
 def apply(obj: Any, name: str) -> ModifierApplyResult:
     mutable(obj)
     if any(m.type == "MULTIRES" for m in obj.modifiers):
@@ -789,12 +804,11 @@ def apply(obj: Any, name: str) -> ModifierApplyResult:
             child.parent == obj and child.parent_type in {"VERTEX", "VERTEX_3"}
             for child in bpy.data.objects
         )
-        or any(slot.link == "OBJECT" for slot in obj.material_slots)
     ):
         raise OperationError(
             "invalid_context",
             "Application requires local Mesh data without custom normals, animated "
-            "data, object material overrides, constraints or topology-dependent "
+            "data, constraints or topology-dependent "
             "parenting",
         )
     if not mod.show_viewport:
@@ -813,6 +827,8 @@ def apply(obj: Any, name: str) -> ModifierApplyResult:
     staged = None
     candidate = None
     committed = False
+    original_slots = material_slots(obj)
+    active_material_index = obj.active_material_index
     try:
         staged = obj.copy()
         candidate = original.copy()
@@ -849,6 +865,7 @@ def apply(obj: Any, name: str) -> ModifierApplyResult:
             != list(original.materials)
             or [group.name for group in staged.vertex_groups]
             != [group.name for group in obj.vertex_groups]
+            or material_slots(staged)[: len(original_slots)] != original_slots
         ):
             raise OperationError(
                 "modifier_apply_failed",
@@ -871,9 +888,13 @@ def apply(obj: Any, name: str) -> ModifierApplyResult:
         )
         obj.data = candidate
         try:
+            restore_material_slots(obj, material_slots(staged))
+            obj.active_material_index = active_material_index
             obj.modifiers.remove(mod)
         except BaseException:
             obj.data = original
+            restore_material_slots(obj, original_slots)
+            obj.active_material_index = active_material_index
             raise
         committed = True
         return result

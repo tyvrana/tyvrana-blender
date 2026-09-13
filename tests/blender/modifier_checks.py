@@ -596,6 +596,8 @@ class ModifierTests(unittest.TestCase):
 
     def test_apply_all_other_supported_types(self) -> None:
         target = self.target()
+        material = bpy.data.materials.new("Object Finish")
+        self.call("material.assign", material_name=material.name)
         for kind, settings in (
             ("shrinkwrap", {"target": target.name}),
             ("boolean", {"operand_object": target.name}),
@@ -606,6 +608,7 @@ class ModifierTests(unittest.TestCase):
                 evaluated = self.evaluated()
                 self.call("modifier.apply", modifier_name="Shape")
                 result = self.call("mesh.inspect")
+                self.assertEqual(api.material_slots(self.obj), [("OBJECT", material)])
                 for key in (
                     "vertex_count",
                     "edge_count",
@@ -680,6 +683,40 @@ class ModifierTests(unittest.TestCase):
         self.assertEqual(before, authored(original))
         self.assertEqual([m.name for m in self.obj.modifiers], ["Shape"])
         self.assertEqual(counts, (len(bpy.data.objects), len(bpy.data.meshes)))
+
+    def test_apply_preserves_object_overrides_and_shared_sibling(self) -> None:
+        underlying = bpy.data.materials.new("Underlying")
+        finish = bpy.data.materials.new("Local Finish")
+        other = bpy.data.materials.new("Sibling Finish")
+        self.obj.data.materials.append(underlying)
+        self.obj.data.materials.append(None)
+        sibling = bpy.data.objects.new("Sibling", self.obj.data)
+        bpy.context.scene.collection.objects.link(sibling)
+        self.call("material.assign", material_name=finish.name)
+        self.call("material.assign", object_name=sibling.name, material_name=other.name)
+        self.obj.active_material_index = 1
+        original = self.obj.data
+        before = authored(original)
+        slots = api.material_slots(self.obj)
+        sibling_slots = api.material_slots(sibling)
+        self.add("subdivision_surface", mode="simple")
+        counts = (len(bpy.data.objects), len(bpy.data.meshes))
+        with patch.object(
+            api.mesh, "inspect", side_effect=RuntimeError("invalid stage")
+        ):
+            self.error("modifier.apply", "modifier_apply_failed", modifier_name="Shape")
+        self.assertEqual(self.obj.data, original)
+        self.assertEqual(api.material_slots(self.obj), slots)
+        self.assertEqual(authored(original), before)
+        self.assertEqual(counts, (len(bpy.data.objects), len(bpy.data.meshes)))
+        self.call("modifier.apply", modifier_name="Shape")
+        self.assertNotEqual(self.obj.data, original)
+        self.assertEqual(api.material_slots(self.obj), slots)
+        self.assertEqual(self.obj.active_material_index, 1)
+        self.assertEqual(list(self.obj.data.materials), [underlying, None])
+        self.assertEqual(sibling.data, original)
+        self.assertEqual(authored(original), before)
+        self.assertEqual(api.material_slots(sibling), sibling_slots)
 
     def test_disabled_application_is_explicit_failure(self) -> None:
         self.add("subdivision_surface")

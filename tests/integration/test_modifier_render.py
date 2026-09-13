@@ -38,6 +38,18 @@ async def test_reversible_modifier_form_renders_through_mcp(
                     client, identifier, "blender." + operation_name, arguments
                 )
 
+            materials = await call("material.inspect")
+            surface_material = next(
+                material["name"]
+                for material in materials["materials"]
+                if any(
+                    a["object"] == "Surface" and a["slot"] == 0
+                    for a in material["assignments"]
+                )
+            )
+            await call(
+                "material.assign", object_name="Surface", material_name=surface_material
+            )
             scene_before = await call("scene.inspect")
             camera_before = await call("camera.inspect")
             light_before = await call("light.inspect")
@@ -138,6 +150,9 @@ async def test_reversible_modifier_form_renders_through_mcp(
                 assert (await call("mesh.inspect", object_name="Surface"))[
                     "vertex_count"
                 ] == evaluated_after["vertex_count"]
+                third = await render(client, identifier)
+                assert mean_pixel_difference(second, third) < 0.2
+                assert await call("material.inspect") == material_before
             else:
                 removed = await call(
                     "modifier.remove", object_name="Surface", modifier_name="Form"

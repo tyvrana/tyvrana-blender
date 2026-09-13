@@ -1320,6 +1320,11 @@ preserve the original object/data/stack. Active object, selection and mode are
 preserved; temporary objects and unused Mesh copies are removed. Even single-user
 application replaces the authored datablock; reacquire external Mesh references
 and its returned name. Siblings keep the original shared Mesh unchanged.
+Object-linked material assignments, underlying data slots and the active material
+index are preserved through the staged application and Mesh replacement. Existing
+slot order and effective assignments are validated before commit; new native slots
+are carried with their link modes. Failed publication restores the original slot
+state with the original Mesh.
 
 Native interpolation determines new UVs, seams, face material indices, weights
 and custom attributes. Representative Simple subdivision tests preserve both UV
@@ -1333,7 +1338,7 @@ Linked/override objects and animated object state are rejected. A local object m
 hold modifiers over a linked Mesh, but **application requires local editable Mesh
 data**. Shape-key meshes permit stack changes/evaluated inspection, but application
 returns `mesh_has_shape_keys`. Authored custom normals, mesh animation, constraints,
-object-linked material slots and topology-dependent parenting also protect apply.
+and topology-dependent parenting also protect apply.
 Remaining Armature modifiers are preserved rather than applied. These guards avoid
 inventing remapping/rigging workflows. Edit Mode requests fail without changing UI
 mode; stack inspection remains available.
