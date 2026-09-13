@@ -696,7 +696,8 @@ def run() -> None:
         raise RuntimeError("Native retopology checks failed")
 
 
-if bpy.app.background:
-    run()
-else:
-    bpy.app.timers.register(run, first_interval=3)
+if __name__ == "__main__":
+    if bpy.app.background:
+        run()
+    else:
+        bpy.app.timers.register(run, first_interval=3)

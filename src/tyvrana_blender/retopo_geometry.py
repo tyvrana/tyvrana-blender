@@ -17,10 +17,12 @@ from .retopo_models import (
     MAX_BOUNDARIES,
     MAX_BOUNDARY_EDGES,
     MAX_COORDINATE,
+    MAX_POLES,
     BoundarySummary,
     Correspondence,
     DistanceSummary,
     EvaluatedSurfaceSummary,
+    PoleSummary,
     RetopoQuality,
     ValenceSummary,
 )
@@ -327,6 +329,35 @@ def correspondence(reference: Surface, bm: Any, transform: Any) -> Correspondenc
         )
 
 
+def non_manifold_vertices(bm: Any) -> list[int]:
+    """Find disconnected face fans and invalid boundary incidence in linear work."""
+    invalid = []
+    for vertex in bm.verts:
+        if not vertex.link_faces:
+            continue  # Loose geometry is reported separately.
+        adjacent: dict[Any, set[Any]] = {face: set() for face in vertex.link_faces}
+        bad_edge = False
+        boundaries = 0
+        for edge in vertex.link_edges:
+            faces = list(edge.link_faces)
+            boundaries += len(faces) == 1
+            if len(faces) == 2:
+                adjacent[faces[0]].add(faces[1])
+                adjacent[faces[1]].add(faces[0])
+            elif len(faces) != 1:
+                bad_edge = True
+        pending = [next(iter(adjacent))]
+        reached = set(pending)
+        while pending:
+            for face in adjacent[pending.pop()]:
+                if face not in reached:
+                    reached.add(face)
+                    pending.append(face)
+        if bad_edge or boundaries not in {0, 2} or len(reached) != len(adjacent):
+            invalid.append(vertex.index)
+    return invalid
+
+
 def quality(obj: Any, bm: Any, data: Any | None = None) -> RetopoQuality:
     transform = matrix(obj)
     components = boundary_components([e for e in bm.edges if e.is_boundary])
@@ -349,6 +380,19 @@ def quality(obj: Any, bm: Any, data: Any | None = None) -> RetopoQuality:
             )
         )
     valences = [len(v.link_edges) for v in bm.verts]
+    unusual = [v for v in bm.verts if len(v.link_edges) != (3 if v.is_boundary else 4)]
+    # Report interior poles first; normal boundary corners are contextual entries.
+    unusual.sort(key=lambda v: (v.is_boundary, v.index))
+    poles = [
+        PoleSummary(
+            vertex_index=v.index,
+            valence=len(v.link_edges),
+            boundary=v.is_boundary,
+            position=list(v.co),
+            incident_face_count=len(v.link_faces),
+        )
+        for v in unusual[:MAX_POLES]
+    ]
     with world_mesh(bm, transform) as world:
         areas = [float(f.calc_area()) for f in world.faces]
         aspects = [
@@ -366,6 +410,7 @@ def quality(obj: Any, bm: Any, data: Any | None = None) -> RetopoQuality:
             boundary_chain_count=sum(c[2] == "open" for c in components),
             branched_boundary_count=sum(c[2] == "branched" for c in components),
             non_manifold_edge_count=sum(len(e.link_faces) > 2 for e in bm.edges),
+            non_manifold_vertex_count=len(non_manifold_vertices(bm)),
             inconsistent_winding_edge_count=sum(
                 e.is_manifold and not e.is_contiguous for e in bm.edges
             ),
@@ -383,4 +428,7 @@ def quality(obj: Any, bm: Any, data: Any | None = None) -> RetopoQuality:
             extreme_aspect_ratio_count=sum(a > EXTREME_ASPECT_RATIO for a in aspects),
             boundaries=boundaries,
             boundaries_truncated=len(components) > MAX_BOUNDARIES,
+            poles=poles,
+            poles_total=len(unusual),
+            poles_truncated=len(unusual) > MAX_POLES,
         )

@@ -25,6 +25,9 @@ MAX_BOUNDARIES = 64
 MAX_RELAX_WORK = 100_000
 MAX_COORDINATE = 1_000_000
 EXTREME_ASPECT_RATIO = 10.0
+MAX_FINISH_EDGES = 128
+MAX_COLLAPSE_EDGES = 64
+MAX_POLES = 128
 GUIDANCE = (
     "Retopology reads the current evaluated high-resolution source and edits a "
     "separate authored low-poly target. Pass source_object and target_object "
@@ -47,6 +50,25 @@ GUIDANCE = (
     "max_projection_distance (positive, at most 1000, default 1). "
     "Inspect face-center distances as well as vertex distances: coarse faces "
     "can cut through curvature even when their vertices lie on the source."
+    " Finishing: insert_loop takes one edge selector, factor (0..1, default "
+    "0.5), and from_vertex (an endpoint, required away from midpoint); it cuts "
+    "the complete quad ring, including clean boundary-to-boundary rings. "
+    "slide takes a single vertex or complete edge-loop/chain selector, "
+    "toward_vertex (an unselected connected neighbor identifying the side), "
+    "and factor (0..1, excluding 1); it preserves topology. subdivide takes "
+    "an edge selector and cuts (1..4); each touched quad needs all four or "
+    "two opposite selected edges. collapse takes an edge selector, mode "
+    "edge (one edge, may create triangles) or ring (one seed edge expands to "
+    "a quad ring); midpoint placement, allow_boundary false by default. "
+    "rotate_edge takes one edge selector and direction clockwise or "
+    "counterclockwise; it redirects two adjacent triangles or quads and "
+    "changes valence without moving vertices. Straight quad corners may "
+    "need deliberate relax afterward. stitch welds equal open boundary "
+    "chains chain_a/chain_b with explicit endpoint indices start_a/start_b "
+    "and max_weld_distance (world, default 0.01). fill_boundary takes a "
+    "closed boundary selector, corner_vertex and span (columns); mode grid. "
+    "Finishing construction invalidates indices; inspect poles, boundaries, "
+    "quality and correspondence, deliberately relax/project, then render."
 )
 
 
@@ -138,11 +160,111 @@ class RetopoBridgeArguments(ProjectionSettings):
         return value
 
 
+class FinishEdgesArguments(ProjectionSettings):
+    selector: MeshElementSelector
+
+    @field_validator("selector")
+    @classmethod
+    def edge_domain(cls, value: MeshElementSelector) -> MeshElementSelector:
+        if value.domain != "edge":
+            raise ValueError("This operation requires an edge selector")
+        return value
+
+
+class RetopoInsertArguments(ProjectionSettings):
+    edge: MeshElementSelector
+    factor: Annotated[Float32, Field(gt=0, lt=1)] = 0.5
+    from_vertex: Annotated[int, Field(ge=0)] | None = None
+
+    @model_validator(mode="after")
+    def ring_reference(self) -> Self:
+        if self.edge.domain != "edge":
+            raise ValueError("Loop insertion requires one edge")
+        if self.factor != 0.5 and self.from_vertex is None:
+            raise ValueError("Non-midpoint insertion requires from_vertex")
+        return self
+
+
+class RetopoSlideArguments(ProjectionSettings):
+    selector: MeshElementSelector
+    toward_vertex: Annotated[int, Field(ge=0)]
+    factor: Annotated[Float32, Field(ge=0, lt=1)]
+
+    @field_validator("selector")
+    @classmethod
+    def slide_domain(cls, value: MeshElementSelector) -> MeshElementSelector:
+        if value.domain not in {"vertex", "edge"}:
+            raise ValueError("Slide requires a vertex or edge selector")
+        return value
+
+
+class RetopoSubdivideArguments(FinishEdgesArguments):
+    cuts: Annotated[int, Field(ge=1, le=4)] = 1
+
+
+class RetopoCollapseArguments(FinishEdgesArguments):
+    mode: Literal["edge", "ring"] = "edge"
+    allow_boundary: bool = False
+
+
+class RetopoRotateArguments(ProjectionSettings):
+    edge: MeshElementSelector
+    direction: Literal["clockwise", "counterclockwise"] = "clockwise"
+
+    @field_validator("edge")
+    @classmethod
+    def edge_domain(cls, value: MeshElementSelector) -> MeshElementSelector:
+        if value.domain != "edge":
+            raise ValueError("Rotation requires one edge")
+        return value
+
+
+class RetopoStitchArguments(ProjectionSettings):
+    chain_a: MeshElementSelector
+    chain_b: MeshElementSelector
+    start_a: Annotated[int, Field(ge=0)]
+    start_b: Annotated[int, Field(ge=0)]
+    max_weld_distance: Annotated[Float32, Field(gt=0, le=1)] = 0.01
+
+    @field_validator("chain_a", "chain_b")
+    @classmethod
+    def edge_domain(cls, value: MeshElementSelector) -> MeshElementSelector:
+        if value.domain != "edge":
+            raise ValueError("Stitching requires edge selectors")
+        return value
+
+
+class RetopoFillArguments(ProjectionSettings):
+    boundary: MeshElementSelector
+    corner_vertex: Annotated[int, Field(ge=0)]
+    span: Annotated[int, Field(ge=1, le=63)]
+    mode: Literal["grid"] = "grid"
+
+    @field_validator("boundary")
+    @classmethod
+    def edge_domain(cls, value: MeshElementSelector) -> MeshElementSelector:
+        if value.domain != "edge":
+            raise ValueError("Grid fill requires a boundary edge selector")
+        return value
+
+
+type RetopoFinishArguments = (
+    RetopoInsertArguments
+    | RetopoSlideArguments
+    | RetopoSubdivideArguments
+    | RetopoCollapseArguments
+    | RetopoRotateArguments
+    | RetopoStitchArguments
+    | RetopoFillArguments
+)
+
+
 type RetopoEditArguments = (
     RetopoSeedArguments
     | RetopoProjectArguments
     | RetopoExtrudeArguments
     | RetopoBridgeArguments
+    | RetopoFinishArguments
 )
 
 
@@ -183,6 +305,14 @@ class ValenceSummary(Model):
     max_valence: int
 
 
+class PoleSummary(Model):
+    vertex_index: int
+    valence: int
+    boundary: bool
+    position: Vector
+    incident_face_count: int
+
+
 class RetopoQuality(Model):
     mesh: MeshSummary
     quad_count: int
@@ -193,6 +323,7 @@ class RetopoQuality(Model):
     boundary_chain_count: int
     branched_boundary_count: int
     non_manifold_edge_count: int
+    non_manifold_vertex_count: int = 0
     inconsistent_winding_edge_count: int
     loose_vertex_count: int
     loose_edge_count: int
@@ -205,6 +336,9 @@ class RetopoQuality(Model):
     extreme_aspect_ratio_threshold: float = EXTREME_ASPECT_RATIO
     boundaries: list[BoundarySummary]
     boundaries_truncated: bool
+    poles: list[PoleSummary] = Field(default_factory=list)
+    poles_total: int = 0
+    poles_truncated: bool = False
 
 
 class EvaluatedSurfaceSummary(Model):
@@ -263,3 +397,19 @@ class RetopoEditResult(Model):
     correspondence_before: Correspondence
     correspondence_after: Correspondence
     patch: PatchFrame | None = None
+    removed: ElementCounts = Field(
+        default_factory=lambda: ElementCounts(vertices=0, edges=0, faces=0)
+    )
+    created_vertices: BoundedIndices = Field(
+        default_factory=lambda: BoundedIndices(indices=[], total=0, truncated=False)
+    )
+    created_edges: BoundedIndices = Field(
+        default_factory=lambda: BoundedIndices(indices=[], total=0, truncated=False)
+    )
+    flow_edges: BoundedIndices = Field(
+        default_factory=lambda: BoundedIndices(indices=[], total=0, truncated=False)
+    )
+
+    input_edges_before: BoundedIndices = Field(
+        default_factory=lambda: BoundedIndices(indices=[], total=0, truncated=False)
+    )

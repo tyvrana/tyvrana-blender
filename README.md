@@ -88,6 +88,13 @@ Names are exact and are advertised in sorted order:
 | `blender.retopo.relax` | Source/target, vertex selector, bounded smoothing | Reprojected relaxation with optional boundary lock |
 | `blender.retopo.extrude_boundary` | Source/target, boundary selector, offset | Projected quad strip |
 | `blender.retopo.bridge_loops` | Source/target, two equal closed loops | Validated projected quad bands |
+| `blender.retopo.insert_loop` | One transverse edge; optional factor/reference endpoint | One projected loop through a quad ring |
+| `blender.retopo.slide` | Vertex/loop selector, explicit side, factor | Surface-conforming topology-preserving slide |
+| `blender.retopo.subdivide` | Coherent edge selection, bounded cuts | Local projected quad density |
+| `blender.retopo.collapse` | Edge or quad ring; explicit boundary permission | Controlled density reduction |
+| `blender.retopo.rotate_edge` | Internal edge, winding-relative direction | Triangle/quad flow and pole redirection |
+| `blender.retopo.stitch` | Equal open chains, explicit endpoints, weld cap | Weld matching seam boundaries |
+| `blender.retopo.fill_boundary` | Closed boundary, explicit corner and span | Projected quad grid fill |
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
@@ -1949,8 +1956,8 @@ The construction workflow follows Blender's [Poly Build](https://docs.blender.or
 [surface snapping](https://docs.blender.org/manual/en/5.2/editors/3dview/controls/snapping.html)
 and [bridge loops](https://docs.blender.org/manual/en/5.2/modeling/meshes/editing/edge/bridge_edge_loops.html)
 concepts, using native BMesh construction, edge extrusion, bridging and smoothing.
-Grid Fill, vertex/edge sliding and topology cleanup remain distinct later tools;
-no automatic quad-remeshing library or generic mesh primitive is added here.
+The finishing operations below add controlled loop density, sliding, pole-flow
+redirection and boundary closure. No automatic quad-remeshing library is used.
 
 ### Source and target ownership
 
@@ -2017,7 +2024,9 @@ and:
 - `quad_count` (four corners), `triangle_count` (three), `ngon_count` (more than four).
 - Boundary edge, closed-loop, open-chain and branched-component counts;
   `non_manifold_edge_count` counts edges with **more than two** faces. Boundaries
-  and loose edges are reported separately. The nested generic MeshSummary retains
+  and loose edges are reported separately. `non_manifold_vertex_count` also
+  detects disconnected face fans and invalid boundary incidence, including
+  vertex-only pinches that edge counts cannot detect. The nested generic MeshSummary retains
   its broader native non-manifold classification. Inconsistent two-face winding,
   loose vertices/edges and degenerate faces are also counted.
 - `valence`: edge-degree counts `valence_0` through `valence_5`, `valence_6_plus`
@@ -2134,6 +2143,126 @@ A minimal workflow (replace names/geometry with inspected scene values):
 Render before and after, examine the actual cage, query current boundaries, and
 extend deliberately. Final deformation topology still needs anatomical loop-flow
 and pole review before UVs, detail transfer and rigging.
+
+### Loop flow and topology finishing
+
+Finishing continues the same explicit read-only source/authored target model.
+The tools follow Blender's [loop cutting](https://docs.blender.org/manual/en/5.2/modeling/meshes/editing/edge/loopcut_slide.html),
+[vertex sliding](https://docs.blender.org/manual/en/5.2/modeling/meshes/editing/vertex/slide_vertices.html),
+[collapse](https://docs.blender.org/manual/en/5.2/modeling/meshes/editing/mesh/delete.html)
+and [Grid Fill](https://docs.blender.org/manual/en/5.2/modeling/meshes/editing/face/grid_fill.html)
+workflows using native BMesh data operations. There are no viewport mouse gestures,
+implicit anatomy templates, automatic density transitions or external remeshers.
+
+Every operation requires `source_object` and `target_object`, uses the existing
+world-space `surface_offset`/`max_projection_distance` contract, and stages changes
+before publication. Projection applies only to newly created or deliberately
+moved vertices; unrelated coordinates remain fixed. No finishing operation
+implicitly smooths the cage. Use `retopo.relax` deliberately afterward.
+
+| Operation | Additional arguments | Semantics |
+| --- | --- | --- |
+| `blender.retopo.insert_loop` | `edge`: exactly one selected edge; `factor` in `(0,1)`, default `0.5`; optional `from_vertex` | Traverse opposite edges through a complete quad ring and insert one loop. Non-midpoint factors require an explicit endpoint identifying factor zero. |
+| `blender.retopo.slide` | `selector`: one vertex or a complete edge loop/chain; `toward_vertex`; required `factor` in `[0,1)` | Interpolate from current positions toward an explicitly identified topological neighbor/rail, then project. Zero is an exact coordinate no-op. |
+| `blender.retopo.subdivide` | Edge `selector`; `cuts: 1..4`, default `1` | Native local subdivision; each touched quad must have all four or two opposite edges selected. New vertices project to the source. |
+| `blender.retopo.collapse` | `selector`: exactly one edge; `mode: "edge"` (default) or `"ring"`; `allow_boundary: false` | Collapse one edge, or expand its complete transverse quad ring and collapse each disjoint edge at its midpoint. Project surviving merged vertices. |
+| `blender.retopo.rotate_edge` | `edge`: exactly one internal edge; `direction: "clockwise"` (default) or `"counterclockwise"` | Native topological rotation between two triangles or two quads. Coordinates stay fixed; the replacement diagonal changes local valence. |
+| `blender.retopo.stitch` | `chain_a`, `chain_b`: open boundary edge selectors; explicit endpoint indices `start_a`, `start_b`; world `max_weld_distance` in `(0,1]`, default `0.01` | Pair vertices along the explicit chain directions, weld to pair midpoints, and project the retained vertices. |
+| `blender.retopo.fill_boundary` | Closed `boundary` edge selector; `corner_vertex`; `span: 1..63`; `mode: "grid"` | Fill an even boundary with a native rectangular quad grid, then project new interior vertices. |
+
+**Ring insertion and subdivision.** Rings may be closed or cleanly terminate at
+two boundaries. Traversal follows opposite edges of quad faces, never a guessed
+continuation through a vertex pole. Triangles, ngons, shared ring endpoints,
+branching, inconsistent orientation and invalid revisits are rejected. The
+`from_vertex` endpoint defines factor zero; the opposite endpoint defines one.
+This orientation propagates across the face ring. At the default midpoint no
+orientation reference is needed. Multiple cuts remain in `subdivide`, while
+`insert_loop` creates exactly one identifiable flow loop. Subdivision rejects
+partial face patterns that would introduce arbitrary triangles or ngons. Callers
+must select a coherent pattern; surrounding unselected faces are not automatically
+expanded into a transition.
+
+**Sliding.** For a single vertex, `toward_vertex` must be its connected neighbor.
+For a loop, it must be one unselected neighboring vertex identifying exactly one
+side; corresponding rails propagate through adjacent quads. Select a complete
+closed loop or boundary-to-boundary chain. Interior vertices require valence four,
+with clean valence-three boundary endpoints. Incomplete selections, poles,
+ambiguous anchors and reversing rail orientation fail. Factor one is excluded to
+prevent collapsing onto the adjacent rail. To move in the other direction, supply
+a neighbor on that side. Direction is independent of incidental edge-index order.
+
+**Reduction and poles.** Ring collapse preserves a quad neighborhood. Single-edge
+collapse may deliberately turn adjacent quads into triangles; it reports that
+change rather than promising quads. Any selected endpoint on an actual boundary
+requires `allow_boundary: true`. Collapse and stitching at an existing Mirror
+center seam are conservatively rejected even with that permission. Native rotation
+supports quad pole redirection as well as triangle diagonal changes. Clockwise and
+counterclockwise follow native face winding. Mixed triangle/quad pairs, invalid
+combined neighborhoods, existing incompatible diagonals, foldovers and unsafe
+results fail. Rotation can retain straight corners in nonzero-area quads; these
+are useful intermediate topology but generally need deliberate relaxation.
+It does not automatically move vertices to rescue an invalid rotation.
+
+**Stitching and filling.** Stitch means welding matching seam boundaries; it does
+not create a bridge strip. Chains must be disjoint, open, nonbranching and equal
+in vertex count, with compatible opposite face winding. Every explicit pair must
+satisfy the world-space weld cap. Reversing both start endpoints gives the same
+pairing; reversing only one generally describes a different, invalid seam.
+Existing closed-loop bridging remains the operation for filling a strip between
+separated closed loops.
+
+Grid Fill requires an entire unbranched closed boundary component. The explicit
+corner starts the layout following surrounding face winding; `span` defines the
+first side's edge count. For `N` boundary edges, the other dimension is
+`N/2 - span`, which must be positive. Opposite sides therefore have matching
+counts; the wrapper supplies those two sides to native `bmesh.ops.grid_fill`.
+Open, odd, intersecting or unsuitable boundaries fail. New faces must have valid
+winding, positive area, no foldover, and aspect at most 10. A filled grid is not
+a certificate of good production flow. Existing boundary positions remain fixed;
+inspect face-center error and deliberately relax when needed.
+
+**Inspection and results.** `RetopoQuality` additionally contains `poles`,
+`poles_total`, and `poles_truncated`. Up to 128 entries report `vertex_index`,
+`valence`, `boundary`, target-local `position`, and `incident_face_count`.
+Interior valence-four and boundary valence-three vertices are omitted. Interior
+entries precede boundary entries; ordinary valence-two corners remain explicitly
+marked as boundary structure, not automatically classified as defects. Valence
+three/five may be deliberate flow transitions, and high valence is contextual.
+Existing spacing, area, aspect, boundary and source-distance metrics remain
+separate review dimensions.
+
+Edit results retain before/after quality and correspondence and additionally
+return nonnegative `created`/`removed` element counts, bounded `created_vertices`,
+`created_edges`, and `flow_edges`. The last identifies the inserted loop or rotated
+diagonal. `input_edges_before` records the finishing operation's selected/expanded
+input edges when relevant. These are explicitly indices from the pre-edit
+snapshot; created/flow indices refer to the result snapshot. Slide preserves
+geometry ordering. Every other finishing operation invalidates previous indices,
+including rotations that leave counts unchanged.
+
+**Safety and work.** The existing source/evaluation, valuable-data and shared-Mesh
+isolation policies apply unchanged. Selection/material/seam data use native
+preservation/interpolation; final UVs, weights, shape keys, animation, custom
+normals and unsafe deformation relationships remain protected. All operations
+support the vetted Mirror, Shrinkwrap and Mirror → Shrinkwrap stacks without
+applying helpers. Authored projection remains explicit; evaluated Shrinkwrap
+cannot substitute for authored correspondence inspection. Existing Mirror seam
+vertices may not move off their plane.
+
+Finishing selections/rings/closed fill boundaries are limited to 128 edges;
+collapse rings to 64. Subdivision and grid fill have conservative allocation
+estimates before native construction. The existing 100,000-element target and
+2,000,000-element evaluated limits remain in force. Results reject duplicate
+faces/edges, disconnected vertex face fans, loose or zero-length geometry,
+invalid edge incidence, inconsistent
+winding and unsupported faces. Evaluated Mesh and per-operation BVH cleanup
+remain scoped to the shared transaction. Local validity checks do not constitute
+a general global self-intersection solver.
+
+A professional sequence is: inspect → add/remove local density → redirect flow
+→ close boundaries → relax/project → inspect quality/correspondence → render and
+verify. Generic dissolve, arbitrary ngon filling, screen-space sliding, automatic
+pole creation and automatic density-transition generation are deliberately absent.
 
 ## Cameras
 

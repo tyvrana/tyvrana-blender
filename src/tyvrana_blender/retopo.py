@@ -21,14 +21,21 @@ from .retopo_models import (
     PatchFrame,
     ProjectionSettings,
     RetopoBridgeArguments,
+    RetopoCollapseArguments,
     RetopoCreateArguments,
     RetopoCreateResult,
+    RetopoEditArguments,
     RetopoEditResult,
     RetopoExtrudeArguments,
+    RetopoFillArguments,
+    RetopoInsertArguments,
     RetopoInspectArguments,
     RetopoProjectArguments,
     RetopoRelaxArguments,
+    RetopoRotateArguments,
     RetopoSeedArguments,
+    RetopoSlideArguments,
+    RetopoSubdivideArguments,
     RetopoSummary,
 )
 
@@ -467,6 +474,9 @@ def validate(
     target: Any,
     affected: set[Any],
     created: list[Any],
+    *,
+    quad_only: bool = True,
+    allow_straight: bool = False,
 ) -> None:
     mesh.refresh(bm)
     if mesh.work_size(bm) > MAX_TARGET_ELEMENTS:
@@ -476,17 +486,17 @@ def validate(
     if any(
         len(e.link_faces) > 2 or (e.is_manifold and not e.is_contiguous)
         for e in bm.edges
-    ):
+    ) or geometry.non_manifold_vertices(bm):
         raise OperationError(
             "retopo_topology_invalid",
-            "Result has nonmanifold edges or inconsistent winding",
+            "Result has nonmanifold edges/vertex fans or inconsistent winding",
         )
     signatures = [frozenset(v.index for v in f.verts) for f in bm.faces]
     if len(set(signatures)) != len(signatures) or any(
-        len(f.verts) != 4 for f in created
+        len(f.verts) not in ({4} if quad_only else {3, 4}) for f in created
     ):
         raise OperationError(
-            "retopo_topology_invalid", "Construction requires distinct quad faces"
+            "retopo_topology_invalid", "Construction requires distinct supported faces"
         )
     affected_indices = {f.index for f in affected}
     with geometry.world_mesh(bm, geometry.matrix(target)) as world:
@@ -503,7 +513,13 @@ def validate(
                     a, b, c, d = points[diagonal:] + points[:diagonal]
                     first = (b - a).cross(c - a)
                     second = (c - a).cross(d - a)
-                    if first.dot(second) <= 0:
+                    if first.dot(second) <= 0 and not (
+                        allow_straight
+                        and (
+                            first.length <= geometry.AREA_EPSILON
+                            or second.length <= geometry.AREA_EPSILON
+                        )
+                    ):
                         raise OperationError(
                             "retopo_topology_invalid",
                             "Quad folds by at least 90 degrees across a diagonal",
@@ -511,9 +527,10 @@ def validate(
                 for loop in face.loops:
                     outgoing = loop.link_loop_next.vert.co - loop.vert.co
                     incoming = loop.link_loop_prev.vert.co - loop.vert.co
-                    if (
-                        outgoing.cross(incoming).dot(face.normal)
-                        <= geometry.AREA_EPSILON
+                    if outgoing.cross(incoming).dot(face.normal) < (
+                        -geometry.AREA_EPSILON
+                        if allow_straight
+                        else geometry.AREA_EPSILON
                     ):
                         raise OperationError(
                             "retopo_topology_invalid", "Folded, concave or twisted quad"
@@ -530,12 +547,27 @@ def validate(
     )
 
 
-def execute(
-    arguments: RetopoSeedArguments
-    | RetopoProjectArguments
-    | RetopoExtrudeArguments
-    | RetopoBridgeArguments,
-) -> RetopoEditResult:
+def rebind_vertices(bm: Any, previous: dict[Any, Any], state: Any) -> dict[Any, Any]:
+    """Native subdivision may reallocate vertex custom data and invalidate wrappers."""
+    mesh.refresh(bm)
+    current = list(bm.verts)[: len(previous)]
+    coordinates = list(previous.values())
+    if [tuple(v.co) for v in current] != [tuple(co) for co in coordinates]:
+        raise OperationError(
+            "retopo_topology_invalid",
+            "Construction moved or reordered original vertices",
+        )
+    rebound = dict(zip(previous, current, strict=True))
+    state.elements["verts"] = {
+        rebound[v]: value for v, value in state.elements["verts"].items()
+    }
+    state.history = [rebound.get(e, e) for e in state.history]
+    return dict(zip(current, coordinates, strict=True))
+
+
+def execute(arguments: RetopoEditArguments) -> RetopoEditResult:
+    from . import retopo_finish as finish
+
     source, target = objects(arguments)
     rejected = blockers(source, target)
     if rejected:
@@ -550,9 +582,8 @@ def execute(
     isolated = (
         sum(o.type == "MESH" and o.data == original for o in bpy.data.objects) > 1
     )
-    topology = isinstance(
-        arguments, RetopoSeedArguments | RetopoExtrudeArguments | RetopoBridgeArguments
-    )
+    finishing = isinstance(arguments, finish.FINISH_TYPES)
+    topology = not isinstance(arguments, RetopoProjectArguments | RetopoSlideArguments)
     with (
         geometry.surface(source, target) as (reference, _),
         mesh.snapshot(target) as bm,
@@ -561,6 +592,7 @@ def execute(
         before = geometry.quality(target, bm)
         if (
             before.non_manifold_edge_count
+            or before.non_manifold_vertex_count
             or before.inconsistent_winding_edge_count
             or before.degenerate_face_count
         ):
@@ -571,6 +603,11 @@ def execute(
         correspondence_before = geometry.correspondence(
             reference, bm, geometry.matrix(target)
         )
+        if finishing and (before.loose_edge_count or before.loose_vertex_count):
+            raise OperationError(
+                "retopo_topology_invalid",
+                "Finishing requires surface geometry without loose elements",
+            )
         previous_vertices = {v: v.co.copy() for v in bm.verts}
         previous_edges, previous_faces = set(bm.edges), set(bm.faces)
         selection_state = mesh._Selection(bm)
@@ -578,6 +615,7 @@ def execute(
         committed = False
         selected_count = 0
         frame = None
+        finish_result = None
         moved_vertices = []
         projection_distances: list[float] = []
         try:
@@ -588,12 +626,29 @@ def execute(
                 growth = MAX_BOUNDARY_EDGES * 12
             elif isinstance(arguments, RetopoBridgeArguments):
                 growth = MAX_BOUNDARY_EDGES * arguments.segments * 12
+            elif isinstance(arguments, RetopoInsertArguments):
+                growth = 128 * 12
+            elif isinstance(arguments, RetopoSubdivideArguments):
+                growth = 128 * (arguments.cuts + 1) ** 2 * 12
+            elif isinstance(arguments, RetopoFillArguments):
+                growth = 64 * 64 * 3
             if mesh.work_size(bm) + growth > MAX_TARGET_ELEMENTS:
                 raise OperationError(
                     "retopo_geometry_limit",
                     "Construction estimate exceeds target geometry capacity",
                 )
-            if isinstance(arguments, RetopoSeedArguments):
+            if isinstance(arguments, finish.FINISH_TYPES):
+                finish_result = finish.apply(bm, target, arguments)
+                selected_count = finish_result.selected_count
+                if finish_result.rebind_vertices:
+                    previous_vertices = rebind_vertices(
+                        bm, previous_vertices, selection_state
+                    )
+                moved_vertices = finish_result.vertices
+                projection_distances = project(
+                    reference, target, moved_vertices, arguments
+                )
+            elif isinstance(arguments, RetopoSeedArguments):
                 _, projection_distances, frame = seed(reference, target, bm, arguments)
                 moved_vertices = [v for v in bm.verts if v not in previous_vertices]
             elif isinstance(arguments, RetopoExtrudeArguments):
@@ -615,34 +670,12 @@ def execute(
                     reference, target, moved_vertices, arguments
                 )
             elif isinstance(arguments, RetopoBridgeArguments):
-                old_vertices = list(previous_vertices)
-                old_coordinates = list(previous_vertices.values())
+                original_count = len(previous_vertices)
                 selected_count = bridge(bm, arguments)
-                # Native subdivision allocates vertex custom-data layers and can
-                # invalidate every Python BMVert wrapper. The original vertex
-                # prefix must survive unchanged; rebind only after checking it.
-                mesh.refresh(bm)
-                current = list(bm.verts)
-                original_prefix = current[: len(old_vertices)]
-                if [tuple(v.co) for v in original_prefix] != [
-                    tuple(co) for co in old_coordinates
-                ]:
-                    raise OperationError(
-                        "retopo_bridge_invalid",
-                        "Bridge moved or reordered original vertices",
-                    )
-                rebound = dict(zip(old_vertices, original_prefix, strict=True))
-                previous_vertices = dict(
-                    zip(original_prefix, old_coordinates, strict=True)
+                previous_vertices = rebind_vertices(
+                    bm, previous_vertices, selection_state
                 )
-                selection_state.elements["verts"] = {
-                    rebound[v]: state
-                    for v, state in selection_state.elements["verts"].items()
-                }
-                selection_state.history = [
-                    rebound.get(e, e) for e in selection_state.history
-                ]
-                moved_vertices = current[len(old_vertices) :]
+                moved_vertices = list(bm.verts)[original_count:]
                 projection_distances = project(
                     reference, target, moved_vertices, arguments
                 )
@@ -681,7 +714,58 @@ def execute(
             affected = set(created_faces) | {
                 f for v in moved_vertices for f in v.link_faces
             }
-            validate(bm, reference, target, affected, created_faces)
+            if finish_result is not None:
+                affected.update(f for f in finish_result.faces if f.is_valid)
+                edge_signatures = [
+                    frozenset(v.index for v in e.verts) for e in bm.edges
+                ]
+                if len(set(edge_signatures)) != len(edge_signatures):
+                    raise OperationError(
+                        "retopo_topology_invalid", "Finishing produced duplicate edges"
+                    )
+                if any(e.is_wire or e.calc_length() <= 1e-9 for e in bm.edges) or any(
+                    not v.link_edges for v in bm.verts
+                ):
+                    raise OperationError(
+                        "retopo_topology_invalid",
+                        "Finishing produced loose or zero-length geometry",
+                    )
+                for mod in target.modifiers:
+                    if mod.type == "MIRROR":
+                        axis = list(mod.use_axis).index(True)
+                        if any(
+                            v.is_valid
+                            and abs(co[axis]) <= 1e-6
+                            and abs(v.co[axis]) > 1e-6
+                            for v, co in previous_vertices.items()
+                        ):
+                            raise OperationError(
+                                "retopo_flow_invalid",
+                                "Finishing moved a Mirror seam vertex off its plane",
+                            )
+            validate(
+                bm,
+                reference,
+                target,
+                affected,
+                created_faces,
+                quad_only=not isinstance(
+                    arguments, RetopoCollapseArguments | RetopoRotateArguments
+                ),
+                allow_straight=isinstance(arguments, RetopoRotateArguments),
+            )
+            if isinstance(arguments, RetopoFillArguments):
+                with geometry.world_mesh(bm, geometry.matrix(target)) as world:
+                    if any(
+                        max(e.calc_length() for e in world.faces[f.index].edges) ** 2
+                        / world.faces[f.index].calc_area()
+                        > 10
+                        for f in created_faces
+                    ):
+                        raise OperationError(
+                            "retopo_topology_invalid",
+                            "Grid fill produces extreme quad aspect",
+                        )
             selection_state.restore(bm)
             candidate = original.copy()
             bm.to_mesh(candidate)
@@ -711,12 +795,13 @@ def execute(
                 mesh_isolated=isolated,
                 selected_count=selected_count,
                 moved_count=sum(
-                    (v.co - co).length > 1e-7 for v, co in previous_vertices.items()
+                    v.is_valid and (v.co - co).length > 1e-7
+                    for v, co in previous_vertices.items()
                 ),
                 created=ElementCounts(
-                    vertices=len(bm.verts) - len(previous_vertices),
-                    edges=len(bm.edges) - len(previous_edges),
-                    faces=len(bm.faces) - len(previous_faces),
+                    vertices=sum(v not in previous_vertices for v in bm.verts),
+                    edges=sum(e not in previous_edges for e in bm.edges),
+                    faces=len(created_faces),
                 ),
                 created_faces=geometry.bounded(sorted(f.index for f in created_faces)),
                 projection=geometry.distances(projection_distances),
@@ -727,6 +812,25 @@ def execute(
                     reference, bm, geometry.matrix(target)
                 ),
                 patch=frame,
+                input_edges_before=geometry.bounded(finish_result.input_edges_before)
+                if finish_result
+                else geometry.bounded([]),
+                removed=ElementCounts(
+                    vertices=sum(not v.is_valid for v in previous_vertices),
+                    edges=sum(not e.is_valid for e in previous_edges),
+                    faces=sum(not f.is_valid for f in previous_faces),
+                ),
+                created_vertices=geometry.bounded(
+                    [v.index for v in bm.verts if v not in previous_vertices]
+                ),
+                created_edges=geometry.bounded(
+                    [e.index for e in bm.edges if e not in previous_edges]
+                ),
+                flow_edges=geometry.bounded(
+                    sorted(e.index for e in finish_result.flow_edges)
+                )
+                if finish_result
+                else geometry.bounded([]),
             )
             target.data = candidate
             bpy.context.view_layer.update()

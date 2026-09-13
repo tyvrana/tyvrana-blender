@@ -60,6 +60,12 @@ if "TYVRANA_TEST_RETOPO" in os.environ:
         retopo_scene.prepare_tube_scene()
     else:
         retopo_scene.prepare_scene(patch=os.environ["TYVRANA_TEST_RETOPO"] == "patch")
+if "TYVRANA_TEST_FINISH" in os.environ:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    retopo_scene = importlib.import_module("tests.blender.retopo_scene")
+    importlib.import_module("tests.blender.retopo_finish_scene").prepare_scene(
+        os.environ["TYVRANA_TEST_FINISH"]
+    )
 deadline = time.monotonic() + 180
 
 
@@ -84,7 +90,10 @@ def check() -> float | None:
             (control / "ready.tmp").replace(control / "ready.json")
         if (control / "stop").exists():
             worker = runtime.worker if runtime is not None else None
-            if "TYVRANA_TEST_RETOPO" in os.environ:
+            if (
+                "TYVRANA_TEST_RETOPO" in os.environ
+                or "TYVRANA_TEST_FINISH" in os.environ
+            ):
                 retopo_scene.clear_display()
             adapter.unregister()
             assert not bpy.app.timers.is_registered(adapter.pump)

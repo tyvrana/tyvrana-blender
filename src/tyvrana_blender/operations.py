@@ -97,15 +97,22 @@ from .remesh_models import (
 )
 from .retopo_models import (
     RetopoBridgeArguments,
+    RetopoCollapseArguments,
     RetopoCreateArguments,
     RetopoCreateResult,
     RetopoEditArguments,
     RetopoEditResult,
     RetopoExtrudeArguments,
+    RetopoFillArguments,
+    RetopoInsertArguments,
     RetopoInspectArguments,
     RetopoProjectArguments,
     RetopoRelaxArguments,
+    RetopoRotateArguments,
     RetopoSeedArguments,
+    RetopoSlideArguments,
+    RetopoStitchArguments,
+    RetopoSubdivideArguments,
     RetopoSummary,
 )
 from .sculpt_models import (
@@ -203,12 +210,19 @@ OPERATIONS = (
     "blender.object.set_transform",
     "blender.render.image",
     "blender.retopo.bridge_loops",
+    "blender.retopo.collapse",
     "blender.retopo.create_target",
     "blender.retopo.extrude_boundary",
+    "blender.retopo.fill_boundary",
+    "blender.retopo.insert_loop",
     "blender.retopo.inspect",
     "blender.retopo.project",
     "blender.retopo.relax",
+    "blender.retopo.rotate_edge",
     "blender.retopo.seed_patch",
+    "blender.retopo.slide",
+    "blender.retopo.stitch",
+    "blender.retopo.subdivide",
     "blender.scene.inspect",
     "blender.scene.raycast",
     "blender.sculpt.face_sets.assign",
@@ -446,6 +460,20 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.retopo.insert_loop":
+                arguments = RetopoInsertArguments.model_validate(request.arguments)
+            case "blender.retopo.slide":
+                arguments = RetopoSlideArguments.model_validate(request.arguments)
+            case "blender.retopo.subdivide":
+                arguments = RetopoSubdivideArguments.model_validate(request.arguments)
+            case "blender.retopo.collapse":
+                arguments = RetopoCollapseArguments.model_validate(request.arguments)
+            case "blender.retopo.rotate_edge":
+                arguments = RetopoRotateArguments.model_validate(request.arguments)
+            case "blender.retopo.stitch":
+                arguments = RetopoStitchArguments.model_validate(request.arguments)
+            case "blender.retopo.fill_boundary":
+                arguments = RetopoFillArguments.model_validate(request.arguments)
             case "blender.retopo.bridge_loops":
                 arguments = RetopoBridgeArguments.model_validate(request.arguments)
             case "blender.retopo.create_target":
@@ -640,7 +668,14 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             RetopoSeedArguments
             | RetopoProjectArguments
             | RetopoExtrudeArguments
-            | RetopoBridgeArguments,
+            | RetopoBridgeArguments
+            | RetopoInsertArguments
+            | RetopoSlideArguments
+            | RetopoSubdivideArguments
+            | RetopoCollapseArguments
+            | RetopoRotateArguments
+            | RetopoStitchArguments
+            | RetopoFillArguments,
         ):
             result = backend.retopo_edit(arguments)
         elif isinstance(arguments, RetopoInspectArguments):
