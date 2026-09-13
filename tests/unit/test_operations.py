@@ -9,6 +9,7 @@ from tyvrana_protocol import (
     OperationSuccess,
 )
 
+from tyvrana_blender import sculpt_models as regional
 from tyvrana_blender.camera_models import (
     CameraConfigureArguments,
     CameraCreateArguments,
@@ -175,7 +176,9 @@ class Backend:
             sculpt_vertex_count=8,
             symmetry=Symmetry(),
             view3d_available=False,
-            mask_present=False,
+            mask=self.sculpt_mask_inspect(
+                regional.MaskInspectArguments(object_name=arguments.object_name)
+            ),
             hidden_geometry=False,
         )
 
@@ -197,6 +200,114 @@ class Backend:
             bounds_after_min=[-1, -1, -1],
             bounds_after_max=[1, 1, 1],
             changed=False,
+        )
+
+    def sculpt_mask_inspect(
+        self, arguments: regional.MaskInspectArguments
+    ) -> regional.SculptMaskSummary:
+        self.calls.append("sculpt_mask_inspect")
+        return regional.SculptMaskSummary(
+            object_name=arguments.object_name,
+            multires_level=0,
+            effective_values_available=True,
+            base_mesh=regional.MaskStatistics(
+                present=False,
+                sample_count=8,
+                min=0,
+                max=0,
+                mean=0,
+                masked_fraction=0,
+                fully_masked_fraction=0,
+                unmasked_fraction=1,
+            ),
+        )
+
+    def sculpt_mask_clear(
+        self, arguments: regional.MaskClearArguments
+    ) -> regional.SculptMaskSummary:
+        self.calls.append("sculpt_mask_clear")
+        return self.sculpt_mask_inspect(
+            regional.MaskInspectArguments(object_name=arguments.object_name)
+        )
+
+    def sculpt_mask_invert(
+        self, arguments: regional.MaskInvertArguments
+    ) -> regional.SculptMaskSummary:
+        self.calls.append("sculpt_mask_invert")
+        return self.sculpt_mask_inspect(
+            regional.MaskInspectArguments(object_name=arguments.object_name)
+        )
+
+    def sculpt_mask_stroke(
+        self, arguments: regional.MaskStrokeArguments
+    ) -> regional.MaskStrokeResult:
+        self.calls.append("sculpt_mask_stroke")
+        return regional.MaskStrokeResult(
+            object_name=arguments.object_name,
+            mode=arguments.mode,
+            sample_count=len(arguments.samples),
+            radius=arguments.radius,
+            strength=arguments.strength,
+            symmetry=arguments.symmetry,
+            snapped_locations=[s.location for s in arguments.samples],
+            max_snap_distance=0,
+            mask=self.sculpt_mask_inspect(
+                regional.MaskInspectArguments(object_name=arguments.object_name)
+            ),
+        )
+
+    def sculpt_face_sets_inspect(
+        self, arguments: regional.FaceSetsInspectArguments
+    ) -> regional.FaceSetsSummary:
+        self.calls.append("sculpt_face_sets_inspect")
+        return regional.FaceSetsSummary(
+            object_name=arguments.object_name,
+            authored=False,
+            face_sets=[],
+            unassigned_face_count=0,
+        )
+
+    def sculpt_face_sets_assign(
+        self, arguments: regional.FaceSetsAssignArguments
+    ) -> regional.FaceSetsAssignResult:
+        self.calls.append("sculpt_face_sets_assign")
+        return regional.FaceSetsAssignResult(
+            assigned_id=arguments.face_set_id or 2,
+            assigned_face_count=1,
+            mesh_isolated=False,
+            summary=self.sculpt_face_sets_inspect(
+                regional.FaceSetsInspectArguments(object_name=arguments.object_name)
+            ),
+        )
+
+    def sculpt_face_sets_initialize(
+        self, arguments: regional.FaceSetsInitializeArguments
+    ) -> regional.FaceSetsSummary:
+        self.calls.append("sculpt_face_sets_initialize")
+        return self.sculpt_face_sets_inspect(
+            regional.FaceSetsInspectArguments(object_name=arguments.object_name)
+        )
+
+    def sculpt_filter(
+        self, arguments: regional.SculptFilterArguments
+    ) -> regional.SculptFilterResult:
+        self.calls.append("sculpt_filter")
+        return regional.SculptFilterResult(
+            object_name=arguments.object_name,
+            type=arguments.type,
+            strength=arguments.strength,
+            iterations=arguments.iterations,
+            axes=arguments.axes,
+            orientation=arguments.orientation,
+            multires_level=0,
+            bounds_before_min=[-1, -1, -1],
+            bounds_before_max=[1, 1, 1],
+            bounds_after_min=[-1, -1, -1],
+            bounds_after_max=[1, 1, 1],
+            changed=False,
+            mask=self.sculpt_mask_inspect(
+                regional.MaskInspectArguments(object_name=arguments.object_name)
+            ),
         )
 
     def modifier_inspect(

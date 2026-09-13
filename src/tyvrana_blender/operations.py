@@ -92,6 +92,16 @@ from .modifier_models import (
 from .sculpt_models import (
     RAYCAST,
     CameraRayArguments,
+    FaceSetsAssignArguments,
+    FaceSetsAssignResult,
+    FaceSetsInitializeArguments,
+    FaceSetsInspectArguments,
+    FaceSetsSummary,
+    MaskClearArguments,
+    MaskInspectArguments,
+    MaskInvertArguments,
+    MaskStrokeArguments,
+    MaskStrokeResult,
     MultiresConfigureArguments,
     MultiresCreateArguments,
     MultiresInspectArguments,
@@ -99,7 +109,10 @@ from .sculpt_models import (
     MultiresSummary,
     RaycastArguments,
     RaycastResult,
+    SculptFilterArguments,
+    SculptFilterResult,
     SculptInspectArguments,
+    SculptMaskSummary,
     SculptStrokeArguments,
     SculptStrokeResult,
     SculptSummary,
@@ -172,7 +185,15 @@ OPERATIONS = (
     "blender.render.image",
     "blender.scene.inspect",
     "blender.scene.raycast",
+    "blender.sculpt.face_sets.assign",
+    "blender.sculpt.face_sets.initialize",
+    "blender.sculpt.face_sets.inspect",
+    "blender.sculpt.filter",
     "blender.sculpt.inspect",
+    "blender.sculpt.mask.clear",
+    "blender.sculpt.mask.inspect",
+    "blender.sculpt.mask.invert",
+    "blender.sculpt.mask.stroke",
     "blender.sculpt.stroke",
     "blender.shader.connect",
     "blender.shader.disconnect",
@@ -220,6 +241,26 @@ class SceneBackend(Protocol):
     def multires_configure(
         self, arguments: MultiresConfigureArguments
     ) -> MultiresSummary: ...
+    def sculpt_mask_inspect(
+        self, arguments: MaskInspectArguments
+    ) -> SculptMaskSummary: ...
+    def sculpt_mask_clear(self, arguments: MaskClearArguments) -> SculptMaskSummary: ...
+    def sculpt_mask_invert(
+        self, arguments: MaskInvertArguments
+    ) -> SculptMaskSummary: ...
+    def sculpt_mask_stroke(
+        self, arguments: MaskStrokeArguments
+    ) -> MaskStrokeResult: ...
+    def sculpt_face_sets_inspect(
+        self, arguments: FaceSetsInspectArguments
+    ) -> FaceSetsSummary: ...
+    def sculpt_face_sets_assign(
+        self, arguments: FaceSetsAssignArguments
+    ) -> FaceSetsAssignResult: ...
+    def sculpt_face_sets_initialize(
+        self, arguments: FaceSetsInitializeArguments
+    ) -> FaceSetsSummary: ...
+    def sculpt_filter(self, arguments: SculptFilterArguments) -> SculptFilterResult: ...
     def sculpt_inspect(self, arguments: SculptInspectArguments) -> SculptSummary: ...
     def sculpt_stroke(self, arguments: SculptStrokeArguments) -> SculptStrokeResult: ...
 
@@ -314,6 +355,14 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MultiresCreateArguments
             | MultiresSubdivideArguments
             | MultiresConfigureArguments
+            | MaskInspectArguments
+            | MaskClearArguments
+            | MaskInvertArguments
+            | MaskStrokeArguments
+            | FaceSetsInspectArguments
+            | FaceSetsAssignArguments
+            | FaceSetsInitializeArguments
+            | SculptFilterArguments
             | SculptInspectArguments
             | SculptStrokeArguments
             | InspectArguments
@@ -363,6 +412,24 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 arguments = MultiresSubdivideArguments.model_validate(request.arguments)
             case "blender.multires.configure":
                 arguments = MultiresConfigureArguments.model_validate(request.arguments)
+            case "blender.sculpt.mask.inspect":
+                arguments = MaskInspectArguments.model_validate(request.arguments)
+            case "blender.sculpt.mask.clear":
+                arguments = MaskClearArguments.model_validate(request.arguments)
+            case "blender.sculpt.mask.invert":
+                arguments = MaskInvertArguments.model_validate(request.arguments)
+            case "blender.sculpt.mask.stroke":
+                arguments = MaskStrokeArguments.model_validate(request.arguments)
+            case "blender.sculpt.face_sets.inspect":
+                arguments = FaceSetsInspectArguments.model_validate(request.arguments)
+            case "blender.sculpt.face_sets.assign":
+                arguments = FaceSetsAssignArguments.model_validate(request.arguments)
+            case "blender.sculpt.face_sets.initialize":
+                arguments = FaceSetsInitializeArguments.model_validate(
+                    request.arguments
+                )
+            case "blender.sculpt.filter":
+                arguments = SculptFilterArguments.model_validate(request.arguments)
             case "blender.sculpt.inspect":
                 arguments = SculptInspectArguments.model_validate(request.arguments)
             case "blender.sculpt.stroke":
@@ -504,6 +571,22 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             result = backend.multires_inspect(arguments)
         elif isinstance(arguments, SculptStrokeArguments):
             result = backend.sculpt_stroke(arguments)
+        elif isinstance(arguments, MaskInspectArguments):
+            result = backend.sculpt_mask_inspect(arguments)
+        elif isinstance(arguments, MaskClearArguments):
+            result = backend.sculpt_mask_clear(arguments)
+        elif isinstance(arguments, MaskInvertArguments):
+            result = backend.sculpt_mask_invert(arguments)
+        elif isinstance(arguments, MaskStrokeArguments):
+            result = backend.sculpt_mask_stroke(arguments)
+        elif isinstance(arguments, FaceSetsInspectArguments):
+            result = backend.sculpt_face_sets_inspect(arguments)
+        elif isinstance(arguments, FaceSetsAssignArguments):
+            result = backend.sculpt_face_sets_assign(arguments)
+        elif isinstance(arguments, FaceSetsInitializeArguments):
+            result = backend.sculpt_face_sets_initialize(arguments)
+        elif isinstance(arguments, SculptFilterArguments):
+            result = backend.sculpt_filter(arguments)
         elif isinstance(arguments, SculptInspectArguments):
             result = backend.sculpt_inspect(arguments)
         elif isinstance(arguments, InspectArguments):

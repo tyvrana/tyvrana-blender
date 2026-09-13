@@ -16,6 +16,23 @@ from tyvrana_blender.sculpt_models import (
 from .test_operations import Backend
 
 VALID: dict[str, dict[str, Any]] = {
+    "sculpt.mask.inspect": {"object_name": "Surface"},
+    "sculpt.mask.clear": {"object_name": "Surface"},
+    "sculpt.mask.invert": {"object_name": "Surface"},
+    "sculpt.mask.stroke": {
+        "object_name": "Surface",
+        "mode": "add",
+        "samples": [{"location": [0, 0, 1]}],
+        "radius": 0.3,
+        "strength": 0.5,
+    },
+    "sculpt.face_sets.inspect": {"object_name": "Surface"},
+    "sculpt.face_sets.assign": {
+        "object_name": "Surface",
+        "selector": {"mode": "all", "domain": "face"},
+    },
+    "sculpt.face_sets.initialize": {"object_name": "Surface", "mode": "loose_parts"},
+    "sculpt.filter": {"object_name": "Surface", "type": "smooth", "strength": 0.5},
     "scene.raycast": {"mode": "camera", "u": 0.5, "v": 0.5},
     "multires.inspect": {"object_name": "Surface"},
     "multires.create": {"object_name": "Surface"},
@@ -180,3 +197,78 @@ def test_six_brushes_deterministic_defaults(brush: str) -> None:
     assert args.symmetry.model_dump() == {"x": False, "y": False, "z": False}
     assert args.samples[0].pressure == 1
     assert not args.invert
+
+
+@pytest.mark.parametrize(
+    "operation,patch",
+    [
+        *[
+            ("sculpt.mask.stroke", {"mode": v})
+            for v in ["draw", "invert", "MASK", None, True]
+        ],
+        *[
+            ("sculpt.mask.stroke", {"samples": v})
+            for v in [
+                [],
+                [{"location": [0, 0, 1]}] * 257,
+                [{"location": [0, 0, 1], "pressure": 1.1}],
+                [{"location": [0, 0, float("nan")]}],
+            ]
+        ],
+        *[
+            ("sculpt.mask.stroke", {field: v})
+            for field in ["radius", "strength"]
+            for v in [True, "0.2", None, -0.1, float("nan"), float("inf")]
+        ],
+        *[
+            ("sculpt.face_sets.assign", {"face_set_id": v})
+            for v in [0, -1, 2**31, True, "2", 1.5, None]
+        ],
+        ("sculpt.face_sets.assign", {"selector": {"mode": "all", "domain": "vertex"}}),
+        *[
+            ("sculpt.face_sets.initialize", {"mode": v})
+            for v in ["normals", "masked", "random", None, True]
+        ],
+        *[
+            ("sculpt.filter", {"type": v})
+            for v in ["random", "sharpen", "sphere", "erase_displacement", "view", None]
+        ],
+        *[
+            ("sculpt.filter", {"strength": v})
+            for v in [-0.1, 1.1, True, "0.5", None, float("nan"), float("inf")]
+        ],
+        *[
+            ("sculpt.filter", {"iterations": v})
+            for v in [0, -1, 101, 1.5, True, "3", None]
+        ],
+        ("sculpt.filter", {"axes": {"x": False, "y": False, "z": False}}),
+        ("sculpt.filter", {"axes": {"x": 1}}),
+        ("sculpt.filter", {"orientation": "view"}),
+        ("sculpt.filter", {"type": "scale", "strength": -1}),
+        ("sculpt.filter", {"type": "scale", "iterations": 2}),
+        ("sculpt.filter", {"type": "inflate", "iterations": 2}),
+    ],
+)
+def test_regional_invalid_arguments_never_reach_host(
+    operation: str, patch: dict[str, Any]
+) -> None:
+    backend = Backend()
+    result = response(operation, {**VALID[operation], **patch}, backend)
+    assert isinstance(result, OperationFailure), result
+    assert result.error.code == "invalid_arguments"
+    assert not backend.calls
+
+
+@pytest.mark.parametrize(
+    "kind", ["smooth", "surface_smooth", "relax", "inflate", "scale"]
+)
+def test_native_filter_contracts(kind: str) -> None:
+    backend = Backend()
+    strength = -0.2 if kind in {"inflate", "scale"} else 0.5
+    result = response(
+        "sculpt.filter",
+        {**VALID["sculpt.filter"], "type": kind, "strength": strength},
+        backend,
+    )
+    assert isinstance(result, OperationSuccess)
+    assert backend.calls[0] == "sculpt_filter"

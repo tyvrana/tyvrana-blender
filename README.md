@@ -13,8 +13,8 @@ are declared validated. One current adapter implementation serves supported host
 
 The extension provides objects, cameras, lights, materials, generated and imported
 packed images, shader graphs, semantic mesh modeling, whole-mesh UV controls,
-modifier stacks, Multires sculpting, evaluated surface picking, and PNG scene
-renders delivered as MCP images.
+modifier stacks, Multires sculpting, regional masks and Face Sets, native sculpt
+filters, evaluated surface picking, and PNG scene renders delivered as MCP images.
 
 ## Install and connect
 
@@ -70,6 +70,14 @@ Names are exact and are advertised in sorted order:
 | `blender.multires.configure` | Object name; partial existing display/sculpt/render levels | Updated Multires state |
 | `blender.sculpt.inspect` | Object name | Sculpt context, resolution and scale summary |
 | `blender.sculpt.stroke` | Object, brush, local surface samples, radius, strength | Native sculpt result with snapped targets and bounds |
+| `blender.sculpt.mask.inspect` | Object name | Explicitly scoped native mask statistics |
+| `blender.sculpt.mask.stroke` | Object, add/subtract mode, local samples, radius, strength | Native mask painting and updated summary |
+| `blender.sculpt.mask.clear` | Object name | Clear visible protection |
+| `blender.sculpt.mask.invert` | Object name | Invert visible protection |
+| `blender.sculpt.face_sets.inspect` | Object name | Authored region IDs, counts, areas and bounds |
+| `blender.sculpt.face_sets.assign` | Object, face selector; optional positive ID | Persistent region assignment |
+| `blender.sculpt.face_sets.initialize` | Object and initialization mode | Deterministic visible region organization |
+| `blender.sculpt.filter` | Object, type, strength; optional iterations/axes/orientation | Native masked refinement and geometry bounds |
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
@@ -1104,8 +1112,8 @@ selectors or unsupported region geometry return `invalid_arguments`. Capacity
 and protected-data/context failures use `invalid_context`; unexpected native
 failures are sanitized as `operation_failed`.
 
-Hole fill, triangulation, individual face operations, shading controls
-and sculpting are deferred. Filling arbitrary boundary selections needs a
+Hole fill, triangulation, individual face operations and shading controls
+are deferred. Filling arbitrary boundary selections needs a
 deliberate loop/hole contract; no ambiguous catch-all fill operation is exposed.
 Semantics follow the official [BMesh API](https://docs.blender.org/api/5.2/bmesh.html),
 [Blender 5.2.1 operation definitions](https://github.com/blender/blender/blob/v5.2.1/source/blender/bmesh/intern/bmesh_opdefines.cc),
@@ -1492,15 +1500,15 @@ never deliberately discarded as a recovery shortcut.
   multires: MultiresSummary,
   effective_sculpt_level, sculpt_vertex_count,
   symmetry: {x, y, z}, view3d_available,
-  mask_present, hidden_geometry
+  mask: SculptMaskSummary, hidden_geometry
 }
 ```
 
 `sculpt_vertex_count` counts native grid points at a Multires sculpt level,
 including duplicated grid boundaries; otherwise it counts base vertices. It is
-not the unique evaluated Mesh vertex count. `mask_present` and `hidden_geometry`
-inspect authored mask/visibility state only; they do not claim to summarize
-private higher-level grid masks or hidden grid points.
+not the unique evaluated Mesh vertex count. `mask` follows the explicit statistics
+scope below. `hidden_geometry` inspects authored visibility only, not private
+higher-level hidden grid points.
 
 `blender.sculpt.stroke` takes:
 
@@ -1563,7 +1571,7 @@ for that stroke; a partial symmetry object defaults omitted axes to false. Nativ
 symmetry feathering is enabled, radial repetition and tiling are disabled, and
 prior mesh symmetry is restored afterward. Existing masks and hidden geometry
 are respected; automatic masking, gravity and axis locks do not silently alter
-the requested stroke. Full mask/Face Set editing is a later regional-control layer.
+the requested stroke. Sculpt masks provide explicit regional protection.
 
 Actual strokes require a normal interactive Blender window with a View3D region.
 Background strokes return `invalid_context`; raycasting, Multires management and
@@ -1596,6 +1604,172 @@ unexpected error occurs during or after native execution, `sculpt_failed` report
 claim of rollback or a replacement for future undo/history support. Dyntopo,
 voxel remeshing and retopology have different destructive topology/data semantics
 and are not part of this layer.
+
+## Sculpt masks and Face Sets
+
+Masks protect sculpt geometry: **0 is fully editable, 1 is fully protected**, with
+partial protection between those values. Masks, persistent Face Sets, mesh UI
+selection, vertex groups and materials are separate concepts. Protect good detail
+before broad refinement, then render and verify both regions.
+
+| Operation | Arguments | Result |
+| --- | --- | --- |
+| `blender.sculpt.mask.inspect` | `object_name` | `SculptMaskSummary` |
+| `blender.sculpt.mask.stroke` | Stroke contract below | Snapped targets and updated mask summary |
+| `blender.sculpt.mask.clear` | `object_name` | Updated mask summary |
+| `blender.sculpt.mask.invert` | `object_name` | Updated mask summary |
+| `blender.sculpt.face_sets.inspect` | `object_name` | Authored base-face region summary |
+| `blender.sculpt.face_sets.assign` | `object_name`, face-domain `selector`, optional `face_set_id` | Assigned ID/count, mesh isolation flag and updated summary |
+| `blender.sculpt.face_sets.initialize` | `object_name`, `mode` | Updated region summary |
+
+`SculptMaskSummary` has this shape:
+
+```text
+{
+  object_name, multires_level,
+  effective_values_available,
+  statistics_scope: "base_mesh",
+  base_mesh: {
+    present, sample_count, min, max, mean,
+    masked_fraction, fully_masked_fraction, unmasked_fraction
+  }
+}
+```
+
+Statistics describe Blender's authored `.sculpt_mask` FLOAT/POINT attribute,
+including hidden vertices. A missing attribute means all base values are zero.
+`masked_fraction` counts values greater than 0.001; `unmasked_fraction` counts
+values at most 0.001; `fully_masked_fraction` counts values at least 0.999 and is a
+subset of masked points. Empty meshes report zero counts/statistics.
+
+**Multires masks live in native grid storage that Blender 5.2 does not expose
+through RNA.** With stored Multires levels, `effective_values_available` is false:
+base statistics and attribute presence cannot establish effective grid coverage.
+Even an evaluated `.sculpt_mask` attribute is only interpolated base data. The
+adapter does not read private C layouts or invent effective statistics. Native
+mask painting, inversion, clearing, sculpt strokes and filters operate on the
+actual grid masks. Native level changes preserve that storage, subject to
+Blender's resolution-dependent interpolation. Inspect, render and verify at the
+level used for the intended refinement.
+
+Mask painting takes:
+
+```json
+{
+  "object_name": "Surface",
+  "mode": "add",
+  "samples": [{"location": [0, 0, 1], "pressure": 1}],
+  "radius": 0.4,
+  "strength": 1,
+  "symmetry": {"x": false, "y": false, "z": false}
+}
+```
+
+`mode` is required: `add` increases protection; `subtract` decreases it. Targets,
+radius, pressure, symmetry, sample limits, scale guards and surface snapping have
+the same meaning as sculpt strokes. The fresh native Essentials Mask brush owns
+falloff and accumulation. A single dab need not fully protect its entire radius.
+The result reports `object_name`, `mode`, `sample_count`, `radius`, `strength`,
+`symmetry`, `snapped_locations`, `max_snap_distance`, and `mask`; it does not claim
+an affected-grid count. Zero pressure/strength can still initialize mask storage.
+
+Clear uses native zero flood-fill and is idempotent. Invert uses native `1-mask`.
+Both affect visible sculpt points and preserve hidden masks, geometry and Face
+Sets; clear does not mean deleting hidden protection. Existing `sculpt.stroke`
+and `sculpt.filter` respect native masks and hidden geometry. Mask mutations and
+filters share the interactive context, single-user, scale, modifier, restoration
+and failure guards of sculpt strokes. Read-only mask inspection works headlessly
+outside Edit Mode; Multires statistics retain the limitation above.
+
+Face Sets use Blender's native `.sculpt_face_set` INT/FACE attribute. Inspection
+returns `object_name`, `authored`, `scope: "base_mesh"`, `unassigned_face_count`,
+and `face_sets` sorted by ID. Each entry contains `id`, `face_count`,
+`hidden_face_count`, local authored `area`, and local `bounds_min/max`. Missing
+storage represents Blender's implicit default ID 1, with `authored: false`.
+Stored ID 0 counts as unassigned. Negative IDs are rejected as requiring explicit
+repair; visibility uses native hide state, not public negative IDs. Runtime
+cursor-based active Face Set state is not exposed as persistent selection.
+
+Assignment uses the existing authored face selector, including snapshot-local
+indices or semantic bounds/normals. An omitted ID allocates `max(1, current IDs)+1`;
+an explicit ID may create or reuse any integer from 1 through 2,147,483,647.
+Empty selections, invalid indices and more than 256 resulting sets are rejected
+before mutation. Hidden faces are assignable when explicitly selected; visibility
+is preserved. Results contain `assigned_id`, `assigned_face_count`,
+`mesh_isolated`, and `summary`. The complete Mesh is staged before publication,
+preserving native Multires displacement/mask grids; shared siblings keep their
+original Mesh. Face Set writes require Object Mode and local editable data under
+the dedicated Multires guards. They do not require unit scale or an interactive
+window. Coordinates, topology, UVs, materials and unrelated attributes remain
+unchanged.
+
+Initialization supports four deterministic authored-topology modes matching
+Blender's region concepts: `loose_parts`, `materials`, `uv_seams`, and
+`sharp_edges`. Materials uses material-slot index plus one. The other modes flood
+face adjacency, stopping at seams or sharp edges where applicable. Components
+are ordered by the lowest current face index; IDs start above any retained hidden
+IDs. Hidden faces retain IDs and form component boundaries. Initialization
+replaces visible region organization. Face Set identity persists through level
+changes and sculpt detail while authored topology is unchanged; later topology
+changes may rebuild/invalidate regions. There are no permanent cross-topology IDs.
+
+Face Set-to-mask conversion is deferred. Blender's active-Face-Set mask expansion
+is cursor-dependent and modal, with no deterministic ID-based EXEC operator or
+public access to Multires masks. The adapter does not approximate those grids or
+alter hidden state to simulate a bridge. Broad automasking and sculpt visibility
+controls remain deferred.
+
+## Native sculpt filters
+
+`blender.sculpt.filter` executes Blender's native Sculpt Mesh Filter:
+
+```json
+{
+  "object_name": "Surface",
+  "type": "surface_smooth",
+  "strength": 0.5,
+  "iterations": 12,
+  "axes": {"x": true, "y": true, "z": true},
+  "orientation": "local"
+}
+```
+
+`object_name`, `type`, and `strength` are required. Axes default to all enabled;
+partial objects default omitted axes to true. At least one axis must be enabled.
+`orientation` is `local` (default) or `world`, defining which displacement
+components those axes constrain. View orientation is not exposed.
+
+| Type | Strength | Iterations and native effect |
+| --- | --- | --- |
+| `smooth` | 0–1 | 1–100, default 1; neighbor averaging, potentially shrinking the form |
+| `surface_smooth` | 0–1 | 1–100; surface smoothing with native shape-preservation/current-vertex factors fixed at 0.5 |
+| `relax` | 0–1 | 1–100; tangential relaxation of vertex distribution with native boundary handling |
+| `inflate` | -1–1 | Exactly 1; displacement along original surface normals in local units |
+| `scale` | Greater than -1, at most 1 | Exactly 1; unmasked coordinates scale by `1 + strength` about the object origin |
+
+Strength is native filter strength, not brush pressure or a radius. Refinement
+iterations accumulate native passes. Inflate/scale use one pass to avoid ambiguous
+repeated original-state displacement semantics. Zero strength can return
+`changed: false`. Work is limited to 64 million sculpt points × iterations × four
+conservative passes, in addition to the existing total geometry limits. Supported
+filters work on ordinary meshes and internal Multires sculpt grids. They preserve
+native masks and Face Sets and honor native protection and visibility.
+Partially protected points receive Blender's reduced effect. Mask transitions
+still affect how neighboring geometry is smoothed, so inspect the boundary.
+Multires synchronization around hide boundaries can also move boundary points;
+results match native Blender rather than imposing a separate boundary lock.
+Fully protected interiors and their hidden state remain preserved.
+
+Results contain `object_name`, `type`, `strength`, `iterations`, `axes`,
+`orientation`, `multires_level`, `bounds_before_min/max`, `bounds_after_min/max`,
+`changed`, and `mask`. Bounds/hash compare evaluated geometry at the sculpt level.
+The same UI/tool/brush restoration and **nontransactional** mutation boundary as
+strokes applies: a post-start failure reports `sculpt_failed` with
+`mutation_possible: true`; reinspect and rerender before retrying.
+
+Sphere, sharpen, random, detail enhancement, displacement erasure and Face Set
+boundary relaxation are not exposed in this layer. Dyntopo, voxel remeshing and
+retopology remain separate destructive topology workflows.
 
 ## Cameras
 
@@ -1968,3 +2142,13 @@ Raycast tests cover camera projection, shifts, aspect ratio, evaluated geometry,
 clipping, world/local normals and misses. MCP tests render, pick a visible surface,
 perform a native Multires stroke and rerender while checking unchanged authored
 geometry, object transforms, cameras, lights and materials.
+
+Regional sculpt tests cover real mask add/subtract, pressure/radius/symmetry,
+invert/clear, partial and full protection, hidden geometry, Multires mask
+persistence, and state restoration. Face Set checks cover native default IDs,
+semantic assignment, deterministic initialization, shared Mesh isolation and
+persistence through Multires changes. Filter tests measure geometry rather than
+relying only on operator completion: noise reduction, tangential redistribution,
+normal inflation, scaling, axis/orientation constraints, and preservation of a
+masked region. Full MCP tests exercise the regional operations and compare renders
+while preserving authored geometry and unrelated scene state.

@@ -5,7 +5,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, TypeAdapter, field_validator, model_validator
 
-from .mesh_models import Arguments, MeshVector
+from .mesh_models import Arguments, FaceArguments, MeshVector
 from .models import Model, Vector
 from .modifier_models import Name, Number
 
@@ -125,35 +125,24 @@ class SculptInspectArguments(Arguments):
     object_name: Name
 
 
-class SculptSummary(Model):
-    object_name: str
-    object_mode: str
-    object_scale: Vector
-    scale_applied: bool
-    multires: MultiresSummary
-    effective_sculpt_level: int
-    sculpt_vertex_count: int
-    symmetry: Symmetry
-    view3d_available: bool
-    mask_present: bool
-    hidden_geometry: bool
-
-
 class StrokeSample(Arguments):
     location: MeshVector
     pressure: Unit = 1.0
 
 
-class SculptStrokeArguments(SculptInspectArguments):
-    brush: Brush
+class StrokeArguments(SculptInspectArguments):
     samples: Annotated[
         list[StrokeSample], Field(min_length=1, max_length=MAX_STROKE_SAMPLES)
     ]
     # Blender 5.2's minimum unprojected diameter is 0.001 Blender units.
     radius: Annotated[Number, Field(ge=0.0005, le=1_000_000)]
     strength: Unit
-    invert: bool = False
     symmetry: Symmetry = Field(default_factory=Symmetry)
+
+
+class SculptStrokeArguments(StrokeArguments):
+    brush: Brush
+    invert: bool = False
 
     @model_validator(mode="after")
     def flatten_needs_motion(self) -> Self:
@@ -180,3 +169,156 @@ class SculptStrokeResult(Model):
     bounds_after_min: Vector
     bounds_after_max: Vector
     changed: bool
+
+
+class MaskStatistics(Model):
+    present: bool
+    sample_count: int
+    min: Unit
+    max: Unit
+    mean: Unit
+    masked_fraction: Unit
+    fully_masked_fraction: Unit
+    unmasked_fraction: Unit
+
+
+class SculptMaskSummary(Model):
+    object_name: str
+    multires_level: int
+    effective_values_available: bool
+    # Multires grid storage is not exposed by Blender RNA. These statistics
+    # describe only the authored point attribute, never interpolated grid masks.
+    statistics_scope: Literal["base_mesh"] = "base_mesh"
+    base_mesh: MaskStatistics
+
+
+class SculptSummary(Model):
+    object_name: str
+    object_mode: str
+    object_scale: Vector
+    scale_applied: bool
+    multires: MultiresSummary
+    effective_sculpt_level: int
+    sculpt_vertex_count: int
+    symmetry: Symmetry
+    view3d_available: bool
+    mask: SculptMaskSummary
+    hidden_geometry: bool
+
+
+class MaskInspectArguments(SculptInspectArguments):
+    pass
+
+
+class MaskClearArguments(SculptInspectArguments):
+    pass
+
+
+class MaskInvertArguments(SculptInspectArguments):
+    pass
+
+
+class MaskStrokeArguments(StrokeArguments):
+    mode: Literal["add", "subtract"]
+
+
+class MaskStrokeResult(Model):
+    object_name: str
+    mode: Literal["add", "subtract"]
+    sample_count: int
+    radius: Number
+    strength: Unit
+    symmetry: Symmetry
+    snapped_locations: list[Vector]
+    max_snap_distance: Number
+    mask: SculptMaskSummary
+
+
+type FaceSetId = Annotated[int, Field(ge=1, le=2_147_483_647)]
+MAX_FACE_SETS = 256
+
+
+class FaceSetsInspectArguments(SculptInspectArguments):
+    pass
+
+
+class FaceSetsAssignArguments(FaceArguments):
+    object_name: Name
+    face_set_id: FaceSetId | None = None
+
+
+class FaceSetsInitializeArguments(SculptInspectArguments):
+    mode: Literal["loose_parts", "materials", "uv_seams", "sharp_edges"]
+
+
+class FaceSetSummary(Model):
+    id: int
+    face_count: int
+    hidden_face_count: int
+    area: Number
+    bounds_min: Vector
+    bounds_max: Vector
+
+
+class FaceSetsSummary(Model):
+    object_name: str
+    authored: bool
+    scope: Literal["base_mesh"] = "base_mesh"
+    face_sets: list[FaceSetSummary]
+    unassigned_face_count: int
+
+
+class FaceSetsAssignResult(Model):
+    assigned_id: FaceSetId
+    assigned_face_count: int
+    mesh_isolated: bool
+    summary: FaceSetsSummary
+
+
+class FilterAxes(Arguments):
+    x: bool = True
+    y: bool = True
+    z: bool = True
+
+    @model_validator(mode="after")
+    def nonempty(self) -> Self:
+        if not (self.x or self.y or self.z):
+            raise ValueError("Enable at least one filter axis")
+        return self
+
+
+type FilterType = Literal["smooth", "surface_smooth", "relax", "inflate", "scale"]
+
+
+class SculptFilterArguments(SculptInspectArguments):
+    type: FilterType
+    strength: Annotated[Number, Field(ge=-1, le=1)]
+    iterations: Annotated[int, Field(ge=1, le=100)] = 1
+    axes: FilterAxes = Field(default_factory=FilterAxes)
+    orientation: Literal["local", "world"] = "local"
+
+    @model_validator(mode="after")
+    def refinement_strength(self) -> Self:
+        if self.type in {"smooth", "surface_smooth", "relax"} and self.strength < 0:
+            raise ValueError("Refinement filters require nonnegative strength")
+        if self.type in {"inflate", "scale"} and self.iterations != 1:
+            raise ValueError("Inflate and scale support one iteration per operation")
+        if self.type == "scale" and self.strength <= -1:
+            raise ValueError("Scale strength must be greater than -1")
+        return self
+
+
+class SculptFilterResult(Model):
+    object_name: str
+    type: FilterType
+    strength: Number
+    iterations: int
+    axes: FilterAxes
+    orientation: Literal["local", "world"]
+    multires_level: int
+    bounds_before_min: Vector
+    bounds_before_max: Vector
+    bounds_after_min: Vector
+    bounds_after_max: Vector
+    changed: bool
+    mask: SculptMaskSummary

@@ -791,7 +791,7 @@ class SculptTests(NativeCase):
         mask = self.obj.data.attributes.new(".sculpt_mask", "FLOAT", "POINT")
         for value in mask.data:
             value.value = 1
-        self.assertTrue(self.call("sculpt.inspect")["mask_present"])
+        self.assertTrue(self.call("sculpt.inspect")["mask"]["base_mesh"]["present"])
         before = authored(self.obj)
         self.assertFalse(self.stroke()["changed"])
         self.assertEqual(before, authored(self.obj))
@@ -870,7 +870,8 @@ def run() -> None:
         raise RuntimeError("Native sculpt foundation checks failed")
 
 
-if bpy.app.background:
-    run()
-else:
-    bpy.app.timers.register(run, first_interval=3)
+if __name__ == "__main__":
+    if bpy.app.background:
+        run()
+    else:
+        bpy.app.timers.register(run, first_interval=3)

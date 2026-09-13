@@ -16,7 +16,7 @@ from tyvrana_protocol import (
     OperationRequest,
 )
 
-from . import mesh, modifiers, multires, raycast, sculpt, shader, uv
+from . import mesh, modifiers, multires, raycast, sculpt, sculpt_regions, shader, uv
 from .artifacts import ArtifactSpool
 from .camera_models import (
     CameraConfigureArguments,
@@ -99,6 +99,16 @@ from .modifier_models import (
 from .operations import OperationError, execute, registration
 from .raster import RasterError, raster_size
 from .sculpt_models import (
+    FaceSetsAssignArguments,
+    FaceSetsAssignResult,
+    FaceSetsInitializeArguments,
+    FaceSetsInspectArguments,
+    FaceSetsSummary,
+    MaskClearArguments,
+    MaskInspectArguments,
+    MaskInvertArguments,
+    MaskStrokeArguments,
+    MaskStrokeResult,
     MultiresConfigureArguments,
     MultiresCreateArguments,
     MultiresInspectArguments,
@@ -106,7 +116,10 @@ from .sculpt_models import (
     MultiresSummary,
     RaycastArguments,
     RaycastResult,
+    SculptFilterArguments,
+    SculptFilterResult,
     SculptInspectArguments,
+    SculptMaskSummary,
     SculptStrokeArguments,
     SculptStrokeResult,
     SculptSummary,
@@ -542,6 +555,50 @@ class BlenderBackend:
         return multires.configure(
             modifiers.object_mesh(arguments.object_name), arguments
         )
+
+    def sculpt_mask_inspect(self, arguments: MaskInspectArguments) -> SculptMaskSummary:
+        main_thread()
+        return sculpt_regions.mask_inspect(modifiers.object_mesh(arguments.object_name))
+
+    def sculpt_mask_clear(self, arguments: MaskClearArguments) -> SculptMaskSummary:
+        main_thread()
+        return sculpt.execute(modifiers.object_mesh(arguments.object_name), arguments)
+
+    def sculpt_mask_invert(self, arguments: MaskInvertArguments) -> SculptMaskSummary:
+        main_thread()
+        return sculpt.execute(modifiers.object_mesh(arguments.object_name), arguments)
+
+    def sculpt_mask_stroke(self, arguments: MaskStrokeArguments) -> MaskStrokeResult:
+        main_thread()
+        return sculpt.execute(modifiers.object_mesh(arguments.object_name), arguments)
+
+    def sculpt_face_sets_inspect(
+        self, arguments: FaceSetsInspectArguments
+    ) -> FaceSetsSummary:
+        main_thread()
+        return sculpt_regions.face_sets_inspect(
+            modifiers.object_mesh(arguments.object_name)
+        )
+
+    def sculpt_face_sets_assign(
+        self, arguments: FaceSetsAssignArguments
+    ) -> FaceSetsAssignResult:
+        main_thread()
+        return sculpt_regions.face_sets_assign(
+            modifiers.object_mesh(arguments.object_name), arguments
+        )
+
+    def sculpt_face_sets_initialize(
+        self, arguments: FaceSetsInitializeArguments
+    ) -> FaceSetsSummary:
+        main_thread()
+        return sculpt_regions.face_sets_initialize(
+            modifiers.object_mesh(arguments.object_name), arguments
+        )
+
+    def sculpt_filter(self, arguments: SculptFilterArguments) -> SculptFilterResult:
+        main_thread()
+        return sculpt.execute(modifiers.object_mesh(arguments.object_name), arguments)
 
     def sculpt_inspect(self, arguments: SculptInspectArguments) -> SculptSummary:
         main_thread()

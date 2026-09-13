@@ -6,25 +6,35 @@ import math
 import shutil
 import tempfile
 from array import array
+from itertools import product
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 import bpy  # type: ignore[import-not-found]
 from bpy_extras import view3d_utils  # type: ignore[import-not-found]
 from mathutils import Vector  # type: ignore[import-not-found]
 from mathutils.bvhtree import BVHTree  # type: ignore[import-not-found]
 
-from . import modifiers, multires
+from . import modifiers, multires, sculpt_regions
 from .operations import OperationError
 from .sculpt_models import (
+    MaskClearArguments,
+    MaskInvertArguments,
+    MaskStrokeArguments,
+    MaskStrokeResult,
+    SculptFilterArguments,
+    SculptFilterResult,
+    SculptMaskSummary,
     SculptStrokeArguments,
     SculptStrokeResult,
     SculptSummary,
+    StrokeArguments,
     Symmetry,
 )
 
 logger = logging.getLogger(__name__)
 ASSETS = {
+    "mask": ("Mask", "MASK"),
     "draw": ("Draw", "DRAW"),
     "smooth": ("Smooth", "SMOOTH"),
     "inflate": ("Inflate/Deflate", "INFLATE"),
@@ -69,7 +79,7 @@ def inspect(obj: Any) -> SculptSummary:
         sculpt_vertex_count=count,
         symmetry=symmetry(obj),
         view3d_available=view_context() is not None,
-        mask_present=obj.data.attributes.get(".sculpt_mask") is not None,
+        mask=sculpt_regions.mask_inspect(obj),
         hidden_geometry=any(v.hide for v in obj.data.vertices)
         or any(f.hide for f in obj.data.polygons),
     )
@@ -141,7 +151,7 @@ def brush_asset(kind: str) -> Any:
     return brush
 
 
-def prepare_brush(brush: Any, arguments: SculptStrokeArguments) -> None:
+def prepare_brush(brush: Any, arguments: StrokeArguments) -> None:
     brush.use_locked_size = "SCENE"
     brush.unprojected_size = arguments.radius * 2
     brush.strength = arguments.strength
@@ -162,13 +172,58 @@ def prepare_brush(brush: Any, arguments: SculptStrokeArguments) -> None:
             setattr(brush.mesh_automasking_settings, prop.identifier, False)
 
 
-def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
+type NativeArguments = (
+    SculptStrokeArguments
+    | MaskStrokeArguments
+    | MaskClearArguments
+    | MaskInvertArguments
+    | SculptFilterArguments
+)
+
+
+@overload
+def execute(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult: ...
+
+
+@overload
+def execute(obj: Any, arguments: MaskStrokeArguments) -> MaskStrokeResult: ...
+
+
+@overload
+def execute(
+    obj: Any, arguments: MaskClearArguments | MaskInvertArguments
+) -> SculptMaskSummary: ...
+
+
+@overload
+def execute(obj: Any, arguments: SculptFilterArguments) -> SculptFilterResult: ...
+
+
+def execute(
+    obj: Any, arguments: NativeArguments
+) -> SculptStrokeResult | MaskStrokeResult | SculptMaskSummary | SculptFilterResult:
+    stroke_arguments = arguments if isinstance(arguments, StrokeArguments) else None
+    requested_symmetry = stroke_arguments.symmetry if stroke_arguments else Symmetry()
+    sample_count = len(stroke_arguments.samples) if stroke_arguments else 1
+    work = (
+        arguments.iterations * 4
+        if isinstance(arguments, SculptFilterArguments)
+        else sample_count
+    )
+    kind = (
+        arguments.brush
+        if isinstance(arguments, SculptStrokeArguments)
+        else "mask"
+        if isinstance(arguments, MaskStrokeArguments)
+        else "draw"
+    )
+    radius = stroke_arguments.radius if stroke_arguments else 1.0
     context = bpy.context
     view = view_context()
     if view is None:
         raise OperationError(
             "invalid_context",
-            "Sculpt strokes require an interactive Blender window with a View3D region",
+            "Sculpt operations require an interactive window with a View3D region",
         )
     if context.mode not in {"OBJECT", "SCULPT"} or (
         context.mode == "SCULPT" and context.object != obj
@@ -179,7 +234,7 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
     if not multires.unit_scale(obj):
         raise OperationError(
             "sculpt_unapplied_scale",
-            "Sculpt strokes require unit object and inherited scale without shear",
+            "Sculpt operations require unit object and inherited scale without shear",
         )
     mod = multires.find(obj, required=False)
     if (
@@ -212,12 +267,12 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
     if any(m != mod for m in obj.modifiers):
         raise OperationError(
             "invalid_context",
-            "Sculpt strokes require an otherwise empty modifier stack",
+            "Sculpt operations require an otherwise empty modifier stack",
         )
     if mod and context.scene.render.use_simplify:
         raise OperationError(
             "invalid_context",
-            "Disable scene Simplify before Multires strokes so evaluated targets "
+            "Disable scene Simplify before Multires operations so evaluated targets "
             "match the sculpt level",
         )
     if mod and (
@@ -231,12 +286,15 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
             "Enable internal Multires displacement at a positive sculpt level; "
             "Sculpt Base Mesh is not supported",
         )
+    # Validate public native attributes before entering Sculpt or starting undo.
+    sculpt_regions.mask_inspect(obj)
+    sculpt_regions.face_values(obj)
     level = int(mod.sculpt_levels) if mod else 0
     multires.budget(obj, int(mod.total_levels) if mod else 0)
     if sum(o.data == obj.data for o in bpy.data.objects if o.type == "MESH") > 1:
         raise OperationError(
             "invalid_context",
-            "Make the sculpt Mesh single-user before strokes; Multires "
+            "Make the sculpt Mesh single-user before sculpt operations; Multires "
             "subdivision isolates shared meshes",
         )
     vertices = (
@@ -244,11 +302,11 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
         if level
         else len(obj.data.vertices)
     )
-    passes = 2 ** sum(arguments.symmetry.model_dump().values())
-    if vertices * len(arguments.samples) * passes > 64_000_000:
+    passes = 2 ** sum(requested_symmetry.model_dump().values())
+    if vertices * work * passes > 64_000_000:
         raise OperationError(
             "invalid_context",
-            "Stroke exceeds the bounded sculpt work limit; reduce samples "
+            "Operation exceeds the sculpt work limit; reduce samples/iterations "
             "or sculpt level",
         )
     area, region, rv = view
@@ -278,6 +336,7 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
     view_values["view_camera_offset"] = tuple(rv.view_camera_offset)
     prior_tool = context.workspace.tools.from_space_view3d_mode("SCULPT", create=False)
     tool_id = prior_tool.idname if prior_tool else "builtin.brush"
+    mask_overlay = area.spaces.active.overlay.show_sculpt_mask
     viewport_level = mod.levels if mod else None
     temporary_scene = None
     brush = None
@@ -291,9 +350,11 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
         context.view_layer.update()
         tree, minimum, maximum, before_hash = surface(obj)
         locations, normals, distances = [], [], []
-        for i, sample in enumerate(arguments.samples):
+        for i, sample in enumerate(
+            stroke_arguments.samples if stroke_arguments else []
+        ):
             point, normal, _, distance = tree.find_nearest(Vector(sample.location))
-            if point is None or distance > arguments.radius:
+            if point is None or distance > radius:
                 raise OperationError(
                     "invalid_arguments",
                     "Stroke sample is farther than the brush radius from the "
@@ -303,16 +364,21 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
             locations.append(list(point))
             normals.append(normal)
             distances.append(distance)
-        if arguments.brush == "flatten" and not any(
-            (Vector(location) - Vector(locations[0])).cross(normals[0]).length
-            > arguments.radius * 1e-6
-            for location in locations[1:]
+        if (
+            isinstance(arguments, SculptStrokeArguments)
+            and arguments.brush == "flatten"
+            and not any(
+                (Vector(location) - Vector(locations[0])).cross(normals[0]).length
+                > arguments.radius * 1e-6
+                for location in locations[1:]
+            )
         ):
             raise OperationError(
                 "invalid_arguments", "Flatten requires motion along the sculpt surface"
             )
-        brush = brush_asset(arguments.brush)
-        prepare_brush(brush, arguments)
+        brush = brush_asset(kind)
+        if stroke_arguments:
+            prepare_brush(brush, stroke_arguments)
         # Paint.brush is read-only in Blender 5.2. A temporary scene owns the
         # brush reference and tool settings, including the initially-unset case.
         # Its objects and Mesh data remain the actual target, not a sculpt substitute.
@@ -335,7 +401,7 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
                 setattr(paint, "lock_" + axis, False)
                 setattr(paint, "tile_" + axis, False)
                 setattr(
-                    obj.data, "use_mirror_" + axis, getattr(arguments.symmetry, axis)
+                    obj.data, "use_mirror_" + axis, getattr(requested_symmetry, axis)
                 )
             obj.data.radial_symmetry = (1, 1, 1)
             for prop in paint.mesh_automasking_settings.bl_rna.properties:
@@ -350,52 +416,46 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
                     "invalid_context",
                     "Blender could not activate the temporary sculpt brush",
                 )
-            # Supply a real viewport hit to initialize SculptSession. The native
-            # operator then consumes our object-local locations without ray override.
-            normal_world = (obj.matrix_world.to_3x3() @ normals[0]).normalized()
-            rv.view_perspective = "ORTHO"
-            rv.view_rotation = normal_world.to_track_quat("Z", "Y")
-            rv.view_location = obj.matrix_world @ Vector(locations[0])
-            rv.view_distance = max(
-                math.dist(minimum, maximum) * 2, arguments.radius * 4, 0.01
-            )
-            rv.update()
-            projected = [
-                view3d_utils.location_3d_to_region_2d(
-                    region, rv, obj.matrix_world @ Vector(location)
-                )
-                for location in locations
-            ]
-            if any(mouse is None for mouse in projected):
-                raise OperationError(
-                    "invalid_context", "Could not initialize sculpt surface view"
-                )
-            elements = [
-                dict(
-                    name="",
-                    location=location,
-                    mouse=projected[i],
-                    mouse_event=projected[i],
-                    pressure=sample.pressure,
-                    size=brush.size / 2,
-                    x_tilt=0,
-                    y_tilt=0,
-                    time=i / 60,
-                    is_start=i == 0,
-                )
-                for i, (location, sample) in enumerate(
-                    zip(locations, arguments.samples, strict=True)
-                )
-            ]
             started = True
-            outcome = bpy.ops.sculpt.brush_stroke(
-                "EXEC_DEFAULT",
-                stroke=elements,
-                override_location=False,
-                mode="INVERT" if arguments.invert else "NORMAL",
-            )
-            if "FINISHED" not in outcome:
-                raise RuntimeError("Native sculpt stroke did not finish")
+            if stroke_arguments:
+                paint_stroke(
+                    obj,
+                    stroke_arguments,
+                    brush,
+                    area,
+                    region,
+                    rv,
+                    locations,
+                    normals,
+                    minimum,
+                    maximum,
+                )
+            elif isinstance(arguments, SculptFilterArguments):
+                outcome = bpy.ops.sculpt.mesh_filter(
+                    "EXEC_DEFAULT",
+                    type=arguments.type.upper(),
+                    strength=arguments.strength,
+                    iteration_count=arguments.iterations,
+                    deform_axis={
+                        a.upper() for a in "xyz" if getattr(arguments.axes, a)
+                    },
+                    orientation=arguments.orientation.upper(),
+                    start_mouse=(0, 0),
+                    surface_smooth_shape_preservation=0.5,
+                    surface_smooth_current_vertex=0.5,
+                )
+                if "FINISHED" not in outcome:
+                    raise RuntimeError("Native sculpt filter did not finish")
+            else:
+                outcome = bpy.ops.paint.mask_flood_fill(
+                    "EXEC_DEFAULT",
+                    mode="INVERT"
+                    if isinstance(arguments, MaskInvertArguments)
+                    else "VALUE",
+                    value=0.0,
+                )
+                if "FINISHED" not in outcome:
+                    raise RuntimeError("Native mask operation did not finish")
             bpy.ops.wm.tool_set_by_id(name=tool_id, space_type="VIEW_3D")
             tool_restored = True
             bpy.ops.object.mode_set(mode="OBJECT")  # Flush Multires displacement.
@@ -403,6 +463,36 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
         window.view_layer = original_layer
         context.view_layer.update()
         _, after_minimum, after_maximum, after_hash = surface(obj)
+        if isinstance(arguments, (MaskClearArguments, MaskInvertArguments)):
+            return sculpt_regions.mask_inspect(obj)
+        if isinstance(arguments, MaskStrokeArguments):
+            return MaskStrokeResult(
+                object_name=obj.name,
+                mode=arguments.mode,
+                sample_count=len(locations),
+                radius=arguments.radius,
+                strength=arguments.strength,
+                symmetry=arguments.symmetry,
+                snapped_locations=locations,
+                max_snap_distance=max(distances),
+                mask=sculpt_regions.mask_inspect(obj),
+            )
+        if isinstance(arguments, SculptFilterArguments):
+            return SculptFilterResult(
+                object_name=obj.name,
+                type=arguments.type,
+                strength=arguments.strength,
+                iterations=arguments.iterations,
+                axes=arguments.axes,
+                orientation=arguments.orientation,
+                multires_level=level,
+                bounds_before_min=minimum,
+                bounds_before_max=maximum,
+                bounds_after_min=after_minimum,
+                bounds_after_max=after_maximum,
+                changed=before_hash != after_hash,
+                mask=sculpt_regions.mask_inspect(obj),
+            )
         return SculptStrokeResult(
             object_name=obj.name,
             brush=arguments.brush,
@@ -424,12 +514,12 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
         if not started and isinstance(exc, OperationError):
             raise
         logger.exception(
-            "Sculpt stroke failed%s",
+            "Sculpt operation failed%s",
             " after native execution began" if started else " during setup",
         )
         raise OperationError(
             "sculpt_failed",
-            "Sculpt stroke failed; inspect the surface before retrying",
+            "Sculpt operation failed; inspect state and rerender before retrying",
             {"mutation_possible": started},
         ) from exc
     finally:
@@ -455,6 +545,7 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
             for key, value in view_values.items():
                 setattr(rv, key, value)
             rv.update()
+            area.spaces.active.overlay.show_sculpt_mask = mask_overlay
         if temporary_scene is not None:
             bpy.data.scenes.remove(temporary_scene)
         # Entering Sculpt Mode can also load a default local brush. Both that
@@ -465,3 +556,102 @@ def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
         for library in list(bpy.data.libraries):
             if library.as_pointer() not in original_libraries:
                 bpy.data.libraries.remove(library)
+
+
+def paint_stroke(
+    obj: Any,
+    arguments: StrokeArguments,
+    brush: Any,
+    area: Any,
+    region: Any,
+    rv: Any,
+    locations: list[list[float]],
+    normals: list[Any],
+    minimum: list[float],
+    maximum: list[float],
+) -> None:
+    # Supply a real viewport hit to initialize SculptSession. The native
+    # operator then consumes our object-local locations without ray override.
+    normal_world = (obj.matrix_world.to_3x3() @ normals[0]).normalized()
+    rv.view_perspective = "ORTHO"
+    rv.view_rotation = normal_world.to_track_quat("Z", "Y")
+    rv.view_location = obj.matrix_world @ Vector(locations[0])
+    rv.view_distance = max(math.dist(minimum, maximum) * 2, arguments.radius * 4, 0.01)
+    rv.update()
+    projected = [
+        view3d_utils.location_3d_to_region_2d(
+            region, rv, obj.matrix_world @ Vector(location)
+        )
+        for location in locations
+    ]
+    if any(mouse is None for mouse in projected):
+        raise OperationError(
+            "invalid_context", "Could not initialize sculpt surface view"
+        )
+    if isinstance(arguments, MaskStrokeArguments):
+        # Blender's brush EXEC path skips the mask-layer initialization done by
+        # INVOKE. An empty native gesture initializes real base/grid storage.
+        # Use a nondegenerate rectangle strictly outside the projected bounds;
+        # a zero-area rectangle can produce degenerate clipping planes.
+        corners = [
+            view3d_utils.location_3d_to_region_2d(
+                region, rv, obj.matrix_world @ Vector(point)
+            )
+            for point in product(*zip(minimum, maximum, strict=True))
+        ]
+        if any(point is None for point in corners):
+            raise RuntimeError("Could not project mask initialization bounds")
+        x = math.floor(min(point.x for point in corners)) - 10
+        y = math.floor(min(point.y for point in corners)) - 10
+        for axis in "xyz":
+            setattr(obj.data, "use_mirror_" + axis, False)
+        try:
+            result = bpy.ops.paint.mask_box_gesture(
+                "EXEC_DEFAULT",
+                xmin=x,
+                xmax=x + 1,
+                ymin=y,
+                ymax=y + 1,
+                mode="VALUE",
+                value=0.0,
+                use_front_faces_only=False,
+            )
+            if "FINISHED" not in result:
+                raise RuntimeError("Native mask initialization did not finish")
+        finally:
+            for axis in "xyz":
+                setattr(
+                    obj.data, "use_mirror_" + axis, getattr(arguments.symmetry, axis)
+                )
+    elements = [
+        dict(
+            name="",
+            location=location,
+            mouse=projected[i],
+            mouse_event=projected[i],
+            pressure=sample.pressure,
+            size=brush.size / 2,
+            x_tilt=0,
+            y_tilt=0,
+            time=i / 60,
+            is_start=i == 0,
+        )
+        for i, (location, sample) in enumerate(
+            zip(locations, arguments.samples, strict=True)
+        )
+    ]
+    outcome = bpy.ops.sculpt.brush_stroke(
+        "EXEC_DEFAULT",
+        stroke=elements,
+        override_location=False,
+        mode="INVERT"
+        if (isinstance(arguments, SculptStrokeArguments) and arguments.invert)
+        or (isinstance(arguments, MaskStrokeArguments) and arguments.mode == "subtract")
+        else "NORMAL",
+    )
+    if "FINISHED" not in outcome:
+        raise RuntimeError("Native sculpt stroke did not finish")
+
+
+def stroke(obj: Any, arguments: SculptStrokeArguments) -> SculptStrokeResult:
+    return execute(obj, arguments)
