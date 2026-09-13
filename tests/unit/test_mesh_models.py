@@ -76,6 +76,16 @@ CASES = [
     (
         MeshTransformArguments,
         "transform",
+        {
+            "selector": VERTEX,
+            "translation": [0, 0, 0.2],
+            "falloff": {"center": [0, 0, 0], "radii": [1, 2, 3]},
+        },
+        "mesh_edit",
+    ),
+    (
+        MeshTransformArguments,
+        "transform",
         {"selector": EDGE, "rotation": [0, 0, math.pi], "pivot": "origin"},
         "mesh_edit",
     ),
@@ -450,5 +460,51 @@ def test_transform_vectors_are_strict(field: str, bad: Any) -> None:
                 "selector": VERTEX,
                 "translation": [0, 0, 1],
                 field: [bad, 1, 1],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "falloff",
+    [
+        {"center": [0, 0, 0], "radii": [0, 1, 1]},
+        {"center": [0, 0, 0], "radii": [-1, 1, 1]},
+        {"center": [0, 0, 0], "radii": [1, 1]},
+        {"center": [0, 0, 0], "radii": None},
+        {"center": None, "radii": [1, 1, 1]},
+        {"center": [0, 0, 0], "radii": [1, 1, 1], "expression": "distance"},
+        *[
+            {"center": [0, 0, 0], "radii": [bad, 1, 1]}
+            for bad in [True, "1", float("nan"), float("inf"), 1e40, 1e-50]
+        ],
+        *[
+            {"center": [bad, 0, 0], "radii": [1, 1, 1]}
+            for bad in [True, "1", float("nan"), float("inf"), 1e40, 1e-50]
+        ],
+    ],
+)
+def test_transform_falloff_rejects_invalid_regions(falloff: Any) -> None:
+    with pytest.raises(ValidationError):
+        MeshTransformArguments.model_validate(
+            {
+                "object_name": "Mesh",
+                "selector": VERTEX,
+                "translation": [0, 0, 1],
+                "falloff": falloff,
+            }
+        )
+
+
+@pytest.mark.parametrize("field", ["rotation", "scale"])
+@pytest.mark.parametrize("translate", [False, True])
+def test_falloff_requires_translation_only(field: str, translate: bool) -> None:
+    with pytest.raises(ValidationError):
+        MeshTransformArguments.model_validate(
+            {
+                "object_name": "Mesh",
+                "selector": VERTEX,
+                field: [1, 1, 1],
+                "falloff": {"center": [0, 0, 0], "radii": [1, 1, 1]},
+                **({"translation": [0, 0, 1]} if translate else {}),
             }
         )

@@ -112,16 +112,35 @@ class MeshQueryArguments(MeshSelectionArguments):
     limit: int = Field(default=64, ge=1, le=MAX_QUERY_RESULTS)
 
 
+class TransformFalloff(Arguments):
+    center: MeshVector
+    radii: MeshVector
+
+    @field_validator("radii")
+    @classmethod
+    def positive_radii(cls, value: list[float]) -> list[float]:
+        if any(radius <= 0 for radius in value):
+            raise ValueError("Falloff radii must be positive")
+        return value
+
+
 class MeshTransformArguments(MeshSelectionArguments):
     translation: MeshVector | None = None
     rotation: MeshVector | None = None
     scale: MeshVector | None = None
     pivot: Literal["median", "origin"] | MeshVector = "median"
+    falloff: TransformFalloff | None = None
 
     @model_validator(mode="after")
     def needs_transform(self) -> Self:
         if self.translation is None and self.rotation is None and self.scale is None:
             raise ValueError("Supply translation, rotation, or scale")
+        if self.falloff is not None and (
+            self.translation is None
+            or self.rotation is not None
+            or self.scale is not None
+        ):
+            raise ValueError("Falloff supports translation only")
         return self
 
 

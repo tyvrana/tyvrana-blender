@@ -16,7 +16,8 @@ from .test_e2e import core_client, discover, operation
 
 @pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
 @pytest.mark.parametrize(
-    "edit", ["extrude", "bevel", "inset_extrude", "regional_transform", "shading"]
+    "edit",
+    ["extrude", "bevel", "inset_extrude", "regional_transform", "falloff", "shading"],
 )
 async def test_modeling_changes_real_render_over_mcp(
     profile: dict[str, str], tmp_path: Path, ui: bool, edit: str
@@ -107,6 +108,17 @@ async def test_modeling_changes_real_render_over_mcp(
                     )
                     expected = (8, 12, 6)
                     assert MeshEditResult.model_validate(result).changed_faces == 6
+                elif edit == "falloff":
+                    result = await mesh(
+                        "transform",
+                        selector={"domain": "vertex", "mode": "all"},
+                        translation=[1.4, 0, 0],
+                        falloff={"center": [0, 0, 1], "radii": [3, 3, 1]},
+                    )
+                    expected = (8, 12, 6)
+                    assert (
+                        MeshEditResult.model_validate(result).transformed_vertices == 4
+                    )
                 else:
                     result = await mesh(
                         "transform",

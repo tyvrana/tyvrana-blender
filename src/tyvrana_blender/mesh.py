@@ -315,7 +315,30 @@ def center(vertices: list[Any]) -> Any:
 
 def apply_transform(
     bm: Any, vertices: list[Any], arguments: MeshTransformArguments
-) -> None:
+) -> int:
+    if arguments.falloff is not None:
+        falloff = arguments.falloff
+        assert arguments.translation is not None
+        translation = Vector(arguments.translation)
+        influenced = 0
+        for vertex in vertices:
+            distance = math.hypot(
+                *(
+                    (float(vertex.co[i]) - falloff.center[i]) / falloff.radii[i]
+                    for i in range(3)
+                )
+            )
+            if distance >= 1:
+                continue
+            remaining = 1 - distance
+            weight = min(1.0, remaining * remaining * (3 - 2 * remaining))
+            vertex.co += translation * weight
+            influenced += 1
+        if not influenced:
+            raise OperationError(
+                "mesh_selection_empty", "Falloff does not reach selected geometry"
+            )
+        return influenced
     pivot = (
         center(vertices)
         if arguments.pivot == "median"
@@ -334,6 +357,7 @@ def apply_transform(
         @ Matrix.Translation(-pivot)
     )
     bmesh.ops.transform(bm, verts=vertices, matrix=matrix)
+    return len(vertices)
 
 
 def edit(
@@ -368,8 +392,7 @@ def edit(
         try:
             if isinstance(arguments, MeshTransformArguments):
                 vertices = selected_vertices(selected, domain)
-                transformed = len(vertices)
-                apply_transform(bm, vertices, arguments)
+                transformed = apply_transform(bm, vertices, arguments)
             elif isinstance(arguments, MeshExtrudeArguments):
                 edges = region_edges(selected)
                 check_budget(size + sum(len(face.loops) for face in selected) * 12)

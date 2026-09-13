@@ -23,6 +23,14 @@ ALL_FACES = {"domain": "face", "mode": "all"}
 UPPER = {"domain": "vertex", "mode": "box", "min": [-1, -1, 1], "max": [1, 1, 1]}
 MUTATIONS: list[tuple[str, dict[str, Any]]] = [
     ("transform", {"selector": UPPER, "translation": [0, 0, 1]}),
+    (
+        "transform",
+        {
+            "selector": ALL_FACES,
+            "translation": [0.2, 0, 0],
+            "falloff": {"center": [1, 1, 1], "radii": [4, 2, 2]},
+        },
+    ),
     ("extrude_faces", {"selector": TOP, "offset": [0, 0, 1]}),
     ("inset_faces", {"selector": TOP, "thickness": 0.2}),
     ("bevel_edges", {"selector": ALL_EDGES, "width": 0.2, "segments": 3}),
@@ -303,6 +311,64 @@ class MeshTests(unittest.TestCase):
             self.assertEqual(result["transformed_vertices"], 8)
             self.assertEqual(result["mesh"]["bounds_min"], [-1, -1, 0])
             self.assertEqual(result["mesh"]["bounds_max"], [1, 1, 2])
+
+    def test_falloff_center_half_radius_boundary_and_local_space(self) -> None:
+        for selector in (ALL_EDGES, ALL_FACES):
+            self.reset()
+            self.obj.location = (4, 5, 6)
+            self.obj.scale = (2, 3, 4)
+            self.obj.rotation_euler = (0.2, 0.3, 0.4)
+            transform = self.obj.matrix_local.copy()
+            before = [tuple(v.co) for v in self.obj.data.vertices]
+            result = self.call(
+                "transform",
+                selector=selector,
+                translation=[0.2, 0, 0],
+                falloff={"center": [1, 1, 1], "radii": [4, 2, 2]},
+            )
+            self.assertEqual(result["transformed_vertices"], 2)
+            for old, vertex in zip(before, self.obj.data.vertices, strict=True):
+                if old == (1, 1, 1):
+                    self.assertAlmostEqual(vertex.co.x, 1.2, places=6)
+                elif old == (-1, 1, 1):
+                    self.assertAlmostEqual(vertex.co.x, -0.9, places=6)
+                else:
+                    self.assertEqual(tuple(vertex.co), old)
+                self.assertEqual(tuple(vertex.co)[1:], old[1:])
+            self.assertEqual(self.obj.matrix_local, transform)
+            self.counts((8, 12, 6))
+            self.closed()
+
+    def test_falloff_does_not_expand_explicit_selection(self) -> None:
+        before = [tuple(v.co) for v in self.obj.data.vertices]
+        index = before.index((-1, 1, 1))
+        result = self.call(
+            "transform",
+            selector={"domain": "vertex", "mode": "indices", "indices": [index]},
+            translation=[0.2, 0, 0],
+            falloff={"center": [1, 1, 1], "radii": [4, 2, 2]},
+        )
+        self.assertEqual(result["transformed_vertices"], 1)
+        for i, vertex in enumerate(self.obj.data.vertices):
+            if i == index:
+                self.assertAlmostEqual(vertex.co.x, -0.9, places=6)
+            else:
+                self.assertEqual(tuple(vertex.co), before[i])
+
+    def test_falloff_miss_does_not_replace_mesh(self) -> None:
+        original = self.obj.data
+        before = state(original)
+        count = len(bpy.data.meshes)
+        self.error(
+            "transform",
+            "mesh_selection_empty",
+            selector=ALL_FACES,
+            translation=[0, 0, 1],
+            falloff={"center": [20, 0, 0], "radii": [1, 1, 1]},
+        )
+        self.assertEqual(self.obj.data, original)
+        self.assertEqual(state(original), before)
+        self.assertEqual(len(bpy.data.meshes), count)
 
     def test_scale_rotation_translation_order_and_explicit_pivot(self) -> None:
         selector = {"domain": "vertex", "mode": "indices", "indices": [0]}

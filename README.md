@@ -136,7 +136,7 @@ Names are exact and are advertised in sorted order:
 | `blender.modifier.remove` | Object/modifier names | Removed name and remaining stack; authored data retained |
 | `blender.modifier.apply` | Object/modifier names | Applied name, updated authored mesh and remaining stack |
 | `blender.mesh.query` | Object name, selector; optional limit | Bounded vertex, edge or face details |
-| `blender.mesh.transform` | Object name, selector; translation/rotation/scale and optional pivot | Regional geometry edit result |
+| `blender.mesh.transform` | Object name, selector; translation/rotation/scale and optional pivot; optional local falloff for translation | Regional geometry edit result |
 | `blender.mesh.extrude_faces` | Object name, face selector, offset; optional cap scale | Region extrusion result |
 | `blender.mesh.inset_faces` | Object name, face selector, thickness; optional depth/even offset | Region inset result |
 | `blender.mesh.bevel_edges` | Object name, edge selector, width; optional segments/profile | Topology bevel result |
@@ -1050,6 +1050,30 @@ vertices' arithmetic mean (`median`), the mesh origin, or the explicit local
 pivot. Identity transforms are permitted if supplied explicitly. Zero/negative
 scales follow Blender geometry semantics and can collapse or reflect geometry.
 No cursor, viewport, global orientation, or UI pivot influences the result.
+
+For a smooth directional adjustment, translation also accepts optional
+`falloff: {"center": [x,y,z], "radii": [rx,ry,rz]}`. Center and positive ellipsoid
+semiaxes are object-local. The explicit selector remains a hard boundary: only
+its unique vertices strictly inside the ellipsoid receive displacement. With
+normalized ellipsoid distance `d`, the translation weight is
+`(1-d)^2 * (1+2*d)` for `0 <= d < 1`, and zero outside. This uses Blender's
+[smooth proportional falloff](https://github.com/blender/blender/blob/v5.2.1/source/blender/editors/transform/transform_generics.cc)
+with an explicit local influence region. Equal radii give spherical influence.
+It avoids coordinate queries and repeated small transforms when moving a soft
+region. Weights are evaluated from the input positions, with no viewport,
+cursor, connected-distance or sculpt-mask dependence. Existing mask values are
+preserved but do not weight this mesh operation. Use selectors to protect geometry.
+
+Falloff supports translation only; supplying rotation or scale with it is an
+argument error. `transformed_vertices` counts selected vertices with positive
+influence, while `selected.count` still describes all selector matches. A region
+that reaches none of those vertices returns `mesh_selection_empty` without
+replacing the mesh. The existing staged validation, topology/data preservation,
+shared-mesh isolation and editing guards apply unchanged.
+
+```json
+{"operation":"blender.mesh.transform","arguments":{"object_name":"Surface","selector":{"domain":"vertex","mode":"all"},"translation":[0,0,0.2],"falloff":{"center":[0,0,1],"radii":[0.8,0.5,0.4]}}}
+```
 
 Extrusion/inset require a region with a boundary and reject incident edges having
 more than two faces; selecting an entire closed shell is rejected. Adjacent
