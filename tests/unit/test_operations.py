@@ -19,6 +19,7 @@ from tyvrana_blender.camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from tyvrana_blender.file_models import FileSaveArguments, FileState
 from tyvrana_blender.image_models import (
     ImageConfigureArguments,
     ImageCreateArguments,
@@ -121,6 +122,14 @@ from tyvrana_blender.uv_models import (
 
 
 class Backend:
+    def file_inspect(self) -> FileState:
+        return FileState(
+            filepath=None, is_saved=False, is_dirty=False, exists=False, byte_size=None
+        )
+
+    def file_save(self, arguments: FileSaveArguments) -> FileState:
+        return self.file_inspect()
+
     def __init__(self) -> None:
         self.calls: list[str] = []
 

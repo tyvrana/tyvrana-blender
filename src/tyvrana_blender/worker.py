@@ -103,6 +103,7 @@ class NetworkClient:
     ) -> None:
         self.uri = uri
         self.registration = registration
+        self._registered: AdapterRegistration | None = None
         self.output = output
         self.socket: ClientConnection | None = None
         self.pending: set[str] = set()
@@ -319,6 +320,18 @@ class NetworkClient:
                 ).decode(),
             )
 
+    async def refresh_registration(self) -> None:
+        # A save may occur inside a pending operation. Keep its response and all
+        # admitted transfers alive before reconnecting with the new project path.
+        if (
+            self.socket is not None
+            and self._registered is not None
+            and self.registration != self._registered
+            and not self.pending
+            and not self.inputs.entries
+        ):
+            await self.socket.close(code=1000, reason="Project path changed")
+
     async def expire_inputs(self) -> None:
         while True:
             await asyncio.sleep(0.5)
@@ -344,6 +357,7 @@ class NetworkClient:
                 except (OSError, TimeoutError, ConnectionClosed):
                     socket.transport.abort()
                     break
+            await self.refresh_registration()
 
     def completed(self, task: asyncio.Task[None]) -> None:
         self._tasks.discard(task)
@@ -369,8 +383,9 @@ class NetworkClient:
                     max_queue=8,
                 ) as websocket:
                     self.socket = websocket
+                    self._registered = self.registration
                     await self.send(
-                        websocket, encode_message(self.registration).decode()
+                        websocket, encode_message(self._registered).decode()
                     )
                     connected_at = time.monotonic()
                     logger.info(
@@ -459,6 +474,7 @@ class NetworkClient:
                 logger.info("Core connection unavailable: %s", type(exc).__name__)
             finally:
                 self.socket = None
+                self._registered = None
                 await self.cleanup()
             await self.output.state("disconnected")
             delay = backoff.next_delay(
@@ -473,6 +489,16 @@ class NetworkClient:
             if not line.endswith(b"\n"):
                 return  # Parent closed mid-frame during shutdown.
             message = decode_message(line)
+            if isinstance(message, AdapterRegistration):
+                if (
+                    message.model_copy(
+                        update={"project_path": self.registration.project_path}
+                    )
+                    != self.registration
+                ):
+                    raise ValueError("A project refresh cannot change adapter identity")
+                self.registration = message
+                continue
             if not isinstance(message, (OperationSuccess, OperationFailure)):
                 raise ValueError("Unsupported parent message direction")
             # Main-thread execution is finished; input files are no longer needed,

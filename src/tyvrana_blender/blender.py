@@ -42,6 +42,7 @@ from .camera_models import (
 )
 from .compatibility import require_blender
 from .dispatch import CommandQueue
+from .file_models import FileSaveArguments, FileState
 from .image_models import (
     ALPHA_MODES,
     ImageConfigureArguments,
@@ -550,6 +551,18 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def file_inspect(self) -> FileState:
+        main_thread()
+        from . import files
+
+        return files.inspect()
+
+    def file_save(self, arguments: FileSaveArguments) -> FileState:
+        main_thread()
+        from . import files
+
+        return files.save(arguments)
+
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
 
@@ -1585,7 +1598,10 @@ def after_load(*args: object) -> None:
 
 def after_save(*args: object) -> None:
     if _runtime is not None and _runtime.filepath != str(bpy.data.filepath):
-        restart()
+        _runtime.filepath = str(bpy.data.filepath)
+        _runtime.worker.send(
+            registration(INSTANCE_ID, str(bpy.app.version_string), _runtime.filepath)
+        )
 
 
 def before_exit(*args: object) -> None:

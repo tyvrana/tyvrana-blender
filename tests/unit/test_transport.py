@@ -72,6 +72,34 @@ async def until(predicate: Callable[[], bool]) -> None:
             await asyncio.sleep(0.01)
 
 
+async def test_project_refresh_waits_for_pending_response_and_keeps_worker() -> None:
+    async with worker() as (process, connected, messages):
+        socket = await asyncio.wait_for(connected.get(), 5)
+        pid = process.process.pid
+        request = OperationRequest(
+            type="operation.request",
+            request_id="save",
+            operation="blender.file.save",
+            arguments={},
+        )
+        await socket.send(encode_message(request).decode())
+        await until(lambda: request in messages)
+        process.send(registration("test-process", "5.2.1 LTS", "/project/model.blend"))
+        # Hold execution longer than the maintenance tick. Refresh must not drop it.
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(connected.get(), 0.7)
+        response = OperationSuccess(
+            type="operation.success", request_id="save", result={"saved": True}
+        )
+        process.send(response)
+        wire = await asyncio.wait_for(socket.recv(), 5)
+        assert isinstance(wire, str)
+        assert decode_message(wire.encode()) == response
+        following = await asyncio.wait_for(connected.get(), 5)
+        assert following is not socket
+        assert process.process.pid == pid
+
+
 async def test_real_worker_round_trip_and_cancellation_suppresses_late_reply() -> None:
     async with worker() as (process, connected, messages):
         socket = await asyncio.wait_for(connected.get(), 5)

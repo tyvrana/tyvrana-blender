@@ -21,6 +21,7 @@ from .camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from .file_models import FileInspectArguments, FileSaveArguments, FileState
 from .image_models import (
     ImageConfigureArguments,
     ImageCreateArguments,
@@ -172,6 +173,8 @@ OPERATIONS = (
     "blender.camera.create",
     "blender.camera.inspect",
     "blender.camera.set_active",
+    "blender.file.inspect",
+    "blender.file.save",
     "blender.image.configure",
     "blender.image.create_from_artifact",
     "blender.image.create_generated",
@@ -270,6 +273,9 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def file_inspect(self) -> FileState: ...
+    def file_save(self, arguments: FileSaveArguments) -> FileState: ...
+
     def scene_raycast(self, arguments: RaycastArguments) -> RaycastResult: ...
     def multires_inspect(
         self, arguments: MultiresInspectArguments
@@ -403,7 +409,9 @@ def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure
 def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         arguments: (
-            RaycastArguments
+            FileInspectArguments
+            | FileSaveArguments
+            | RaycastArguments
             | MultiresInspectArguments
             | MultiresCreateArguments
             | MultiresSubdivideArguments
@@ -460,6 +468,10 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.file.inspect":
+                arguments = FileInspectArguments.model_validate(request.arguments)
+            case "blender.file.save":
+                arguments = FileSaveArguments.model_validate(request.arguments)
             case "blender.retopo.insert_loop":
                 arguments = RetopoInsertArguments.model_validate(request.arguments)
             case "blender.retopo.slide":
@@ -651,7 +663,11 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
-        if isinstance(arguments, (WorldRayArguments, CameraRayArguments)):
+        if isinstance(arguments, FileSaveArguments):
+            result = backend.file_save(arguments)
+        elif isinstance(arguments, FileInspectArguments):
+            result = backend.file_inspect()
+        elif isinstance(arguments, (WorldRayArguments, CameraRayArguments)):
             result = backend.scene_raycast(arguments)
         elif isinstance(arguments, MultiresCreateArguments):
             result = backend.multires_create(arguments)

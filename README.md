@@ -105,6 +105,8 @@ Names are exact and are advertised in sorted order:
 | `blender.image.inspect` | `{}` | Sorted image resources |
 | `blender.image.create_generated` | Width/height; optional name, generation and color settings | Created image summary |
 | `blender.image.create_from_artifact` | Attached artifact ID; optional name, color space and alpha mode | Packed image summary |
+| `blender.file.inspect` | No arguments | Native filepath, saved/dirty flags and disk state |
+| `blender.file.save` | Optional absolute `.blend` filepath; explicit overwrite permission | Save the current project and update registration metadata |
 | `blender.image.configure` | Name; optional color space and alpha mode | Updated image summary |
 | `blender.shader.inspect` | Material name | One shader graph summary |
 | `blender.shader.node.create` | Material name, supported node type; optional name and typed settings | Created node summary |
@@ -2263,6 +2265,34 @@ A professional sequence is: inspect → add/remove local density → redirect fl
 → close boundaries → relax/project → inspect quality/correspondence → render and
 verify. Generic dissolve, arbitrary ngon filling, screen-space sliding, automatic
 pole creation and automatic density-transition generation are deliberately absent.
+
+## Project persistence
+
+`blender.file.inspect` takes no arguments and reports `filepath`, `is_saved`,
+`is_dirty`, `exists`, and `byte_size`. The dirty flag is Blender's native signal;
+it is not a complete audit of scripted RNA changes. Save deliberate milestones
+even when that flag is false.
+
+`blender.file.save` uses native `bpy.ops.wm.save_as_mainfile` in Object Mode.
+Supply an absolute host-local `filepath` ending in `.blend` for the first save or
+Save As. Omit it to save the current file. The destination parent must exist;
+relative paths, final-component symlinks, and non-regular destinations fail.
+Every existing destination, including the current file, requires
+`overwrite: true`. Normal Blender backup preferences remain in effect.
+
+The operation saves the current project, changes its active filepath, and reports
+the resulting file state. It remaps relative external references using native
+semantics; it does not pack or separately save external images/resources. A native
+write failure reports `file_save_failed` with `possible_partial_write: true`;
+filesystem writes are not advertised as an atomic transaction. Reinspect the file
+and destination after such a failure.
+
+Project paths describe local application state and save destinations, not binary
+artifact transport. Render/image artifacts continue through the existing typed
+binary channel. Save As refreshes registration after pending operations and input
+transfers finish, preserving the save response and adapter instance identity.
+A brief reconnect updates the advertised project path. No project loader or
+arbitrary execution operation is exposed.
 
 ## Cameras
 
