@@ -292,15 +292,39 @@ def project(
     inverse = transform.inverted()
     proposed = []
     distances = []
+    mirror_axes = [
+        list(mod.use_axis).index(True)
+        for mod in target.modifiers
+        if mod.type == "MIRROR"
+    ]
     for vertex in vertices:
-        location, normal, distance = reference.nearest(
-            transform @ vertex.co, arguments.max_projection_distance
-        )
-        proposed.append(
-            geometry.checked_point(
-                inverse @ (location + normal * arguments.surface_offset)
+        axis = next((a for a in mirror_axes if abs(vertex.co[a]) <= 1e-6), None)
+        if axis is None:
+            location, normal, distance = reference.nearest(
+                transform @ vertex.co, arguments.max_projection_distance
             )
-        )
+        else:
+            plane_normal = inverse.transposed().to_3x3() @ Vector(
+                [float(i == axis) for i in range(3)]
+            )
+            plane_normal.normalize()
+            location, normal, distance = reference.nearest_on_plane(
+                transform @ vertex.co,
+                transform.translation,
+                plane_normal,
+                arguments.max_projection_distance,
+            )
+            normal = normal - plane_normal * normal.dot(plane_normal)
+            if normal.length <= 1e-8 and arguments.surface_offset:
+                raise OperationError(
+                    "retopo_projection_failed",
+                    "No offset direction within the Mirror plane",
+                )
+            normal.normalize()
+        coordinate = inverse @ (location + normal * arguments.surface_offset)
+        if axis is not None:
+            coordinate[axis] = 0
+        proposed.append(geometry.checked_point(coordinate))
         distances.append(distance)
     for vertex, coordinate in zip(vertices, proposed, strict=True):
         vertex.co = coordinate
@@ -693,6 +717,14 @@ def execute(arguments: RetopoEditArguments) -> RetopoEditResult:
                         for v in vertices
                         if not arguments.preserve_boundary or not v.is_boundary
                     ]
+                    seams = [
+                        (v, axis)
+                        for mod in target.modifiers
+                        if mod.type == "MIRROR"
+                        for axis in [list(mod.use_axis).index(True)]
+                        for v in moved_vertices
+                        if abs(v.co[axis]) <= 1e-6
+                    ]
                     for _ in range(arguments.iterations):
                         bmesh.ops.smooth_vert(
                             bm,
@@ -702,6 +734,8 @@ def execute(arguments: RetopoEditArguments) -> RetopoEditResult:
                             use_axis_y=True,
                             use_axis_z=True,
                         )
+                        for vertex, axis in seams:
+                            vertex.co[axis] = 0
                         projection_distances.extend(
                             project(reference, target, moved_vertices, arguments)
                         )

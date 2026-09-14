@@ -96,17 +96,33 @@ class CyclesRenderOptions(Model):
     denoise: bool = False
 
 
+class WireframeRenderOptions(Model):
+    objects: list[ObjectName] = Field(min_length=1, max_length=16)
+    thickness: FiniteFloat = Field(default=0.001, ge=0.000001, le=1)
+    surface_offset: FiniteFloat = Field(default=0, ge=-1, le=1)
+
+    @field_validator("objects")
+    @classmethod
+    def distinct_objects(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value) or any("\x00" in name for name in value):
+            raise ValueError("Provide distinct object names without NUL characters")
+        return value
+
+
 class RenderArguments(Model):
     width: int = Field(default=512, ge=64, le=1024)
     height: int = Field(default=512, ge=64, le=1024)
     format: Literal["png"] = "png"
     cycles: CyclesRenderOptions | None = None
+    wireframe: WireframeRenderOptions | None = None
 
-    @field_validator("cycles", mode="before")
+    @field_validator("cycles", "wireframe", mode="before")
     @classmethod
     def non_null_cycles(cls, value: object) -> object:
         if value is None:
-            raise ValueError("Omit cycles to use scene settings; null is invalid")
+            raise ValueError(
+                "Omit render options to use scene settings; null is invalid"
+            )
         return value
 
 

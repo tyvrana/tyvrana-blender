@@ -109,6 +109,14 @@ def test_registration_is_canonical_and_optional_filepath_is_omitted() -> None:
         {"cycles": {"samples": "16"}},
         {"cycles": {"denoise": 1}},
         {"cycles": {"script": "anything"}},
+        {"wireframe": None},
+        {"wireframe": {"objects": []}},
+        {"wireframe": {"objects": ["Cage", "Cage"]}},
+        {"wireframe": {"objects": ["Cage\u0000"]}},
+        {"wireframe": {"objects": ["Cage"], "thickness": 0}},
+        {"wireframe": {"objects": ["Cage"], "thickness": True}},
+        {"wireframe": {"objects": ["Cage"], "surface_offset": float("nan")}},
+        {"wireframe": {"objects": ["Cage"], "surface_offset": float("inf")}},
     ],
 )
 def test_invalid_render_arguments(arguments: object) -> None:
@@ -126,6 +134,7 @@ def test_render_defaults_and_dimension_bounds() -> None:
         "height": 512,
         "format": "png",
         "cycles": None,
+        "wireframe": None,
     }
     assert RenderArguments(width=64, height=1024).height == 1024
     assert RenderArguments.model_validate({"cycles": {}}).cycles is not None

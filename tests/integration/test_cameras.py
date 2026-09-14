@@ -16,13 +16,13 @@ from .conftest import running_blender
 from .test_e2e import core_client, discover, operation
 
 
-async def render(client: Client, identifier: str) -> bytes:
+async def render(client: Client, identifier: str, **options: JsonValue) -> bytes:
     response = await client.call_tool(
         "tyvrana_execute_operation",
         {
             "adapter_id": identifier,
             "operation": "blender.render.image",
-            "arguments": {"width": 256, "height": 256},
+            "arguments": {"width": 256, "height": 256, **options},
         },
     )
     assert not response.is_error, response.content

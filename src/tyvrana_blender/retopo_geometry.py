@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 import bpy  # type: ignore[import-not-found]
 from mathutils.bvhtree import BVHTree  # type: ignore[import-not-found]
+from mathutils.geometry import closest_point_on_tri  # type: ignore[import-not-found]
 
 from . import mesh, modifiers
 from .mesh_models import BoundedIndices
@@ -28,6 +29,8 @@ from .retopo_models import (
 )
 
 AREA_EPSILON = 1e-12
+MAX_PLANE_PROJECTION_WORK = 2_000_000
+PLANE_EPSILON = 1e-7
 
 
 def checked_point(point: Any) -> Any:
@@ -189,6 +192,8 @@ def surface_summary(obj: Any, data: Any, transform: Any) -> EvaluatedSurfaceSumm
 class Surface:
     def __init__(self, source: Any, depsgraph: Any) -> None:
         self.bvh: Any = None
+        self.sections: dict[tuple[float, ...], list[tuple[list[Any], Any]]] = {}
+        self.plane_work = 0
         with evaluated_mesh(source, depsgraph) as (data, transform):
             data.calc_loop_triangles()
             points = [
@@ -206,6 +211,8 @@ class Surface:
                 )
             self.summary = surface_summary(source, data, transform)
             self.matrix = transform
+            self.points = points
+            self.triangles = triangles
             self.bvh = BVHTree.FromPolygons(points, triangles, all_triangles=True)
 
     def nearest(self, point: Any, maximum: float = 1e19) -> tuple[Any, Any, float]:
@@ -218,6 +225,71 @@ class Surface:
             )
         return location, normal.normalized(), float(distance)
 
+    def nearest_on_plane(
+        self, point: Any, origin: Any, normal: Any, maximum: float
+    ) -> tuple[Any, Any, float]:
+        """Closest point on the actual source/plane intersection, not a clamped hit."""
+        checked_point(point)
+        key = tuple(origin) + tuple(normal)
+        if key not in self.sections:
+            sections = []
+            for triangle in self.triangles:
+                vertices = [self.points[i] for i in triangle]
+                distances = [(v - origin).dot(normal) for v in vertices]
+                face_normal = (
+                    (vertices[1] - vertices[0])
+                    .cross(vertices[2] - vertices[0])
+                    .normalized()
+                )
+                if all(abs(d) <= PLANE_EPSILON for d in distances):
+                    sections.append((vertices, face_normal))
+                    continue
+                points = []
+                for i in range(3):
+                    a, b = vertices[i], vertices[(i + 1) % 3]
+                    da, db = distances[i], distances[(i + 1) % 3]
+                    if abs(da) <= PLANE_EPSILON:
+                        points.append(a - normal * da)
+                    if da * db < 0:
+                        points.append(a.lerp(b, da / (da - db)))
+                if len(points) >= 2:
+                    a, b = max(
+                        ((a, b) for i, a in enumerate(points) for b in points[i + 1 :]),
+                        key=lambda pair: (pair[1] - pair[0]).length_squared,
+                    )
+                    if (b - a).length_squared > PLANE_EPSILON**2:
+                        sections.append(([a, b], face_normal))
+            self.sections[key] = sections
+        sections = self.sections[key]
+        self.plane_work += len(sections)
+        if self.plane_work > MAX_PLANE_PROJECTION_WORK:
+            raise OperationError(
+                "retopo_geometry_limit",
+                "Mirror-plane projection exceeds its work limit",
+            )
+        best = None
+        best_normal = None
+        best_distance = maximum
+        for vertices, face_normal in sections:
+            if len(vertices) == 3:
+                location = closest_point_on_tri(point, *vertices)
+            else:
+                a, b = vertices
+                direction = b - a
+                factor = max(
+                    0.0, min(1.0, (point - a).dot(direction) / direction.length_squared)
+                )
+                location = a + direction * factor
+            distance = float((location - point).length)
+            if distance <= best_distance:
+                best, best_normal, best_distance = location, face_normal, distance
+        if best is None:
+            raise OperationError(
+                "retopo_projection_failed",
+                "No source/Mirror-plane intersection within the projection distance",
+            )
+        return best, best_normal, best_distance
+
 
 @contextmanager
 def surface(source: Any, target: Any | None = None) -> Iterator[tuple[Surface, Any]]:
@@ -227,6 +299,9 @@ def surface(source: Any, target: Any | None = None) -> Iterator[tuple[Surface, A
         yield reference, depsgraph
     finally:
         reference.bvh = None
+        reference.points.clear()
+        reference.triangles.clear()
+        reference.sections.clear()
 
 
 def distances(values: list[float]) -> DistanceSummary:

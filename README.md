@@ -2158,6 +2158,13 @@ by Shrinkwrap**. They remain object-owned, unapplied, and retain their settings.
   remain on one side of the plane; an entire coplanar patch is rejected. Native
   merging is allowed. Clipping is an Edit Mode transform constraint and is not
   silently emulated by these staged Object Mode edits.
+- During explicit projection, vertices within `1e-6` local units of the Mirror
+  plane are fitted to the actual evaluated source/plane intersection and remain
+  exactly on that plane. This also applies to newly extruded seam vertices and
+  to boundary relaxation when `preserve_boundary` is false. Normal offsets remain
+  in the plane. The intersection is rebuilt per operation; up to two million
+  section-candidate comparisons are allowed. A missing or too-distant
+  intersection fails without publishing staged geometry.
 - Shrinkwrap: exact explicit source target, `NEAREST_SURFACEPOINT`, `ON_SURFACE` or
   `ABOVE_SURFACE`, no vertex group/auxiliary target/internal subdivision, offset
   `[-1,1]`. Explicit retopo projection changes authored positions and leaves this
@@ -2490,6 +2497,23 @@ All three fields are optional. Width and height default to 512 and each must be
 an integer from 64 through 1024, inclusive. Only `"png"` is supported. No camera is
 created automatically: a scene without one returns `no_camera`. An existing
 render job returns `invalid_context`. Rendering works in background and UI modes.
+
+An optional `wireframe` object displays the actual evaluated edges of named Mesh
+objects as cyan native wire geometry in this render:
+
+```json
+{"width": 768, "height": 576, "wireframe": {"objects": ["Cage"], "thickness": 0.001, "surface_offset": 0.002}}
+```
+
+One to sixteen distinct objects are allowed, with at most 8192 evaluated edges
+combined. Object Mode and existing bounded modifier/dependency evaluation guards
+apply. Thickness is 0.000001 to one world unit; the optional normal offset is in [-1, 1]
+world units and defaults to zero. A display offset can expose coarse cage chords
+otherwise obscured by a source surface; it does not change authored correspondence.
+This is a normally occluded native render, not an X-ray overlay or a source-fit
+measurement. Evaluated world-space copies, display material and modifiers exist
+only during rendering. Original geometry, materials, modifiers and render visibility
+are restored/preserved, including failure paths. No persistent cage helper is added.
 
 An optional `cycles` object selects Cycles for this request without changing the
 saved scene configuration:

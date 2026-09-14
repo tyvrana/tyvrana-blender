@@ -11,6 +11,7 @@ from tyvrana_protocol import ArtifactDescriptor
 from .artifacts import ArtifactSpool, ArtifactTooLarge, SpoolFull
 from .models import RenderArguments, RenderResult
 from .operations import OperationError
+from .wireframe import display
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,8 @@ def render_image(
             try:
                 for obj, key, value in overrides:
                     setattr(obj, key, value)
-                outcome = bpy.ops.render.render("EXEC_DEFAULT", write_still=False)
+                with display(arguments.wireframe):
+                    outcome = bpy.ops.render.render("EXEC_DEFAULT", write_still=False)
                 result = bpy.data.images.get("Render Result")
                 if "FINISHED" not in outcome or result is None:
                     raise OperationError(

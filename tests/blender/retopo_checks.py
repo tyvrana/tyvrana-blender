@@ -96,6 +96,84 @@ class RetopoCase(NativeCase):
 
 
 class NativeRetopoTests(RetopoCase):
+    def asymmetric_half_patch(self, transformed: bool = False) -> None:
+        self.sphere()
+        for vertex in self.obj.data.vertices:
+            vertex.co.x += 0.25
+        self.obj.data.update()
+        if transformed:
+            self.obj.location = (2, -3, 4)
+            self.obj.rotation_euler = (0.3, -0.2, 0.5)
+            self.obj.scale = (2, 0.8, 1.5)
+        bpy.context.view_layer.update()
+        self.create()
+        self.target.data.from_pydata(
+            [(x * 0.2, (y - 1) * 0.2, 1.15) for y in range(3) for x in range(3)],
+            [],
+            [(a, a + 1, a + 4, a + 3) for a in (0, 1, 3, 4)],
+        )
+        self.target.data.update()
+        self.target.modifiers.new("Symmetry", "MIRROR")
+
+    def test_mirror_plane_project_fits_asymmetric_surface_in_world_space(self) -> None:
+        for transformed in (False, True):
+            with self.subTest(transformed=transformed):
+                self.setUp()
+                self.asymmetric_half_patch(transformed)
+                before = authored(self.obj)
+                result = self.call("project", selector=VERTICES)
+                self.assertLess(
+                    result["correspondence_after"]["vertices"]["max_distance"], 2e-6
+                )
+                for i in (0, 3, 6):
+                    self.assertEqual(self.target.data.vertices[i].co.x, 0)
+                self.assertEqual(authored(self.obj), before)
+                self.assertEqual(len(self.target.modifiers), 1)
+                self.assertEqual(
+                    self.call("inspect")["evaluated_target"]["vertex_count"], 15
+                )
+                self.call("project", selector=VERTICES, surface_offset=0.01)
+                for i in (0, 3, 6):
+                    self.assertEqual(self.target.data.vertices[i].co.x, 0)
+
+    def test_mirror_plane_extrusion_and_boundary_relax_keep_joined_seam(self) -> None:
+        self.asymmetric_half_patch()
+        self.call("project", selector=VERTICES)
+        edges = [
+            e.index
+            for e in self.target.data.edges
+            if all(i in (6, 7, 8) for i in e.vertices)
+        ]
+        result = self.call(
+            "extrude_boundary", selector=indices("edge", edges), offset=[0, 0.2, -0.04]
+        )
+        self.assertEqual(result["created"]["faces"], 2)
+        seams = [v.index for v in self.target.data.vertices if v.co.x == 0]
+        self.assertEqual(len(seams), 4)
+        result = self.call(
+            "relax", selector=VERTICES, preserve_boundary=False, iterations=3
+        )
+        self.assertLess(
+            result["correspondence_after"]["vertices"]["max_distance"], 1e-6
+        )
+        for i in seams:
+            self.assertEqual(self.target.data.vertices[i].co.x, 0)
+        self.assertEqual(self.call("inspect")["evaluated_target"]["vertex_count"], 20)
+
+    def test_mirror_plane_projection_failures_preserve_geometry(self) -> None:
+        self.asymmetric_half_patch()
+        self.failed_unchanged(
+            "project", selector=VERTICES, max_projection_distance=0.01
+        )
+        with patch.object(geometry, "MAX_PLANE_PROJECTION_WORK", 0):
+            result = self.failed_unchanged("project", selector=VERTICES)
+            self.assertEqual(result.error.code, "retopo_geometry_limit")
+        for vertex in self.obj.data.vertices:
+            vertex.co.x += 2
+        self.obj.data.update()
+        result = self.failed_unchanged("project", selector=VERTICES)
+        self.assertEqual(result.error.code, "retopo_projection_failed")
+
     def test_create_empty_independent_aligned_named_and_delete(self) -> None:
         self.sphere()
         self.obj.location = (2, 3, 4)
