@@ -5,7 +5,7 @@ from typing import Any
 
 import bmesh  # type: ignore[import-not-found]
 import bpy  # type: ignore[import-not-found]
-from mathutils import Matrix, Vector  # type: ignore[import-not-found]
+from mathutils import Euler, Matrix, Vector  # type: ignore[import-not-found]
 from mathutils.geometry import intersect_line_line  # type: ignore[import-not-found]
 
 from . import mesh, modifiers
@@ -687,9 +687,34 @@ def execute(arguments: RetopoEditArguments) -> RetopoEditResult:
                     for item in output["geom"]
                     if isinstance(item, bmesh.types.BMVert)
                 ]
-                bmesh.ops.translate(
-                    bm, verts=moved_vertices, vec=Vector(arguments.offset)
+                pivot = sum((v.co for v in moved_vertices), Vector()) / len(
+                    moved_vertices
                 )
+                rotation = Euler(arguments.rotation, "XYZ").to_matrix()
+                offset = Vector(arguments.offset)
+                mirror_axes = [
+                    list(mod.use_axis).index(True)
+                    for mod in target.modifiers
+                    if mod.type == "MIRROR"
+                ]
+                for vertex in moved_vertices:
+                    original_point = vertex.co.copy()
+                    relative = original_point - pivot
+                    scaled = Vector(
+                        [relative[i] * arguments.scale[i] for i in range(3)]
+                    )
+                    proposed = geometry.checked_point(
+                        pivot + rotation @ scaled + offset
+                    )
+                    if any(
+                        abs(original_point[axis]) <= 1e-6 and abs(proposed[axis]) > 1e-6
+                        for axis in mirror_axes
+                    ):
+                        raise OperationError(
+                            "retopo_boundary_invalid",
+                            "Boundary shaping must preserve an existing Mirror seam",
+                        )
+                    vertex.co = proposed
                 projection_distances = project(
                     reference, target, moved_vertices, arguments
                 )

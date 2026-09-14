@@ -234,3 +234,29 @@ def test_insert_explicit_orientation_and_finishing_guidance() -> None:
     )
     assert "toward_vertex" in models.GUIDANCE and "start_a/start_b" in models.GUIDANCE
     assert "changes valence without moving vertices" in models.GUIDANCE
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("rotation", None),
+        ("rotation", [0, 0]),
+        ("rotation", [0, True, 0]),
+        ("rotation", [0, float("inf"), 0]),
+        ("scale", None),
+        ("scale", [0, 1, 1]),
+        ("scale", [-1, 1, 1]),
+        ("scale", [1001, 1, 1]),
+        ("scale", [True, 1, 1]),
+    ],
+)
+def test_boundary_shaping_rejects_invalid_vectors(field: str, value: Any) -> None:
+    with pytest.raises(ValueError):
+        models.RetopoExtrudeArguments.model_validate(
+            {
+                **BASE,
+                "selector": EDGES,
+                "offset": [0, 0.1, 0],
+                field: value,
+            }
+        )

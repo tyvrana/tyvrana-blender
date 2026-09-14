@@ -43,7 +43,9 @@ GUIDANCE = (
     "{mode: all, domain: vertex}. relax additionally takes iterations (1..50, "
     "default 5), factor (0..1, positive, default 0.5), preserve_boundary "
     "(default true). extrude_boundary requires an edge selector and target-local "
-    "offset. bridge_loops requires loop_a/loop_b edge selectors for disjoint "
+    "offset; optional target-local XYZ Euler rotation and positive scale shape "
+    "the new boundary about its centroid before translation and projection. "
+    "bridge_loops requires loop_a/loop_b edge selectors for disjoint "
     "equal closed boundaries, optional segments (1..16) and native twist. "
     "Index selectors use {mode: indices, domain: edge, indices: [...]}. "
     "All edits accept world surface_offset (-1..1, default 0) and "
@@ -130,6 +132,15 @@ class RetopoRelaxArguments(RetopoProjectArguments):
 class RetopoExtrudeArguments(ProjectionSettings):
     selector: MeshElementSelector
     offset: MeshVector
+    rotation: MeshVector = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+    scale: MeshVector = Field(default_factory=lambda: [1.0, 1.0, 1.0])
+
+    @field_validator("scale")
+    @classmethod
+    def positive_scale(cls, value: list[float]) -> list[float]:
+        if any(component <= 0 or component > 1000 for component in value):
+            raise ValueError("Scale components must be positive and at most 1000")
+        return value
 
     @field_validator("selector")
     @classmethod

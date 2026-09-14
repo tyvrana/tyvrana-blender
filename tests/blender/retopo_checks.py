@@ -328,6 +328,82 @@ class NativeRetopoTests(RetopoCase):
                     result["correspondence_after"]["vertices"]["max_distance"], 1e-6
                 )
 
+    def test_shaped_boundary_preserves_source_and_existing_vertices(self) -> None:
+        self.grid(3)
+        selected = [
+            e.index
+            for e in self.target.data.edges
+            if all(self.target.data.vertices[i].co.y > 0.29 for i in e.vertices)
+        ]
+        before, source = authored(self.target), authored(self.obj)
+        result = self.call(
+            "extrude_boundary",
+            selector=indices("edge", selected),
+            offset=[0, 0.25, 0],
+            rotation=[0, 0, 0.2],
+            scale=[1.4, 1, 1],
+        )
+        self.assertEqual(result["created"]["faces"], 3)
+        self.assertEqual(authored(self.target)[0][:16], before[0])
+        self.assertEqual(authored(self.obj), source)
+        expected = sorted(
+            (x * 1.4 * math.cos(0.2), 0.55 + x * 1.4 * math.sin(0.2), 1)
+            for x in (-0.3, -0.1, 0.1, 0.3)
+        )
+        actual = sorted(tuple(v.co) for v in list(self.target.data.vertices)[16:])
+        for point, wanted in zip(actual, expected, strict=True):
+            for value, coordinate in zip(point, wanted, strict=True):
+                self.assertAlmostEqual(value, coordinate, places=6)
+
+    def test_closed_loop_can_turn_before_projection(self) -> None:
+        a, _ = self.ring_fixture()
+        before, source = authored(self.target), authored(self.obj)
+        result = self.call(
+            "extrude_boundary",
+            selector=a,
+            offset=[0, 0, 0.22],
+            rotation=[0.12, 0, 0.08],
+            scale=[1.02, 1.02, 1],
+        )
+        self.assertEqual(result["created"]["vertices"], 8)
+        self.assertEqual(result["created"]["faces"], 8)
+        self.assertEqual(authored(self.target)[0][:32], before[0])
+        self.assertEqual(authored(self.obj), source)
+        zs = [v.co.z for v in list(self.target.data.vertices)[32:]]
+        self.assertGreater(max(zs) - min(zs), 0.2)
+        self.assertEqual(result["after"]["non_manifold_vertex_count"], 0)
+        self.assertLess(
+            result["correspondence_after"]["vertices"]["max_distance"], 1e-6
+        )
+
+    def test_shaping_rejects_mirror_seam_motion_and_fold_atomically(self) -> None:
+        self.asymmetric_half_patch()
+        self.call("project", selector=VERTICES)
+        edges = [
+            e.index
+            for e in self.target.data.edges
+            if all(i in (6, 7, 8) for i in e.vertices)
+        ]
+        self.failed_unchanged(
+            "extrude_boundary",
+            selector=indices("edge", edges),
+            offset=[0, 0.2, -0.04],
+            scale=[1.5, 1, 1],
+        )
+        self.setUp()
+        self.grid(2)
+        edges = [
+            e.index
+            for e in self.target.data.edges
+            if all(self.target.data.vertices[i].co.y > 0.29 for i in e.vertices)
+        ]
+        self.failed_unchanged(
+            "extrude_boundary",
+            selector=indices("edge", edges),
+            offset=[0, 0.2, 0],
+            rotation=[0, 0, math.pi],
+        )
+
     def test_extrude_invalid_internal_disconnected_and_folded(self) -> None:
         self.grid(2)
         internal = next(

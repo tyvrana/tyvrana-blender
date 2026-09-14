@@ -27,7 +27,7 @@ def test_native_retopology(profile: dict[str, str], tmp_path: Path, ui: bool) ->
     log = result.stdout + result.stderr
     (tmp_path / "retopo-native.log").write_text(log)
     assert result.returncode == 0, log
-    assert "BLENDER_RETOPO_TESTS_PASSED 33" in log, log
+    assert "BLENDER_RETOPO_TESTS_PASSED 36" in log, log
     assert "Traceback" not in log, log
     assert "Warning:" not in log, log
     assert "WARNING" not in log, log

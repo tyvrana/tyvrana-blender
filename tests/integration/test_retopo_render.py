@@ -88,6 +88,8 @@ async def test_build_grow_project_relax_and_render_cage(
                 **pair,
                 selector={"mode": "indices", "domain": "edge", "indices": chosen},
                 offset=[0, 0.2, 0],
+                rotation=[0, 0, 0.12],
+                scale=[1.15, 1, 1],
                 surface_offset=0.015,
             )
             assert grown["created"]["faces"] == 4

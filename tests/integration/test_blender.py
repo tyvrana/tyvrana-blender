@@ -51,3 +51,28 @@ def test_blender_exit_handler_reaps_an_active_worker(profile: dict[str, str]) ->
     )
     with pytest.raises(ProcessLookupError):
         os.kill(int(line.split()[1]), 0)
+
+
+def test_native_script_reload_preserves_unsaved_project(
+    profile: dict[str, str],
+) -> None:
+    result = subprocess.run(
+        [
+            "xvfb-run",
+            "-a",
+            "blender",
+            "--python-exit-code",
+            "1",
+            "--python",
+            str(ROOT / "tests/blender/reload_checks.py"),
+        ],
+        env=profile,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    log = result.stdout + result.stderr
+    assert result.returncode == 0, log
+    assert "BLENDER_RELOAD_TESTS_PASSED" in log
+    assert "Traceback" not in log
+    assert "WARNING" not in log

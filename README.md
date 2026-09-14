@@ -26,6 +26,12 @@ official extension command:
 blender --command extension install-file --repo user_default --enable dist/tyvrana_blender-0.1.0.zip
 ```
 
+For updates with unchanged dependencies, replace the installed extension and run
+Blender's **Reload Scripts** action. Tyvrana stops its previous worker, reloads its
+operation modules, and reconnects without closing the project. In-flight requests
+are interrupted; finish or cancel them before reloading. The scene and unsaved
+project edits are retained.
+
 When replacing an enabled installation with changed dependencies, first disable
 Tyvrana in Preferences, save preferences, and exit Blender. Install from a fresh
 Blender process so previously imported dependency modules are not reused.
@@ -2111,7 +2117,7 @@ smooth-normal/projection-line offset modes. It is not a collision guarantee.
 | `blender.retopo.seed_patch` | Required source-local `center`, source-local nonzero `tangent_direction`, world `width`/`height`; `u_segments`, `v_segments` default 1 | Snap center, project transformed tangent into its source tangent plane, derive orthogonal tangent, build and project an oriented quad grid |
 | `blender.retopo.project` | Required vertex `selector`; `mode: "nearest_surface"` | Project selected authored vertices; unselected coordinates and element ordering remain unchanged |
 | `blender.retopo.relax` | Vertex `selector`, nearest-surface mode; `iterations: 1..50` default 5, `factor: (0,1]` default 0.5, `preserve_boundary: true` | Native neighbor smoothing followed by reprojection after every iteration |
-| `blender.retopo.extrude_boundary` | Edge `selector`; nonzero target-local `offset` of length at most 1000 | Extrude one edge or one connected nonbranching boundary chain/loop into a quad strip and project only new vertices |
+| `blender.retopo.extrude_boundary` | Edge `selector`; nonzero target-local `offset`; optional XYZ Euler `rotation` and positive `scale` | Extrude one boundary chain/loop, shape its new section, then project new vertices |
 | `blender.retopo.bridge_loops` | Edge selectors `loop_a`, `loop_b`; `twist` default 0, `segments: 1..16` default 1 | Bridge two disjoint equal-count closed boundary loops, optionally subdivide connecting edges into bands and project new vertices |
 
 Selectors use the existing explicit authored mesh selector union. Seed width and
@@ -2119,6 +2125,18 @@ height are approximately `0.0001..1000`; each segment count is `1..16`. A parall
 or degenerate tangent fails explicitly. Returned `patch` contains the snapped
 source/world center, world normal and actual world tangent basis. The orientation
 is never guessed from a hidden axis.
+
+Boundary extrusion applies component scale, then XYZ Euler rotation in radians,
+about the selected boundary's vertex centroid in target-local coordinates, followed
+by translation and source projection. Defaults are unit scale and zero rotation;
+`offset` remains required, nonzero and at most 1000 units long. Scale components
+must be positive and at most 1000. This supports curved or tapering strip/loop
+growth without first projecting an unshaped section onto an unintended surface.
+Original vertices remain unchanged. An existing Mirror seam must remain in its
+origin plane; incompatible shaping is rejected. Projection, coordinate budgets,
+source winding, fold and topology validation still run before publishing the edit.
+These controls guide the starting section; nearest-surface projection does not
+promise an exact final rotation, width or anatomical correspondence.
 
 Boundary preservation in relaxation locks vertices on the **actual Mesh boundary**,
 not every edge of the selected region. Unselected vertices remain fixed. Turning
