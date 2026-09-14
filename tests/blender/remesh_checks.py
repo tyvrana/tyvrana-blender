@@ -266,6 +266,97 @@ class NativeRemeshTests(RemeshCase):
         self.assertEqual(self.obj.vertex_groups[0].name, "Weight")
         self.assertTrue(any(v.groups for v in self.obj.data.vertices))
 
+    def test_explicit_uv_discard_keeps_shared_source_and_other_attributes(self) -> None:
+        for preserve in (True, False):
+            self.setUp()
+            for name in ("Generated", "Other UV"):
+                layer = self.obj.data.uv_layers.new(name=name)
+                for item in layer.uv:
+                    item.vector = (0.25, 0.75)
+            self.attribute(".sculpt_mask", "FLOAT", "POINT", 0.4)
+            sibling = self.obj.copy()
+            bpy.context.scene.collection.objects.link(sibling)
+            original = self.obj.data
+            before = authored(sibling)
+            analysis = self.analyze(discard_uv_maps=True)
+            self.assertFalse(analysis["blockers"])
+            self.assertEqual(authored(sibling), before)
+            effect = next(
+                d for d in analysis["destructive_effects"] if d["code"] == "uv_maps"
+            )
+            self.assertEqual(effect["names"], ["Generated", "Other UV"])
+            self.assertEqual(effect["behavior"], "discarded")
+            for effect in analysis["destructive_effects"]:
+                if effect["behavior"] == "reprojected":
+                    self.assertNotIn("Generated", effect["names"])
+                    self.assertNotIn("Other UV", effect["names"])
+            result = self.rebuild(discard_uv_maps=True, preserve_attributes=preserve)
+            self.assertTrue(result["settings"]["discard_uv_maps"])
+            self.assertEqual(len(self.obj.data.uv_layers), 0)
+            self.assertEqual(sibling.data, original)
+            self.assertEqual(authored(sibling), before)
+            mask = self.obj.data.attributes.get(".sculpt_mask")
+            self.assertEqual(mask is not None, preserve)
+            if preserve:
+                self.assertTrue(all(abs(v.value - 0.4) < 1e-5 for v in mask.data))
+
+    def test_object_material_overrides_and_shared_sibling_are_preserved(self) -> None:
+        for preserve in (True, False):
+            self.setUp()
+            materials = [bpy.data.materials.new("Material") for _ in range(4)]
+            for material in materials[:3]:
+                self.obj.data.materials.append(material)
+            self.obj.material_slots[1].link = "OBJECT"
+            self.obj.material_slots[1].material = materials[3]
+            self.obj.material_slots[2].link = "OBJECT"
+            self.obj.material_slots[2].material = None
+            sibling = self.obj.copy()
+            bpy.context.scene.collection.objects.link(sibling)
+            sibling.material_slots[1].material = materials[0]
+            original = self.obj.data
+            slots = remesh.modifiers.material_slots(self.obj)
+            sibling_slots = remesh.modifiers.material_slots(sibling)
+            self.assertFalse(self.analyze()["blockers"])
+            self.rebuild(preserve_attributes=preserve)
+            self.assertEqual(remesh.modifiers.material_slots(self.obj), slots)
+            self.assertEqual(list(self.obj.data.materials), materials[:3])
+            self.assertEqual(sibling.data, original)
+            self.assertEqual(remesh.modifiers.material_slots(sibling), sibling_slots)
+
+    def test_uv_discard_failure_preserves_maps_and_object_materials(self) -> None:
+        self.obj.data.uv_layers.new(name="Generated")
+        self.obj.data.materials.append(bpy.data.materials.new("Underlying"))
+        self.obj.material_slots[0].link = "OBJECT"
+        self.obj.material_slots[0].material = bpy.data.materials.new("Override")
+        original = self.obj.data
+        before = authored(self.obj)
+        slots = remesh.modifiers.material_slots(self.obj)
+        objects = {o.as_pointer() for o in bpy.data.objects}
+        meshes = {m.as_pointer() for m in bpy.data.meshes}
+        with patch.object(
+            remesh, "validate_transfer", side_effect=RuntimeError("After remesh")
+        ):
+            self.error(
+                "sculpt.voxel_remesh",
+                "voxel_remesh_failed",
+                voxel_size=0.2,
+                discard_uv_maps=True,
+            )
+        self.assertEqual(self.obj.data, original)
+        self.assertEqual(authored(self.obj), before)
+        self.assertEqual(remesh.modifiers.material_slots(self.obj), slots)
+        self.assertEqual(objects, {o.as_pointer() for o in bpy.data.objects})
+        self.assertEqual(meshes, {m.as_pointer() for m in bpy.data.meshes})
+
+    def test_uv_discard_does_not_bypass_other_production_guards(self) -> None:
+        self.obj.data.uv_layers.new(name="Generated")
+        self.obj.vertex_groups.new(name="Weights")
+        self.blocked("has_vertex_groups", discard_uv_maps=True)
+        self.setUp()
+        self.obj.data.uv_layers.new(name="Generated")
+        self.obj.shape_key_add(name="Basis")
+        self.blocked("has_shape_keys", discard_uv_maps=True)
+
     def test_shape_keys_and_multires_never_reach_native(self) -> None:
         self.obj.shape_key_add(name="Basis")
         self.blocked("has_shape_keys")
@@ -312,7 +403,7 @@ class NativeRemeshTests(RemeshCase):
         bpy.context.view_layer.update()
         self.blocked("nonunit_scale")
 
-    def test_linked_data_and_object_material_override_guards(self) -> None:
+    def test_linked_data_guard(self) -> None:
         with tempfile.TemporaryDirectory(prefix="tyvrana-remesh-library-") as directory:
             path = str(Path(directory) / "source.blend")
             name = self.obj.data.name
@@ -321,10 +412,6 @@ class NativeRemeshTests(RemeshCase):
                 loaded.meshes = [name]
             self.obj.data = loaded.meshes[0]
             self.blocked("linked_data")
-        self.setUp()
-        self.obj.data.materials.append(bpy.data.materials.new("Material"))
-        self.obj.material_slots[0].link = "OBJECT"
-        self.blocked("object_material_overrides")
 
     def test_hidden_and_custom_normal_guards(self) -> None:
         self.obj.data.vertices[0].hide = True
@@ -373,7 +460,7 @@ class NativeRemeshTests(RemeshCase):
             self.attribute("value" + str(i), "FLOAT", "POINT", 0.0)
         self.blocked("attribute_limit")
         with self.assertRaisesRegex(RuntimeError, "Output exceeds attribute capacity"):
-            remesh.validate_transfer(self.obj.data, self.obj.data, True)
+            remesh.validate_transfer(self.obj.data, self.obj.data, set())
         self.setUp()
         self.obj.data.attributes.new("matrix", "FLOAT4X4", "POINT")
         self.blocked("unsupported_attribute")

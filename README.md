@@ -1839,7 +1839,8 @@ First call `blender.sculpt.voxel_remesh.inspect` with the intended settings:
   "adaptivity": 0,
   "preserve_volume": true,
   "fix_poles": true,
-  "preserve_attributes": true
+  "preserve_attributes": true,
+  "discard_uv_maps": false
 }
 ```
 
@@ -1851,7 +1852,8 @@ native remesh settings. Its result contains:
 {
   object_name, guidance,
   mesh: MeshSummary + {edge_length: Distribution, face_area: Distribution},
-  settings: {voxel_size, adaptivity, preserve_volume, fix_poles, preserve_attributes},
+  settings: {voxel_size, adaptivity, preserve_volume, fix_poles,
+             preserve_attributes, discard_uv_maps},
   effective_fix_poles,
   grid: {dimensions, cells, cell_limit, padding_per_axis,
          exceeds_limit, coordinate_limit_exceeded},
@@ -1873,9 +1875,10 @@ boundary, inspection/reinspection requirements and visual verification workflow.
 `blender.sculpt.voxel_remesh` accepts the same properties but **requires an explicit
 voxel_size**. It repeats all analysis/guards immediately before native execution;
 a previous inspection never authorizes bypassing changed blockers. No broad data
-loss override or acknowledgement checkbox is provided. Deliberately setting
-`preserve_attributes: false` requests the documented attribute loss; protected
-production data still blocks execution.
+loss override is provided. `preserve_attributes: false` requests the documented
+attribute loss; UV maps still block unless `discard_uv_maps: true` explicitly
+requests their removal. Weights, shape keys, Multires and the other protected
+data continue to block execution.
 
 Settings use Blender's stored float32 precision:
 
@@ -1889,6 +1892,11 @@ Settings use Blender's stored float32 precision:
   source form and detail. This is not an exact volume or silhouette guarantee.
 - `fix_poles`: default true; native cleanup reduces poles when adaptivity is zero.
 - `preserve_attributes`: default true; native reprojection described below.
+- `discard_uv_maps`: default false. Set true only when deliberately discarding
+  every UV map on the target, such as generated primitive UVs during blockout.
+  Inspection lists the discarded map names; removal happens on the staged Mesh
+  before remeshing. Other requested attributes are still reprojected. Shared
+  siblings keep their UVs, and failure preserves the target's original maps.
 
 The grid estimate uses authored bounds and the actual stored voxel size:
 `n_axis = ceil(extent_axis / voxel_size) + 8`, allowing padding on both sides.
@@ -1916,11 +1924,10 @@ The initial blockers are:
 | `has_modifiers` | Any other modifier; resolve the stack explicitly first |
 | `nonunit_scale` | Local/inherited scale or shear |
 | `mesh_animation`, `deformation_relationship` | Animated Mesh/object, constraints, deformation parents/targets or vertex-parented children |
-| `has_uv_maps` | Any UV map, including a primitive's generated map; no inference that it is disposable |
+| `has_uv_maps` | Any UV map unless `discard_uv_maps: true`; no inference that generated maps are disposable |
 | `has_vertex_groups` | Any group definition, including empty groups; no approximate weight transfer |
 | `has_custom_normals` | Authored custom normals |
 | `dyntopo`, `hidden_geometry` | Dyntopo or hidden authored geometry; no implicit reveal |
-| `object_material_overrides` | Object-linked material slots |
 | `invalid_surface`, `non_manifold` | Empty/degenerate or open/nonmanifold surface, including loose geometry |
 | `voxel_grid_limit`, `voxel_coordinate_limit` | Allocation or coordinate budget |
 | `attribute_limit`, `unsupported_attribute`, `invalid_sculpt_regions` | Attribute capacity, unvalidated types, malformed masks/Face Sets |
@@ -1936,6 +1943,7 @@ Blender 5.2.1's actual data behavior is:
 | Data | Preserve attributes enabled | Disabled |
 | --- | --- | --- |
 | Mesh material-slot references | Retained | Retained |
+| Object-linked material slots, including empty overrides | Retained and checked | Retained and checked |
 | Face material indices | Nearest-source-face sampling; regional layout approximate | All zero |
 | Sculpt mask | Barycentric point sampling; coverage changes with resolution | Removed; fully editable |
 | Face Sets | Nearest-source-face IDs; small sets can disappear | Removed; implicit default ID 1 |
@@ -1944,7 +1952,8 @@ Blender 5.2.1's actual data behavior is:
 | Face attributes and smooth/flat shading | Nearest-source-face sampling | Attributes removed; all faces use the first source face's shading |
 | Corner attributes/colors | Sampled to vertices, then expanded to corners; discontinuities lost | Removed |
 | Computed normals, selection correspondence | Rebuilt/resampled on new topology | Rebuilt |
-| Production UVs, groups/weights, custom normals | Blocked by Tyvrana | Blocked by Tyvrana |
+| UV maps | Blocked unless `discard_uv_maps: true`, then removed | Same explicit discard requirement |
+| Groups/weights, custom normals | Blocked by Tyvrana | Blocked by Tyvrana |
 
 The validated transferable types are FLOAT, INT, INT8, BOOLEAN, FLOAT_VECTOR,
 FLOAT2, INT32_2D, FLOAT_COLOR and BYTE_COLOR on mesh domains. Other types are
@@ -1953,8 +1962,9 @@ publication. Native mask interpolation roundoff within 1e-6 of the valid range
 is normalized to [0,1]; larger invalid values reject the staged result.
 
 Native Blender can reproject UVs and weights, but UV corner discontinuities and
-weight correspondence do not survive exactly. Tyvrana deliberately protects them;
-it does not provide custom attribute-transfer machinery. Native behavior is
+weight correspondence do not survive exactly. Tyvrana protects weights and
+requires explicit UV discard; it does not claim to preserve UV seams or provide
+custom attribute-transfer machinery. Native behavior is
 verified against the [Blender 5.2.1 remesh operator](https://github.com/blender/blender/blob/v5.2.1/source/blender/editors/object/object_remesh.cc)
 and [attribute reprojection implementation](https://github.com/blender/blender/blob/v5.2.1/source/blender/blenkernel/intern/mesh_remesh_voxel.cc),
 not the operator's outdated blanket claim that all data layers are lost.

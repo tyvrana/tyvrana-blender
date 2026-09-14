@@ -163,11 +163,11 @@ def inspect(obj: Any, arguments: VoxelRemeshArguments) -> VoxelRemeshSummary:
         ),
     )
     block(
-        bool(data.uv_layers),
+        bool(data.uv_layers) and not settings.discard_uv_maps,
         "has_uv_maps",
         (
             "UV maps are protected: reprojection cannot retain authored "
-            "seams and production UV layout"
+            "seams and production UV layout; discard_uv_maps explicitly removes them"
         ),
     )
     block(
@@ -194,11 +194,6 @@ def inspect(obj: Any, arguments: VoxelRemeshArguments) -> VoxelRemeshSummary:
         or any(f.hide for f in data.polygons),
         "hidden_geometry",
         "Remeshing replaces the whole surface; reveal hidden geometry explicitly first",
-    )
-    block(
-        any(s.link == "OBJECT" for s in obj.material_slots),
-        "object_material_overrides",
-        "Object-linked material overrides require an explicit material-slot workflow",
     )
     block(
         not state.face_count or state.face_area.min <= 0,
@@ -262,8 +257,22 @@ def inspect(obj: Any, arguments: VoxelRemeshArguments) -> VoxelRemeshSummary:
             ),
         )
     ]
+    discarded_uvs = (
+        {layer.name for layer in data.uv_layers} if settings.discard_uv_maps else set()
+    )
+    if discarded_uvs:
+        effects.append(
+            RemeshDataEffect(
+                code="uv_maps",
+                behavior="discarded",
+                names=sorted(discarded_uvs),
+                message="All UV maps are explicitly removed from the remeshed target",
+            )
+        )
     for domain in ("POINT", "EDGE", "FACE", "CORNER"):
-        names = sorted(a.name for a in attrs if a.domain == domain)[:MAX_ATTRIBUTES]
+        names = sorted(
+            a.name for a in attrs if a.domain == domain and a.name not in discarded_uvs
+        )[:MAX_ATTRIBUTES]
         if not names:
             continue
         method = {
@@ -311,7 +320,7 @@ def inspect(obj: Any, arguments: VoxelRemeshArguments) -> VoxelRemeshSummary:
             code="object_and_material_slots",
             behavior="preserved",
             message=(
-                "Object identity/transforms, Mesh material-slot references "
+                "Object identity/transforms, Mesh and object-linked material slots "
                 "and unrelated scene state remain unchanged"
             ),
         )
@@ -360,13 +369,16 @@ def native_remesh(staged: Any, settings: VoxelRemeshSettings) -> None:
             )
 
 
-def validate_transfer(original: Any, candidate: Any, preserve: bool) -> None:
+def validate_transfer(
+    original: Any,
+    candidate: Any,
+    expected_attributes: set[tuple[str, str, str]] | None,
+) -> None:
     if list(candidate.materials) != list(original.materials):
         raise RuntimeError("Native remesh changed material slots")
-    if preserve:
+    if expected_attributes is not None:
         actual = {(a.name, a.domain, a.data_type) for a in attributes(candidate)}
-        expected = {(a.name, a.domain, a.data_type) for a in attributes(original)}
-        if not expected <= actual:
+        if not expected_attributes <= actual:
             raise RuntimeError("Native remesh lost requested attributes")
     if (
         len(attributes(candidate)) > MAX_ATTRIBUTES
@@ -399,6 +411,7 @@ def execute(obj: Any, arguments: VoxelRemeshArguments) -> VoxelRemeshResult:
             analysis.model_dump(mode="json"),
         )
     original = obj.data
+    original_slots = modifiers.material_slots(obj)
     staged = candidate = None
     committed = False
     try:
@@ -406,13 +419,25 @@ def execute(obj: Any, arguments: VoxelRemeshArguments) -> VoxelRemeshResult:
         candidate = original.copy()
         staged.data = candidate
         bpy.context.scene.collection.objects.link(staged)
+        if analysis.settings.discard_uv_maps:
+            for layer in list(candidate.uv_layers):
+                candidate.uv_layers.remove(layer)
+        expected_attributes = (
+            {(a.name, a.domain, a.data_type) for a in attributes(candidate)}
+            if analysis.settings.preserve_attributes
+            else None
+        )
         native_remesh(staged, analysis.settings)
         if staged.data != candidate:
             raise RuntimeError(
                 "Native remesh unexpectedly replaced staged Mesh identity"
             )
         modifiers.check_geometry(candidate)
-        validate_transfer(original, candidate, analysis.settings.preserve_attributes)
+        validate_transfer(original, candidate, expected_attributes)
+        if analysis.settings.discard_uv_maps and candidate.uv_layers:
+            raise RuntimeError("Native remesh recreated discarded UV maps")
+        if modifiers.material_slots(staged) != original_slots:
+            raise RuntimeError("Native remesh changed object material slots")
         after = geometry(staged).model_copy(
             update={"object_name": obj.name, "mesh_users": 1}
         )
@@ -435,6 +460,8 @@ def execute(obj: Any, arguments: VoxelRemeshArguments) -> VoxelRemeshResult:
             preserved_data=analysis.preservable_data,
         )
         obj.data = candidate
+        if modifiers.material_slots(obj) != original_slots:
+            raise RuntimeError("Mesh publication changed object material slots")
         bpy.context.view_layer.update()
         committed = True
         return result
@@ -448,6 +475,7 @@ def execute(obj: Any, arguments: VoxelRemeshArguments) -> VoxelRemeshResult:
     finally:
         if not committed and candidate is not None and obj.data == candidate:
             obj.data = original
+            modifiers.restore_material_slots(obj, original_slots)
         if staged is not None:
             bpy.data.objects.remove(staged, do_unlink=True)
         if candidate is not None and not committed and candidate.users == 0:

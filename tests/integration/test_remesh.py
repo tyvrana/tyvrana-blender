@@ -6,7 +6,7 @@ import pytest
 from .conftest import ROOT
 
 
-@pytest.mark.parametrize("ui,count", [(False, 21), (True, 23)])
+@pytest.mark.parametrize("ui,count", [(False, 25), (True, 27)])
 def test_native_voxel_remesh(
     profile: dict[str, str], tmp_path: Path, ui: bool, count: int
 ) -> None:

@@ -46,6 +46,7 @@ def test_dispatch_and_description(suffix: str) -> None:
         ("adaptivity", [-0.01, 1.01, True, "0", None, float("nan")]),
         ("preserve_volume", [1, "true", None]),
         ("preserve_attributes", [0, "false", None]),
+        ("discard_uv_maps", [0, "true", None]),
         ("fix_poles", [1, "true", None]),
         ("object_name", ["", " ", "bad\x00name", "\ud800", None]),
         ("unexpected", [True]),
@@ -66,6 +67,7 @@ def test_required_size_and_default_inspection() -> None:
     args = VoxelRemeshInspectArguments(object_name="Surface")
     assert args.voxel_size == 0.1 and args.adaptivity == 0
     assert args.preserve_volume and args.preserve_attributes and args.fix_poles
+    assert not args.discard_uv_maps
     smallest = VoxelRemeshArguments(object_name="Surface", voxel_size=0.0001)
     assert VoxelRemeshArguments.model_validate(smallest.model_dump()) == smallest
 

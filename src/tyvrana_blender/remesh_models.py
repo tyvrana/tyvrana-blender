@@ -21,7 +21,8 @@ MIN_VOXEL_SIZE = binary32(0.0001)
 GUIDANCE = (
     "Destructive topology replacement for rough organic blockout, not production "
     "retopology. Inspect consequences with the intended settings before use. "
-    "Production UVs, weights, shape keys and Multires are protected by blockers. "
+    "UV maps block by default; discard_uv_maps explicitly removes them. "
+    "Weights, shape keys and Multires remain protected by blockers. "
     "Reprojected attributes are approximate; small details and regions may vanish. "
     "All previous mesh indices become invalid: reinspect/query after remeshing, "
     "then raycast before sculpting and render to verify the form."
@@ -34,6 +35,7 @@ class VoxelRemeshSettings(Arguments):
     preserve_volume: bool = True
     fix_poles: bool = True
     preserve_attributes: bool = True
+    discard_uv_maps: bool = False
 
 
 class VoxelRemeshArguments(VoxelRemeshSettings):
