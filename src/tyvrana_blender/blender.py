@@ -42,7 +42,7 @@ from .camera_models import (
 )
 from .compatibility import require_blender
 from .dispatch import CommandQueue
-from .file_models import FileSaveArguments, FileState
+from .file_models import FileOpenArguments, FileSaveArguments, FileState
 from .image_models import (
     ALPHA_MODES,
     ImageConfigureArguments,
@@ -562,6 +562,19 @@ class BlenderBackend:
         from . import files
 
         return files.save(arguments)
+
+    def file_open(self, arguments: FileOpenArguments) -> FileState:
+        global _opening_project
+        main_thread()
+        from . import files
+
+        # Keep the requesting worker and queue alive until the result is sent.
+        _opening_project = True
+        try:
+            return files.open_project(arguments)
+        finally:
+            _opening_project = False
+            after_save()
 
     def __init__(self, spool: ArtifactSpool | None = None) -> None:
         self.spool = spool
@@ -1541,6 +1554,7 @@ class Runtime:
 
 _runtime: Runtime | None = None
 _enabled = False
+_opening_project = False
 _status = "disabled"
 
 
@@ -1588,11 +1602,12 @@ def pump() -> float | None:
 
 
 def before_load(*args: object) -> None:
-    stop()
+    if not _opening_project:
+        stop()
 
 
 def after_load(*args: object) -> None:
-    if _enabled:
+    if _enabled and not _opening_project:
         restart()
 
 

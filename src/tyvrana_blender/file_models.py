@@ -1,7 +1,7 @@
 """Explicit native project persistence, separate from artifact transport."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
 
@@ -27,6 +27,25 @@ class FileSaveArguments(Arguments):
             or Path(value).suffix != ".blend"
         ):
             raise ValueError("Use an absolute native path ending in .blend")
+        return value
+
+
+class FileOpenArguments(Arguments):
+    filepath: Annotated[str, Field(min_length=1, max_length=4096)]
+    discard_current: Literal[True]
+    load_ui: bool = False
+
+    @field_validator("discard_current", mode="before")
+    @classmethod
+    def explicit_replacement(cls, value: object) -> object:
+        if value is not True:
+            raise ValueError("Opening a project requires discard_current: true")
+        return value
+
+    @field_validator("filepath")
+    @classmethod
+    def blend_path(cls, value: str) -> str:
+        FileSaveArguments.blend_path(value)
         return value
 
 

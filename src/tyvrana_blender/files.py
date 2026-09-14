@@ -4,7 +4,7 @@ from pathlib import Path
 
 import bpy  # type: ignore[import-not-found]
 
-from .file_models import FileSaveArguments, FileState
+from .file_models import FileOpenArguments, FileSaveArguments, FileState
 from .operations import OperationError
 
 
@@ -72,4 +72,33 @@ def save(arguments: FileSaveArguments) -> FileState:
             "file_save_failed",
             str(exc),
             {"possible_partial_write": True},
+        ) from exc
+
+
+def open_project(arguments: FileOpenArguments) -> FileState:
+    """Replace the current project without executing embedded Python."""
+    if bpy.context.mode != "OBJECT" or bpy.app.is_job_running("RENDER"):
+        raise OperationError("invalid_context", "Open requires idle Object Mode")
+    source = Path(arguments.filepath)
+    try:
+        if source.is_symlink() or not source.is_file():
+            raise OperationError(
+                "file_source_invalid", "Source must be an existing regular file"
+            )
+        source = source.resolve(strict=True)
+    except OSError as exc:
+        raise OperationError("file_access_failed", str(exc)) from exc
+    try:
+        outcome = bpy.ops.wm.open_mainfile(
+            filepath=str(source), load_ui=arguments.load_ui, use_scripts=False
+        )
+        if "FINISHED" not in outcome:
+            raise RuntimeError("Native open did not finish")
+        result = inspect()
+        if result.filepath != str(source):
+            raise RuntimeError("Native open did not load the requested project")
+        return result
+    except Exception as exc:
+        raise OperationError(
+            "file_open_failed", str(exc), {"possible_partial_load": True}
         ) from exc

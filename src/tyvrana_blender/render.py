@@ -29,6 +29,37 @@ def output_nodes(tree: Any, visited: set[int]) -> list[Any]:
     return nodes
 
 
+def result_editor() -> tuple[Any, Any]:
+    if bpy.app.background:
+        raise OperationError("invalid_context", "Showing a render requires a window")
+    window = bpy.context.window
+    if window is None:
+        raise OperationError("invalid_context", "No active window for render display")
+    areas = [
+        area for area in window.screen.areas if area.type in {"VIEW_3D", "IMAGE_EDITOR"}
+    ]
+    if not areas:
+        raise OperationError(
+            "invalid_context", "No 3D View or Image Editor for render display"
+        )
+    return window, max(areas, key=lambda area: area.width * area.height)
+
+
+def show_result(editor: tuple[Any, Any], result: Any) -> None:
+    window, area = editor
+    area.type = "IMAGE_EDITOR"
+    area.spaces.active.ui_mode = "VIEW"
+    area.spaces.active.image = result
+    region = next(region for region in area.regions if region.type == "WINDOW")
+    with bpy.context.temp_override(window=window, area=area, region=region):
+        outcome = bpy.ops.image.view_all(fit_view=True)
+        if "FINISHED" not in outcome:
+            raise OperationError(
+                "render_display_failed", "Could not fit the render view"
+            )
+    area.tag_redraw()
+
+
 def render_image(
     arguments: RenderArguments, spool: ArtifactSpool
 ) -> tuple[RenderResult, ArtifactDescriptor]:
@@ -39,6 +70,7 @@ def render_image(
         raise OperationError("no_camera", "The current scene has no camera")
     if bpy.app.is_job_running("RENDER"):
         raise OperationError("invalid_context", "Blender is already rendering")
+    editor = result_editor() if arguments.show_result else None
     render = scene.render
     image = render.image_settings
     overrides = [
@@ -106,6 +138,8 @@ def render_image(
                 for obj, key, value in saved:
                     setattr(obj, key, value)
             descriptor = spool.describe(artifact_id)
+            if editor is not None:
+                show_result(editor, result)
             return RenderResult(
                 width=arguments.width, height=arguments.height
             ), descriptor

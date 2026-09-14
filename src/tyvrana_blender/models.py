@@ -115,6 +115,7 @@ class RenderArguments(Model):
     format: Literal["png"] = "png"
     cycles: CyclesRenderOptions | None = None
     wireframe: WireframeRenderOptions | None = None
+    show_result: bool = False
 
     @field_validator("cycles", "wireframe", mode="before")
     @classmethod

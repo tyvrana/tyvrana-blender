@@ -106,6 +106,7 @@ Names are exact and are advertised in sorted order:
 | `blender.image.create_generated` | Width/height; optional name, generation and color settings | Created image summary |
 | `blender.image.create_from_artifact` | Attached artifact ID; optional name, color space and alpha mode | Packed image summary |
 | `blender.file.inspect` | No arguments | Native filepath, saved/dirty flags and disk state |
+| `blender.file.open` | Absolute `.blend` filepath; required `discard_current: true`; optional `load_ui` | Replace current project while retaining MCP response and registration |
 | `blender.file.save` | Optional absolute `.blend` filepath; explicit overwrite permission | Save the current project and update registration metadata |
 | `blender.image.configure` | Name; optional color space and alpha mode | Updated image summary |
 | `blender.shader.inspect` | Material name | One shader graph summary |
@@ -2321,6 +2322,21 @@ pole creation and automatic density-transition generation are deliberately absen
 it is not a complete audit of scripted RNA changes. Save deliberate milestones
 even when that flag is false.
 
+`blender.file.open` loads an existing local regular `.blend` file in idle Object
+Mode. Supply an absolute `filepath` and `discard_current: true` explicitly: opening
+replaces the current project, including unsaved changes. Save valuable work first;
+native dirty state is not a complete audit of scripted edits. `load_ui` defaults
+to false, preserving the current workspace layout; true loads the saved layout.
+Symlinks and missing/nonregular sources are rejected. Embedded Python execution
+is always disabled; there is no script-execution option.
+
+The requesting connection survives native load callbacks. Project registration
+refreshes after the response and pending transfers drain, using the same instance
+ID. Ordinary external file loads retain the extension's normal restart behavior.
+Native open failures report `file_open_failed` and `possible_partial_load: true`;
+inspect the resulting scene before continuing. No rollback of a loaded project
+is promised. Native semantics follow [Blender's file-open operator](https://docs.blender.org/api/5.2/bpy.ops.wm.html#bpy.ops.wm.open_mainfile).
+
 `blender.file.save` uses native `bpy.ops.wm.save_as_mainfile` in Object Mode.
 Supply an absolute host-local `filepath` ending in `.blend` for the first save or
 Save As. Omit it to save the current file. The destination parent must exist;
@@ -2497,6 +2513,13 @@ All three fields are optional. Width and height default to 512 and each must be
 an integer from 64 through 1024, inclusive. Only `"png"` is supported. No camera is
 created automatically: a scene without one returns `no_camera`. An existing
 render job returns `invalid_context`. Rendering works in background and UI modes.
+
+Set `show_result: true` to leave the completed Render Result visible and fitted
+in the active window's largest 3D View or Image Editor. This deliberately changes
+that editor to an Image Editor; scene geometry and render settings are preserved.
+The default false leaves editors unchanged. The option requires a visible window
+and a suitable editor, and rejects background mode before rendering. It is useful
+for visible inspection checkpoints alongside the returned MCP image.
 
 An optional `wireframe` object displays the actual evaluated edges of named Mesh
 objects as cyan native wire geometry in this render:

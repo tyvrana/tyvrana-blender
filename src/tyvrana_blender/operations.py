@@ -21,7 +21,12 @@ from .camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
-from .file_models import FileInspectArguments, FileSaveArguments, FileState
+from .file_models import (
+    FileInspectArguments,
+    FileOpenArguments,
+    FileSaveArguments,
+    FileState,
+)
 from .image_models import (
     ImageConfigureArguments,
     ImageCreateArguments,
@@ -175,6 +180,7 @@ OPERATIONS = (
     "blender.camera.inspect",
     "blender.camera.set_active",
     "blender.file.inspect",
+    "blender.file.open",
     "blender.file.save",
     "blender.image.configure",
     "blender.image.create_from_artifact",
@@ -276,6 +282,7 @@ class OperationError(Exception):
 
 class SceneBackend(Protocol):
     def file_inspect(self) -> FileState: ...
+    def file_open(self, arguments: FileOpenArguments) -> FileState: ...
     def file_save(self, arguments: FileSaveArguments) -> FileState: ...
 
     def scene_raycast(self, arguments: RaycastArguments) -> RaycastResult: ...
@@ -412,6 +419,7 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         arguments: (
             FileInspectArguments
+            | FileOpenArguments
             | FileSaveArguments
             | RaycastArguments
             | MultiresInspectArguments
@@ -472,6 +480,8 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
         match request.operation:
             case "blender.file.inspect":
                 arguments = FileInspectArguments.model_validate(request.arguments)
+            case "blender.file.open":
+                arguments = FileOpenArguments.model_validate(request.arguments)
             case "blender.file.save":
                 arguments = FileSaveArguments.model_validate(request.arguments)
             case "blender.retopo.insert_loop":
@@ -667,7 +677,9 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
-        if isinstance(arguments, FileSaveArguments):
+        if isinstance(arguments, FileOpenArguments):
+            result = backend.file_open(arguments)
+        elif isinstance(arguments, FileSaveArguments):
             result = backend.file_save(arguments)
         elif isinstance(arguments, FileInspectArguments):
             result = backend.file_inspect()

@@ -1,7 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from tyvrana_blender.models import ConnectionConfig, CreateArguments, TransformArguments
+from tyvrana_blender.models import (
+    ConnectionConfig,
+    CreateArguments,
+    RenderArguments,
+    TransformArguments,
+)
 from tyvrana_blender.operations import OPERATIONS, registration
 
 
@@ -135,6 +140,13 @@ def test_render_defaults_and_dimension_bounds() -> None:
         "format": "png",
         "cycles": None,
         "wireframe": None,
+        "show_result": False,
     }
     assert RenderArguments(width=64, height=1024).height == 1024
     assert RenderArguments.model_validate({"cycles": {}}).cycles is not None
+
+
+@pytest.mark.parametrize("value", [None, 1, "true", []])
+def test_render_display_requires_a_boolean(value: object) -> None:
+    with pytest.raises(ValidationError):
+        RenderArguments.model_validate({"show_result": value})

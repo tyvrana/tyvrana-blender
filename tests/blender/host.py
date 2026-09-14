@@ -66,6 +66,10 @@ if "TYVRANA_TEST_FINISH" in os.environ:
     importlib.import_module("tests.blender.retopo_finish_scene").prepare_scene(
         os.environ["TYVRANA_TEST_FINISH"]
     )
+if os.environ.get("TYVRANA_TEST_FILE_OPEN") == "1":
+    probe = bpy.data.texts.new("AutoRunProbe.py")
+    probe.write("import bpy\nbpy.context.scene['file_script_executed'] = True\n")
+    probe.use_module = True
 deadline = time.monotonic() + 180
 if os.environ.get("TYVRANA_TEST_CYCLES_OVERRIDE") == "1":
     bpy.context.scene.render.engine = "BLENDER_EEVEE"
@@ -92,6 +96,15 @@ def check() -> float | None:
             )
             (control / "ready.tmp").replace(control / "ready.json")
         if (control / "stop").exists():
+            if os.environ.get("TYVRANA_TEST_SHOW_RENDER") == "1":
+                assert any(
+                    area.type == "IMAGE_EDITOR"
+                    and area.spaces.active.image == bpy.data.images.get("Render Result")
+                    for window in bpy.context.window_manager.windows
+                    for area in window.screen.areas
+                )
+            if os.environ.get("TYVRANA_TEST_FILE_OPEN") == "1":
+                assert not bpy.context.scene.get("file_script_executed", False)
             if os.environ.get("TYVRANA_TEST_CYCLES_OVERRIDE") == "1":
                 assert bpy.context.scene.render.engine == "BLENDER_EEVEE"
                 assert bpy.context.scene.cycles.samples == 73
@@ -129,4 +142,4 @@ if bpy.app.background:
         adapter.unregister()
 else:
     # Blender itself invokes the extension timer; this test timer only observes.
-    bpy.app.timers.register(check, first_interval=0.1)
+    bpy.app.timers.register(check, first_interval=0.1, persistent=True)

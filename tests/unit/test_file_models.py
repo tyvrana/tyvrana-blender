@@ -4,7 +4,11 @@ import pytest
 from pydantic import ValidationError
 from tyvrana_protocol import OperationRequest, OperationSuccess
 
-from tyvrana_blender.file_models import FileInspectArguments, FileSaveArguments
+from tyvrana_blender.file_models import (
+    FileInspectArguments,
+    FileOpenArguments,
+    FileSaveArguments,
+)
 from tyvrana_blender.operations import execute
 
 from .test_operations import Backend
@@ -44,6 +48,7 @@ def test_file_inspection_has_no_arguments() -> None:
     ("name", "arguments"),
     [
         ("inspect", {}),
+        ("open", {"filepath": "/project/model.blend", "discard_current": True}),
         ("save", {}),
         ("save", {"overwrite": True}),
         ("save", {"filepath": "/project/model.blend"}),
@@ -64,3 +69,26 @@ def test_file_dispatch(name: str, arguments: dict[str, str | bool]) -> None:
     assert isinstance(response, OperationSuccess)
     assert isinstance(response.result, dict)
     assert response.result["is_saved"] is False
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"filepath": "/project/file.blend"},
+        {"filepath": "relative.blend", "discard_current": True},
+        {"filepath": "/project/file.png", "discard_current": True},
+        {"filepath": "/project/file.blend", "discard_current": False},
+        {"filepath": "/project/file.blend", "discard_current": 1},
+        {"filepath": "/project/file.blend", "discard_current": "true"},
+        {"filepath": "/project/file.blend", "discard_current": True, "load_ui": None},
+        {
+            "filepath": "/project/file.blend",
+            "discard_current": True,
+            "use_scripts": True,
+        },
+    ],
+)
+def test_open_requires_explicit_typed_project_replacement(arguments: object) -> None:
+    with pytest.raises(ValidationError):
+        FileOpenArguments.model_validate(arguments)

@@ -70,6 +70,8 @@ async def test_real_render_reaches_mcp_image_content(
     cycles: bool,
 ) -> None:
     profile["TYVRANA_TEST_RENDER"] = "1"
+    if ui:
+        profile["TYVRANA_TEST_SHOW_RENDER"] = "1"
     if cycles:
         profile["TYVRANA_TEST_CYCLES_OVERRIDE"] = "1"
     async with core_client(tmp_path) as (client, port):
@@ -77,6 +79,16 @@ async def test_real_render_reaches_mcp_image_content(
         async with running_blender(profile, tmp_path, ui=ui):
             registered = await discover(client)
             assert registered is not None
+            if not ui:
+                failure = await client.call_tool(
+                    "tyvrana_execute_operation",
+                    {
+                        "adapter_id": registered.instance_id,
+                        "operation": "blender.render.image",
+                        "arguments": {"show_result": True},
+                    },
+                )
+                assert failure.is_error
             result = await client.call_tool(
                 "tyvrana_execute_operation",
                 {
@@ -86,6 +98,7 @@ async def test_real_render_reaches_mcp_image_content(
                         "width": 512,
                         "height": 512,
                         "format": "png",
+                        "show_result": ui,
                         **(
                             {"cycles": {"samples": 8, "device": "cpu", "denoise": True}}
                             if cycles
