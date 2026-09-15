@@ -62,10 +62,10 @@ def dependencies(obj: Any) -> list[Any]:
     result = [obj.parent] if obj.parent else []
     for item in [*obj.modifiers, *obj.constraints]:
         if item.type == "NODES":
-            raise OperationError(
-                "retopo_evaluation_unsupported",
-                "Geometry Nodes evaluation is not bounded here",
-            )
+            from . import instances
+
+            result.extend(instances.evaluation_dependencies(obj))
+            continue
         for prop in item.bl_rna.properties:
             if prop.type != "POINTER":
                 continue
@@ -139,7 +139,15 @@ def graph(source: Any, target: Any | None = None) -> Any:
             )
         active.add(key)
         if obj.type == "MESH":
-            modifiers.budget(obj, modifiers.stack(obj), strict=True)
+            from . import instances
+
+            if instances.KEY in obj:
+                # This owned graph emits bounded shared instances. Its carrier
+                # and prototype stacks are visited and bounded below.
+                instances.evaluation_dependencies(obj)
+                mesh.check_budget(modifiers.data_size(obj.data))
+            else:
+                modifiers.budget(obj, modifiers.stack(obj), strict=True)
         for child in dependencies(obj):
             visit(child, from_source=from_source)
         active.remove(key)

@@ -2994,6 +2994,10 @@ The prototype uses local +Y along its direction and +Z away from the surface;
 its evaluated mesh is shared by every instance. Object transforms on the
 prototype do not position instances. Instance scale applies to prototype coordinates.
 
+Existing evaluated surface and UV inspections accept these intact owned graphs
+alongside ordinary meshes. Their carrier and prototype dependencies still pass
+the bounded evaluation preflight; arbitrary or edited node graphs remain rejected.
+
 Create takes `name` and a `distribution`:
 
 ```json

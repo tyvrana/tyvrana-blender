@@ -85,6 +85,29 @@ class InstanceTests(unittest.TestCase):
                     instance.matrix_world.translation.z, 0.02, places=5
                 )
 
+    def test_existing_evaluated_inspection_with_owned_instances(self) -> None:
+        self.create()
+        package = "bl_ext.user_default.tyvrana_blender."
+        uv_layout = importlib.import_module(package + "uv_layout")
+        uv_models = importlib.import_module(package + "uv_models")
+        arguments = uv_models.UVLayoutArguments(
+            objects=["Surface"], uv_map="UVMap", evaluated=True
+        )
+        report, _ = uv_layout.inspect(arguments, None)
+        self.assertAlmostEqual(report.world_area, 4)
+        obj = bpy.data.objects["Instances"]
+        obj.modifiers[0].node_group.nodes["Instances"].mute = True
+        with self.assertRaises(operations.OperationError):
+            uv_layout.inspect(arguments, None)
+
+    def test_inspection_bounds_instance_dependencies(self) -> None:
+        self.create()
+        package = "bl_ext.user_default.tyvrana_blender."
+        retopo = importlib.import_module(package + "retopo_geometry")
+        bpy.data.objects["Asset"].modifiers.new("Unknown", "NODES")
+        with self.assertRaises(operations.OperationError):
+            retopo.graph(self.surface)
+
     def test_live_deformation_and_transform(self) -> None:
         self.create()
         before = self.inspect()

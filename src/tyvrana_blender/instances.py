@@ -437,6 +437,38 @@ def owned(obj: Any) -> tuple[Any, dict[str, Any]]:
     return group, metadata
 
 
+def evaluation_dependencies(obj: Any) -> list[Any]:
+    """Preflight an owned, non-realizing graph without evaluating arbitrary nodes."""
+    group, metadata = owned(obj)
+    spec = SurfaceDistribution.model_validate(metadata["distribution"])
+    if (
+        len(obj.data.vertices) != spec.rows * spec.columns
+        or len(obj.data.edges)
+        or len(obj.data.polygons)
+    ):
+        fail("Surface-instance point topology changed")
+    for name in ATTRS.values():
+        attribute = obj.data.attributes.get(name)
+        if (
+            attribute is None
+            or attribute.domain != "POINT"
+            or attribute.data_type != "FLOAT_VECTOR"
+        ):
+            fail("Surface-instance binding attributes changed")
+    source = group.nodes["Surface"].inputs["Object"].default_value
+    prototype = group.nodes["Prototype"].inputs["Object"].default_value
+    if source is None or prototype is None:
+        fail("Bound surface or prototype was removed")
+    # References remain authoritative after object renames.
+    validate_inputs(
+        spec.model_copy(
+            update={"surface_object": source.name, "prototype_object": prototype.name}
+        ),
+        obj,
+    )
+    return [source, prototype]
+
+
 def configure(
     name: str, spec: SurfaceDistribution, *, create: bool
 ) -> SurfaceInstancesSummary:

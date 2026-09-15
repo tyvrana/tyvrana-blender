@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 from tyvrana_protocol import JsonValue
 
 from ..png import mean_pixel_difference
@@ -98,6 +99,10 @@ async def test_guided_instances_render_through_mcp(
                 "surface_instances.create", name="Instances", distribution=spec
             )
             assert made["evaluated_instance_count"] == 30
+            layout = await call(
+                "uv.inspect_layout", objects=["Surface"], uv_map="UVMap", evaluated=True
+            )
+            assert layout["world_area"] == pytest.approx(4)
             after = await render(
                 client, identifier, cycles={"samples": 4, "device": "cpu"}
             )
