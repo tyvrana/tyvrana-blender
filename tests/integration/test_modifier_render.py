@@ -106,6 +106,9 @@ async def test_reversible_modifier_form_renders_through_mcp(
                     != evaluated_before["evaluated_basis"]["tangents_sha256"]
                 )
                 assert evaluated_after["viewport_render_settings_differences"] == []
+                repeat = evaluated_after["evaluated_basis"]["tangent_repeatability"]
+                assert repeat["maximum_component_delta"] < 1e-5
+                assert repeat["handedness_change_count"] == 0
             assert evaluated_after["vertex_count"] > evaluated_before["vertex_count"]
             assert fixed_scene(await call("scene.inspect")) == fixed_scene(scene_before)
             assert await call("camera.inspect") == camera_before

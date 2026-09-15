@@ -1108,6 +1108,28 @@ class ModifierTests(unittest.TestCase):
         self.assertEqual(authored(self.obj.data), before)
         self.assertEqual(self.evaluated()["face_count"], 1)
 
+    def test_surface_basis_measures_parallel_tangent_repeatability(self) -> None:
+        for face in self.obj.data.polygons:
+            face.use_smooth = True
+        self.add("subdivision_surface", levels=5, render_levels=5, uv_smooth="none")
+        self.call(
+            "modifier.create",
+            type="triangulate",
+            name="Triangles",
+            settings={"quad_method": "fixed", "keep_custom_normals": True},
+        )
+        before = authored(self.obj.data)
+        count = len(bpy.data.meshes)
+        result = self.call("mesh.inspect_evaluated", uv_map="UVMap")
+        self.assertGreater(result["face_count"], 10000)
+        repeat = result["evaluated_basis"]["tangent_repeatability"]
+        self.assertEqual(len(repeat["repeated_sha256"]), 64)
+        self.assertLess(repeat["maximum_component_delta"], 1e-5)
+        self.assertEqual(repeat["handedness_change_count"], 0)
+        self.assertEqual(before, authored(self.obj.data))
+        self.assertEqual(count, len(bpy.data.meshes))
+        self.assertIsNone(self.evaluated()["evaluated_basis"]["tangent_repeatability"])
+
     def test_evaluated_repeated_inspection_clears_temporary_geometry(self) -> None:
         self.add("subdivision_surface")
         count = len(bpy.data.meshes)

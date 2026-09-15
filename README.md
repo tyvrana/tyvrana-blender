@@ -1604,6 +1604,16 @@ object-local ordered geometry, shading-flag and corner-normal fingerprints.
 Tangents are calculated only on temporary mesh copies, with cleanup on failures.
 Existing modeling/evaluation budgets apply.
 
+When UV tangents are requested, `tangent_repeatability` measures a second native
+calculation on the identical snapshot: its exact hash, maximum XYZ component
+difference, changed-corner count and handedness-change count. Blender's native
+parallel MikkTSpace accumulation can change the final floating-point bits on dense
+meshes. Use the measured differences together with unchanged geometry/UV/normal
+inputs and rendered checks; an exact tangent hash alone is not a robust equality
+test across native recalculations. These diagnostics do not round, suppress or
+declare any difference acceptable, and they are not a comparison with a previous
+scene state.
+
 The operation evaluates the current viewport dependency graph and reports modifier
 visibility/subdivision-level differences from render settings. An empty difference
 list is not a promise of equivalence for every host feature or renderer. Fingerprints

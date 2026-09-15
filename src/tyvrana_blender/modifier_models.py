@@ -405,6 +405,13 @@ class ModifierStackEntry(Model):
     type: str
 
 
+class TangentRepeatability(Model):
+    repeated_sha256: str
+    maximum_component_delta: float
+    changed_corner_count: int
+    handedness_change_count: int
+
+
 class MeshSurfaceBasis(Model):
     geometry_sha256: str
     shading_flags_sha256: str
@@ -412,6 +419,7 @@ class MeshSurfaceBasis(Model):
     uv_map: str | None
     uv_sha256: str | None
     tangents_sha256: str | None
+    tangent_repeatability: TangentRepeatability | None
     smooth_face_count: int
     sharp_edge_count: int
     seam_edge_count: int

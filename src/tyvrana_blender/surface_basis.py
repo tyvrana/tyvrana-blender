@@ -3,9 +3,10 @@
 import hashlib
 import math
 import struct
+from array import array
 from typing import Any
 
-from .modifier_models import MeshSurfaceBasis
+from .modifier_models import MeshSurfaceBasis, TangentRepeatability
 from .operations import OperationError
 
 
@@ -35,6 +36,7 @@ def inspect(data: Any, geometry_sha256: str, uv_map: str | None) -> MeshSurfaceB
         normals.update(float_bytes(normal.vector))
     uv_hash = tangent_hash = None
     negative = zero = None
+    repeatability = None
     if uv_map is not None:
         layer = data.uv_layers.get(uv_map)
         if layer is None:
@@ -52,12 +54,42 @@ def inspect(data: Any, geometry_sha256: str, uv_map: str | None) -> MeshSurfaceB
         data.calc_tangents(uvmap=uv_map)
         try:
             tangent = hashlib.sha256()
+            original = array("f")
             negative = zero = 0
             for loop in data.loops:
-                tangent.update(float_bytes((*loop.tangent, loop.bitangent_sign)))
+                tangent_values = (*loop.tangent, loop.bitangent_sign)
+                tangent.update(float_bytes(tangent_values))
+                original.extend(tangent_values)
                 negative += loop.bitangent_sign < 0
                 zero += loop.tangent.length_squared < 1e-12
             tangent_hash = tangent.hexdigest()
+        finally:
+            data.free_tangents()
+        # Native MikkTSpace uses parallel atomic float accumulation above 10,000
+        # faces. Exact hashes can differ on identical inputs; measure the actual
+        # component and handedness differences without rounding or hiding them.
+        data.calc_tangents(uvmap=uv_map)
+        try:
+            repeated = hashlib.sha256()
+            maximum_delta = 0.0
+            changed = handedness_changes = 0
+            for i, loop in enumerate(data.loops):
+                tangent_values = (*loop.tangent, loop.bitangent_sign)
+                repeated.update(float_bytes(tangent_values))
+                previous = original[i * 4 : i * 4 + 4]
+                delta = max(
+                    abs(a - b)
+                    for a, b in zip(tangent_values[:3], previous[:3], strict=True)
+                )
+                maximum_delta = max(maximum_delta, delta)
+                changed += delta != 0 or tangent_values[3] != previous[3]
+                handedness_changes += tangent_values[3] != previous[3]
+            repeatability = TangentRepeatability(
+                repeated_sha256=repeated.hexdigest(),
+                maximum_component_delta=maximum_delta,
+                changed_corner_count=changed,
+                handedness_change_count=handedness_changes,
+            )
         finally:
             data.free_tangents()
     return MeshSurfaceBasis(
@@ -67,6 +99,7 @@ def inspect(data: Any, geometry_sha256: str, uv_map: str | None) -> MeshSurfaceB
         uv_map=uv_map,
         uv_sha256=uv_hash,
         tangents_sha256=tangent_hash,
+        tangent_repeatability=repeatability,
         smooth_face_count=sum(f.use_smooth for f in data.polygons),
         sharp_edge_count=sum(e.use_edge_sharp for e in data.edges),
         seam_edge_count=sum(e.use_seam for e in data.edges),

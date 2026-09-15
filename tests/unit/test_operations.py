@@ -609,6 +609,7 @@ class Backend:
             uv_map=None,
             uv_sha256=None,
             tangents_sha256=None,
+            tangent_repeatability=None,
             smooth_face_count=0,
             sharp_edge_count=0,
             seam_edge_count=0,
