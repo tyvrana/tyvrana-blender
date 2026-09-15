@@ -3128,7 +3128,11 @@ vertices and one million envelope vertex/bone evaluations.
 The operation stages mesh data and publishes one owned Armature modifier,
 preserving object identity, authored geometry, UVs, materials, transforms and
 unrelated vertex groups. `modifier_index` defaults to 0; `preserve_volume`
-defaults to true. Rebinding replaces weights for the same rig. Unowned Armature
+defaults to true. Rebinding replaces weights for the same rig by default.
+`replace_binding_target: true` explicitly retargets an owned modifier to the
+requested armature, with new weights and rollback of the previous target on failure.
+Unrelated groups are preserved, including old bone-named groups absent from the new
+rig; they no longer contribute to that modifier. Unowned Armature
 modifiers and conflicting bone-named groups are protected. All deform-bone groups
 are created, including empty groups: paired `.L`/`.R` names can therefore follow
 Blender Mirror's vertex-group swapping when Mirror precedes the Armature modifier.
@@ -3162,6 +3166,116 @@ transformed objects, mirrored groups, actual surface-instance root/orientation
 following under internal articulation, persistence and real rendered MCP images.
 Sampled surface normals are normalized before applying instance offsets, retaining
 the requested root separation when the carrier bends.
+
+## Regional deform weights
+
+`blender.weights.inspect` and `blender.weights.assign` work on an existing owned
+armature binding. They edit authored deform weights inside Blender while preserving
+mesh coordinates, UVs, object identity and unrelated vertex groups. Bind initially
+with `blender.armature.bind`. The operations do not perform weight-paint UI input.
+
+### Compact inspection
+
+Inspection accepts `object_name`, an optional authored vertex `selector` (default
+all), optional `bone_names`, `filter` and `sample_limit` (0–32, default 8).
+Selectors reuse the existing `all`, `indices` and object-local `box` vocabulary;
+only the vertex domain is accepted. `filter` is `all`, `unweighted`,
+`non_normalized` or `multiple`, and filters example vertices. Summary counts and
+bone statistics cover the entire selection; `bone_names` limits group statistics.
+
+The result includes the existing binding summary, selected/matching counts,
+unweighted vertices, sums differing from one by more than 1e-5, multiply influenced
+vertices, per-group weight min/max/mean and dominant-vertex counts, and bounded
+example coordinates/weights. Means include zero weights in the selected region.
+Examples show at most four strongest influences and explicitly flag truncation.
+Group locks are reported. Full vertex-weight matrices are never returned by default.
+
+```json
+{"operation":"blender.weights.inspect","arguments":{"object_name":"Surface","filter":"non_normalized","sample_limit":8}}
+```
+
+### Batched regions, gradients and smoothing
+
+Assignment accepts 1–32 ordered `layers`, each with a vertex selector and weight
+profile. Every selection must be nonempty. Later layers replace earlier layers on
+overlapping vertices. Replacing a row clears its competing deform influences;
+unrelated non-deform groups are preserved.
+
+Profiles:
+
+- `constant`: `influences` names 1–4 distinct deform bones with positive weights.
+  Input sums need not equal one; Blender-side computation normalizes them.
+- `gradient`: source-local `start`/`end` plus `start_influences` and
+  `end_influences`. Endpoints are normalized separately, then blended by projected
+  distance along the segment, clamped to its endpoints. `interpolation` is
+  `smoothstep` (default) or `linear`. Both endpoints together name at most four bones.
+- `normalize`: normalize/prune the selected existing deform weights without
+  supplying a matrix. Zero total weight remains unweighted.
+
+```json
+{"operation":"blender.weights.assign","arguments":{"object_name":"Surface","layers":[{"selector":{"mode":"all","domain":"vertex"},"weights":{"mode":"gradient","start":[0,0.8,0],"end":[0,1.2,0],"start_influences":[{"bone":"Base","weight":1}],"end_influences":[{"bone":"End","weight":1}]}}]}}
+```
+
+`max_influences` is 1–4, default 4. Positive influences below 1e-8 are discarded;
+remaining influences are sorted by weight/name, pruned and normalized. Optional
+`smooth_iterations` (0–20, default 0) applies synchronous mesh-adjacency averaging
+across all deform groups in the union of the selected regions. `smooth_factor`
+is in (0,1], default 0.5. An optional `fixed_selector` holds those rows during
+smoothing; it does not prevent the preceding layers from assigning them. Unselected
+neighbors provide fixed boundary values. Only selected vertices are changed.
+
+Assignment rejects locked deform groups, missing/non-deforming bones, invalid or
+empty selections, invalid native weights, shared/linked meshes/rigs and conflicting
+rig animation/constraints. Unweighted vertices require explicit
+`allow_unweighted: true`. Existing unselected rows must already be normalized with
+at most four influences; include invalid rows in a normalize layer to repair them.
+No-op assignments report zero actual float32 weight changes and preserve mesh data.
+A staged copy and the existing binding transaction publish once, with rollback on
+failure. Selection and editor mode are preserved. Results give selected/changed
+counts, each layer's size, fixed count, processing time and the new binding digest.
+
+The binding limit is 100,000 authored vertices. Processing is additionally capped
+at four million vertex/layer/influence work units and four million smoothing
+edge/influence steps. Selectors retain their existing index limits. Mirrored
+half-mesh workflows use native Mirror group swapping and paired `.L`/`.R` bones
+before Armature evaluation; no explicit mirror-weight operation is added here.
+Native tests exercise regional publication through that modifier order.
+
+## Regional deformation and contact QA
+
+`blender.deformation.inspect` also accepts up to 16 `bone_names` and eight
+`contacts`. It returns a `qa` block per mesh with edge/triangle-area min, p05, p50,
+p95, p99 and max ratios, bounded worst-edge endpoints, bone regions and a volume
+proxy. Percentiles use linear interpolation over sorted values. Worst edges rank
+stretch and compression symmetrically by absolute log ratio. Samples identify
+evaluated vertex indices, rest/posed world coordinates and dominant requested bones.
+
+Bone regions include evaluated vertices with at least 0.5 weight. Region edge/face
+statistics require every endpoint in that region; global worst edges still expose
+transitions crossing regions. Displacement max/p95 describes the region's vertices.
+Regions with no nonzero evaluated influence are omitted. Volume uses consistently
+oriented closed triangle surfaces; open surfaces return null; a degenerate rest volume gives no ratio, while complete
+posed collapse reports zero. A volume
+ratio cannot prove absence of self-intersection or measure each joint's tissue volume.
+
+Each contact probe specifies `source_object` (one inspected bound mesh), a separate
+`target_object`, and `rest_min`/`rest_max`. This box selects 1–100,000 evaluated rest
+vertices in source-local coordinates. Their matching posed vertices are measured
+against the target's evaluated rest and posed surfaces. Results include unsigned
+surface-distance distributions, maximum separation increase, and approximate
+outside/penetration maxima from nearest triangle normals.
+
+```json
+{"operation":"blender.deformation.inspect","arguments":{"armature_object":"Rig","objects":["Surface"],"bone_names":["Base","End"],"contacts":[{"source_object":"Surface","target_object":"Support","rest_min":[-0.2,0,-0.1],"rest_max":[0.2,0.2,0.1]}]}}
+```
+
+These probes measure the declared region; they are not automatic seam discovery,
+solid collision tests or visual acceptance. Each evaluated source/target retains
+the 250,000-vertex/500,000-triangle bound. Missing bones/targets, empty contact boxes
+or changed rest/pose source topology fail visibly. Temporary rest evaluation is
+restored even when contact inspection fails. Inspect the actual rendered result
+alongside these measurements. Weights, target binding and pose persist through
+native save/reopen and live extension updates.
 
 ## Development and packaging
 

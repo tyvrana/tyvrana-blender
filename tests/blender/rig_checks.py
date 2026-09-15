@@ -350,6 +350,24 @@ class RigTests(unittest.TestCase):
                 weights=models.EnvelopeWeights(bones=["Segment.R"]),
             )
         )
+        self.backend.weights_assign(
+            importlib.import_module(
+                PACKAGE + "weight_models"
+            ).WeightsAssignArguments.model_validate(
+                {
+                    "object_name": "Surface",
+                    "layers": [
+                        {
+                            "selector": {"mode": "all", "domain": "vertex"},
+                            "weights": {
+                                "mode": "constant",
+                                "influences": [{"bone": "Segment.R", "weight": 1.0}],
+                            },
+                        }
+                    ],
+                }
+            )
+        )
         dg = bpy.context.evaluated_depsgraph_get()
         rest = api.snapshot(self.obj, dg)[0]
         self.backend.armature_pose(

@@ -154,9 +154,21 @@ from tyvrana_blender.uv_models import (
     UVSetActiveArguments,
     UVUnwrapArguments,
 )
+from tyvrana_blender.weight_models import (
+    WeightsAssignArguments,
+    WeightsAssignment,
+    WeightsInspectArguments,
+    WeightsSummary,
+)
 
 
 class Backend:
+    def weights_assign(self, arguments: WeightsAssignArguments) -> WeightsAssignment:
+        raise NotImplementedError
+
+    def weights_inspect(self, arguments: WeightsInspectArguments) -> WeightsSummary:
+        raise NotImplementedError
+
     def armature_create(self, arguments: ArmatureCreateArguments) -> ArmatureSummary:
         raise NotImplementedError
 

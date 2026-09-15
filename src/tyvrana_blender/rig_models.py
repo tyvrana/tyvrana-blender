@@ -4,6 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import ConfigDict, Field, model_validator
 
+from .deformation_models import ContactProbes, ContactSummary, DeformationQA
 from .mesh_models import Arguments, MeshVector
 from .models import Model
 from .modifier_models import Name
@@ -109,9 +110,7 @@ class EnvelopeWeights(Arguments):
 
 class ExplicitWeights(Arguments):
     method: Literal["explicit"]
-    vertices: Annotated[
-        list[VertexWeights], Field(min_length=1, max_length=MAX_VERTICES)
-    ]
+    vertices: Annotated[list[VertexWeights], Field(max_length=MAX_VERTICES)]
 
     @model_validator(mode="after")
     def unique(self) -> Self:
@@ -127,6 +126,7 @@ class ArmatureBindArguments(Arguments):
     modifier_index: Annotated[int, Field(ge=0, le=127)] = 0
     preserve_volume: bool = True
     allow_unweighted: bool = False
+    replace_binding_target: bool = False
 
 
 class PoseBone(Arguments):
@@ -164,11 +164,19 @@ class DeformationInspectArguments(Arguments):
     armature_object: Name
     objects: Annotated[list[Name], Field(min_length=1, max_length=8)]
     sample_limit: Annotated[int, Field(ge=0, le=16)] = 4
+    bone_names: Annotated[list[Name], Field(max_length=16)] = Field(
+        default_factory=list
+    )
+    contacts: ContactProbes = Field(default_factory=list)
 
     @model_validator(mode="after")
     def unique(self) -> Self:
         if len(set(self.objects)) != len(self.objects):
             raise ValueError("Inspect each mesh once")
+        if len(set(self.bone_names)) != len(self.bone_names):
+            raise ValueError("Inspect each bone region once")
+        if any(c.source_object not in self.objects for c in self.contacts):
+            raise ValueError("Contact source must be an inspected bound mesh")
         return self
 
 
@@ -243,6 +251,7 @@ class MeshDeformation(Model):
     triangle_area_ratio_max: float
     collapsed_triangle_count: int
     samples: list[DeformationSample]
+    qa: DeformationQA
 
 
 class DeformationSummary(Model):
@@ -251,3 +260,5 @@ class DeformationSummary(Model):
     meshes: list[MeshDeformation]
     restored_pose_position: str
     inspection_seconds: float
+    contacts: list[ContactSummary]
+    limitations: list[str]

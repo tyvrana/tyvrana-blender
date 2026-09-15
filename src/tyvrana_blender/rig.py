@@ -9,7 +9,7 @@ from typing import Any
 import bpy  # type: ignore[import-not-found]
 from mathutils import Matrix  # type: ignore[import-not-found]
 
-from . import modifiers, retopo_geometry
+from . import deformation_qa, modifiers, retopo_geometry
 from .operations import OperationError
 from .rig_models import (
     MAX_BONES,
@@ -296,7 +296,11 @@ def weights(
     return rows
 
 
-def bind(args: ArmatureBindArguments) -> BindingSummary:
+def bind(
+    args: ArmatureBindArguments,
+    *,
+    prepared_rows: list[list[tuple[str, float]]] | None = None,
+) -> BindingSummary:
     start = time.perf_counter()
     rig = armature(args.armature_object, edit=True)
     obj = modifiers.object_mesh(args.object_name)
@@ -315,8 +319,12 @@ def bind(args: ArmatureBindArguments) -> BindingSummary:
     old_mod = binding_modifier(obj) if KEY in obj else None
     if any(m.type == "ARMATURE" and m != old_mod for m in obj.modifiers):
         fail("Preserve existing unowned Armature modifiers")
-    if old_mod is not None and old_mod.object != rig:
-        fail("Rebinding must preserve the current armature target")
+    if (
+        old_mod is not None
+        and old_mod.object != rig
+        and not args.replace_binding_target
+    ):
+        fail("Retargeting an owned binding requires replace_binding_target=true")
     index_limit = len(obj.modifiers) - (old_mod is not None)
     if args.modifier_index > index_limit or (
         old_mod is None and len(obj.modifiers) >= 128
@@ -329,11 +337,12 @@ def bind(args: ArmatureBindArguments) -> BindingSummary:
         fail(
             "Preserve existing bone-named vertex groups; binding requires unused names"
         )
-    rows = weights(obj, rig, args)
+    rows = weights(obj, rig, args) if prepared_rows is None else prepared_rows
     old_data = obj.data
     old_meta = obj.get(KEY)
     old_index = list(obj.modifiers).index(old_mod) if old_mod else None
     old_volume = old_mod.use_deform_preserve_volume if old_mod else None
+    old_target = old_mod.object if old_mod else None
     data = old_data.copy()
     staged = None
     added = []
@@ -376,6 +385,7 @@ def bind(args: ArmatureBindArguments) -> BindingSummary:
         if old_mod is None and mod is not None:
             obj.modifiers.remove(mod)
         elif old_mod is not None:
+            old_mod.object = old_target
             old_mod.use_deform_preserve_volume = old_volume
             obj.modifiers.move(list(obj.modifiers).index(old_mod), old_index)
         if old_meta is None:
@@ -451,21 +461,34 @@ def pose(args: ArmaturePoseArguments) -> ArmatureSummary:
         raise
 
 
-def snapshot(obj: Any, graph: Any) -> tuple[list[Any], list[Any], list[Any]]:
+def snapshot(
+    obj: Any, graph: Any, bone_names: list[str] | tuple[()] = ()
+) -> tuple[list[Any], list[Any], list[Any], list[dict[str, float]]]:
     with retopo_geometry.evaluated_mesh(obj, graph) as (data, transform):
         data.calc_loop_triangles()
         if len(data.vertices) > 250_000 or len(data.loop_triangles) > 500_000:
             fail("Deformation snapshot exceeds 250000 vertices/500000 triangles")
+        groups = {g.index: g.name for g in obj.vertex_groups if g.name in bone_names}
         return (
             [transform @ v.co for v in data.vertices],
             [tuple(e.vertices) for e in data.edges],
             [tuple(t.vertices) for t in data.loop_triangles],
+            [
+                {
+                    groups[g.group]: g.weight
+                    for g in v.groups
+                    if g.group in groups and g.weight > 0
+                }
+                for v in data.vertices
+            ]
+            if groups
+            else [],
         )
 
 
 def comparison(name: str, rest: Any, posed: Any, limit: int) -> MeshDeformation:
-    a, edges, triangles = rest
-    b, pe, pt = posed
+    a, edges, triangles, _ = rest
+    b, pe, pt, _ = posed
     if len(a) != len(b) or edges != pe or triangles != pt or not a or not triangles:
         fail("Rest and posed evaluated topology differs or has no surface")
     distances = [(q - p).length for p, q in zip(a, b, strict=True)]
@@ -510,6 +533,7 @@ def comparison(name: str, rest: Any, posed: Any, limit: int) -> MeshDeformation:
             )
             for i in indices
         ],
+        qa=deformation_qa.compare(rest, posed, limit),
     )
 
 
@@ -517,20 +541,51 @@ def deformation(args: DeformationInspectArguments) -> DeformationSummary:
     start = time.perf_counter()
     rig = armature(args.armature_object, edit=True)
     objects = [modifiers.object_mesh(n) for n in args.objects]
+    if any(
+        n not in rig.data.bones or not rig.data.bones[n].use_deform
+        for n in args.bone_names
+    ):
+        fail("Deformation regions require existing deform bones")
     for obj in objects:
         if binding_modifier(obj).object != rig:
             fail("Every inspected mesh must have an owned binding to this armature")
     graph = retopo_geometry.graph(rig)
+    targets = {
+        c.target_object: modifiers.object_mesh(c.target_object) for c in args.contacts
+    }
+    for target in targets.values():
+        retopo_geometry.graph(target)
     current = rig.data.pose_position
-    posed = [snapshot(obj, graph) for obj in objects]
+    posed = [snapshot(obj, graph, args.bone_names) for obj in objects]
+    posed_targets = {name: snapshot(obj, graph) for name, obj in targets.items()}
     try:
         rig.data.pose_position = "REST"
         bpy.context.view_layer.update()
-        rest = [snapshot(obj, bpy.context.evaluated_depsgraph_get()) for obj in objects]
+        rest = [
+            snapshot(obj, bpy.context.evaluated_depsgraph_get(), args.bone_names)
+            for obj in objects
+        ]
+        rest_targets = {
+            name: snapshot(obj, bpy.context.evaluated_depsgraph_get())
+            for name, obj in targets.items()
+        }
         results = [
             comparison(obj.name, a, b, args.sample_limit)
             for obj, a, b in zip(objects, rest, posed, strict=True)
         ]
+        contacts = []
+        for probe in args.contacts:
+            index = args.objects.index(probe.source_object)
+            contacts.append(
+                deformation_qa.contact(
+                    probe,
+                    objects[index],
+                    rest[index],
+                    posed[index],
+                    rest_targets[probe.target_object],
+                    posed_targets[probe.target_object],
+                )
+            )
     finally:
         rig.data.pose_position = current
         bpy.context.view_layer.update()
@@ -539,4 +594,15 @@ def deformation(args: DeformationInspectArguments) -> DeformationSummary:
         meshes=results,
         restored_pose_position=current.lower(),
         inspection_seconds=time.perf_counter() - start,
+        contacts=contacts,
+        limitations=[
+            "Bone regions include evaluated vertices with weight >= 0.5; "
+            "edges/faces require every endpoint in the region.",
+            "Volume is a closed, consistently oriented mesh proxy; "
+            "self-intersection is not detected.",
+            "Contact boxes select evaluated rest vertices in source-local coordinates; "
+            "distances use matching posed vertices.",
+            "Signed contact distances use nearest triangle normals, "
+            "not a solid intersection test or complete seam acceptance.",
+        ],
     )

@@ -30,6 +30,7 @@ from . import (
     sculpt_regions,
     shader,
     uv,
+    weights,
 )
 from .artifacts import ArtifactSpool
 from .bake_models import (
@@ -208,6 +209,12 @@ from .uv_models import (
     UVPackResult,
     UVSetActiveArguments,
     UVUnwrapArguments,
+)
+from .weight_models import (
+    WeightsAssignArguments,
+    WeightsAssignment,
+    WeightsInspectArguments,
+    WeightsSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -790,6 +797,14 @@ class BlenderBackend:
         return modifiers.inspect_evaluated(
             modifiers.object_mesh(arguments.object_name), arguments.uv_map
         )
+
+    def weights_assign(self, arguments: WeightsAssignArguments) -> WeightsAssignment:
+        main_thread()
+        return weights.assign(arguments)
+
+    def weights_inspect(self, arguments: WeightsInspectArguments) -> WeightsSummary:
+        main_thread()
+        return weights.inspect(arguments)
 
     def armature_create(self, arguments: ArmatureCreateArguments) -> ArmatureSummary:
         main_thread()

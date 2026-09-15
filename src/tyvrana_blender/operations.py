@@ -207,6 +207,12 @@ from .uv_models import (
     UVSetActiveArguments,
     UVUnwrapArguments,
 )
+from .weight_models import (
+    WeightsAssignArguments,
+    WeightsAssignment,
+    WeightsInspectArguments,
+    WeightsSummary,
+)
 
 logger = logging.getLogger(__name__)
 OPERATIONS = (
@@ -311,6 +317,8 @@ OPERATIONS = (
     "blender.uv.pack_islands",
     "blender.uv.set_active",
     "blender.uv.unwrap",
+    "blender.weights.assign",
+    "blender.weights.inspect",
 )
 type Response = OperationSuccess | OperationFailure
 
@@ -333,6 +341,11 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def weights_assign(
+        self, arguments: WeightsAssignArguments
+    ) -> WeightsAssignment: ...
+    def weights_inspect(self, arguments: WeightsInspectArguments) -> WeightsSummary: ...
+
     def armature_create(
         self, arguments: ArmatureCreateArguments
     ) -> ArmatureSummary: ...
@@ -521,6 +534,8 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         arguments: (
             MeshCreateArguments
+            | WeightsAssignArguments
+            | WeightsInspectArguments
             | ArmatureCreateArguments
             | ArmatureInspectArguments
             | ArmatureBindArguments
@@ -596,6 +611,10 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.weights.assign":
+                arguments = WeightsAssignArguments.model_validate(request.arguments)
+            case "blender.weights.inspect":
+                arguments = WeightsInspectArguments.model_validate(request.arguments)
             case "blender.armature.create":
                 arguments = ArmatureCreateArguments.model_validate(request.arguments)
             case "blender.armature.inspect":
@@ -837,7 +856,11 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
-        if isinstance(arguments, ArmatureCreateArguments):
+        if isinstance(arguments, WeightsAssignArguments):
+            result = backend.weights_assign(arguments)
+        elif isinstance(arguments, WeightsInspectArguments):
+            result = backend.weights_inspect(arguments)
+        elif isinstance(arguments, ArmatureCreateArguments):
             result = backend.armature_create(arguments)
         elif isinstance(arguments, ArmatureInspectArguments):
             result = backend.armature_inspect(arguments)
