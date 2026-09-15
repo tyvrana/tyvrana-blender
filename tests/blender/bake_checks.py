@@ -153,6 +153,69 @@ class BakeTests(unittest.TestCase):
         self.spool.release(out.artifacts)
         self.assertEqual(self.state(), before)
 
+    def test_dense_evaluated_subdivision_bake_preserves_cage(self) -> None:
+        import bmesh  # type: ignore[import-not-found]
+
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(self.low.data)
+            bmesh.ops.subdivide_edges(
+                bm, edges=list(bm.edges), cuts=3, use_grid_fill=True
+            )
+            bm.to_mesh(self.low.data)
+        finally:
+            bm.free()
+        subdivision = self.low.modifiers.new("Render Surface", "SUBSURF")
+        subdivision.subdivision_type = "CATMULL_CLARK"
+        subdivision.uv_smooth = "NONE"
+        subdivision.levels = subdivision.render_levels = 6
+        bpy.context.view_layer.update()
+        # 16 authored quads x Mirror x 4^6 exceeds the 64,000-face budget.
+        before = self.state()
+        with self.assertRaisesRegex(bake.OperationError, "capacity"):
+            self.call(
+                "bake.image",
+                targets=[self.target],
+                name="Too Dense",
+                resolution=64,
+                margin=1,
+                device="cpu",
+            )
+        self.assertEqual(self.state(), before)
+        self.assertNotIn("Too Dense", bpy.data.images)
+        # At level five, 32,768 evaluated quads exceed the previous bound but
+        # fit the current finite budget; UVs and the authored cage must survive.
+        subdivision.levels = subdivision.render_levels = 5
+        bpy.context.view_layer.update()
+        before = self.state()
+        layout = self.call(
+            "uv.inspect_layout",
+            objects=["Low"],
+            uv_map="ProductionUV",
+            evaluated=True,
+            resolution=64,
+        ).result
+        self.assertEqual(layout["face_count"], 32768)
+        self.assertEqual(layout["triangle_count"], 65536)
+        for field in (
+            "degenerate_face_count",
+            "flipped_face_count",
+            "overlap_pair_count",
+            "out_of_unit_face_count",
+        ):
+            self.assertEqual(layout[field], 0)
+        result = self.call(
+            "bake.image",
+            targets=[self.target],
+            name="Dense Normal",
+            resolution=64,
+            margin=1,
+            device="cpu",
+        )
+        self.assertEqual(result.result["qa"]["uncovered_alpha_texels"], 0)
+        self.assertEqual(result.result["qa"]["invalid_normal_texels"], 0)
+        self.assertEqual(self.state(), before)
+
     def test_native_bake_failure_cleans_every_temporary_resource(self) -> None:
         before = self.state()
         count = len(bpy.data.images)

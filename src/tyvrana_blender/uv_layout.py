@@ -26,7 +26,10 @@ def surface(obj: Any, mesh: Any, uv_map: str | None) -> uv_quality.Surface:
     layer = uv.layer_for(mesh, uv_map)
     mesh.calc_loop_triangles()
     if len(mesh.loop_triangles) > uv_quality.MAX_TRIANGLES:
-        raise OperationError("work_limit_exceeded", "UV layout exceeds 24000 triangles")
+        raise OperationError(
+            "work_limit_exceeded",
+            f"UV layout exceeds {uv_quality.MAX_TRIANGLES} triangles",
+        )
     triangles: dict[int, list[tuple[int, int, int]]] = defaultdict(list)
     for triangle in mesh.loop_triangles:
         start = mesh.polygons[triangle.polygon_index].loop_start

@@ -81,6 +81,19 @@ def test_native_triangulation_diagonal_does_not_report_self_overlap() -> None:
     assert report.triangle_count == 2 and report.overlap_pair_count == 0
 
 
+def test_continuous_shared_edge_roundoff_does_not_hide_real_fold_or_other_island() -> (
+    None
+):
+    a = quality.Triangle("A", 0, 0, [(0, 0), (1, 0), (0, 1)], 0.5)
+    b = quality.Triangle("A", 1, 0, [(1, -1), (1, 4e-8), (0, 4e-8)], 0.5)
+    assert quality.overlaps([a, b]) == {}
+    b.island = 1
+    assert quality.overlaps([a, b])
+    b.island = 0
+    b.uv = [(1, -1), (1, 0.001), (0, 0.001)]
+    assert quality.overlaps([a, b])
+
+
 def test_png_signature_dimensions_crc_and_decompression() -> None:
     report, triangles = quality.analyze([quality.Surface("A", [face()])], 1024, False)
     png = quality.png_layout(triangles, 128, report.bounds_min, report.bounds_max)
@@ -134,3 +147,35 @@ def test_joint_pack_and_inspection_contracts() -> None:
             )
     with pytest.raises(ValueError):
         UVLayoutArguments(objects=["A", "A"])
+
+
+def test_combined_face_budget_is_still_enforced() -> None:
+    half = quality.MAX_FACES // 2
+    with pytest.raises(ValueError, match="faces"):
+        quality.analyze(
+            [
+                quality.Surface("A", [face()] * half),
+                quality.Surface("B", [face()] * (half + 1)),
+            ],
+            1024,
+            True,
+        )
+
+
+def test_triangle_and_pair_budgets_remain_independent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(quality, "MAX_TRIANGLES", 1)
+    with pytest.raises(ValueError, match="triangles"):
+        quality.analyze([quality.Surface("A", [face()])], 1024, True)
+    monkeypatch.setattr(quality, "MAX_TRIANGLES", 128000)
+    monkeypatch.setattr(quality, "MAX_PAIR_CHECKS", 1)
+    with pytest.raises(ValueError, match="pair capacity"):
+        quality.analyze(
+            [
+                quality.Surface("A", [face()]),
+                quality.Surface("B", [face()]),
+            ],
+            1024,
+            True,
+        )

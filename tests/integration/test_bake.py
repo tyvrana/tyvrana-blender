@@ -29,7 +29,7 @@ def test_native_bake_preservation(profile: dict[str, str], tmp_path: Path) -> No
     )
     (tmp_path / "bake-native.log").write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_BAKE_TESTS_PASSED 10" in result.stdout
+    assert "BLENDER_BAKE_TESTS_PASSED 11" in result.stdout
     assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))
 
 

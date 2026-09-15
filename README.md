@@ -1040,13 +1040,17 @@ errors, signed flipped/degenerate faces, positive-area triangle overlap pairs
 including cross-object overlaps, tile-centroid identifiers, unit-tile bounds,
 and minimum island/border spacing in pixels. Overlaps are not automatically
 classified as intentional. Touching boundaries are not positive-area overlap;
-the numerical area tolerance is 1e-12 UV units squared. Density percentiles are
+the numerical area tolerance is 1e-12 UV units squared. Continuous edges within
+one object's UV island additionally use the existing 1e-7 coordinate tolerance
+to exclude native float32 rounding strips along oppositely directed shared
+triangle edges. This does not exempt folds or overlaps between separate islands.
+Density percentiles are
 unweighted face samples; distortion percentiles are unweighted native triangles.
 
 `layout_image: true` additionally returns a colored PNG through the ordinary
 bounded artifact transport; `image_size` is 128–1024, default 1024. The image shows
 native triangulation, island colors and a UV grid; it requires no UV editor or
-filesystem-path transport. Inspection is limited to 12,000 faces, 24,000 triangles,
+filesystem-path transport. Inspection is limited to 64,000 faces, 128,000 triangles,
 512 islands and two million overlap/margin candidate comparisons. Evaluated
 references are inspection-only and cannot address authored edits. Results describe
 the current viewport evaluation, including Mirror and Shrinkwrap; they do not

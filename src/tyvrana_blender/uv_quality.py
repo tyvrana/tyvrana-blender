@@ -13,10 +13,11 @@ from .uv_models import UVLayoutResult, UVMetricSummary
 
 type Point = tuple[float, float]
 type Point3 = tuple[float, float, float]
-MAX_FACES = 12000
-MAX_TRIANGLES = 24000
+MAX_FACES = 64000
+MAX_TRIANGLES = 128000
 MAX_PAIR_CHECKS = 2_000_000
 EPS = 1e-12
+UV_CONTINUITY_TOLERANCE = 1e-7
 
 
 @dataclass
@@ -93,7 +94,10 @@ def islands(surface: Surface) -> list[list[Face]]:
             a, b = (face.uv[i], face.uv[j]) if v < w else (face.uv[j], face.uv[i])
             key = (min(v, w), max(v, w))
             for other, c, d in links[key]:
-                if math.dist(a, c) <= 1e-7 and math.dist(b, d) <= 1e-7:
+                if (
+                    math.dist(a, c) <= UV_CONTINUITY_TOLERANCE
+                    and math.dist(b, d) <= UV_CONTINUITY_TOLERANCE
+                ):
                     adjacent[face.index].add(other)
                     adjacent[other].add(face.index)
             links[key].append((face.index, a, b))
@@ -197,6 +201,23 @@ def intersection_area(first: list[Point], second: list[Point]) -> float:
     return abs(area(polygon))
 
 
+def shared_edge_roundoff(a: Triangle, b: Triangle, overlap: float) -> bool:
+    """Ignore only a sub-precision strip along an already continuous UV edge."""
+    if a.object_name != b.object_name or a.island != b.island:
+        return False
+    for i in range(3):
+        p, q = a.uv[i], a.uv[(i + 1) % 3]
+        for j in range(3):
+            r, s = b.uv[j], b.uv[(j + 1) % 3]
+            if (
+                math.dist(p, s) <= UV_CONTINUITY_TOLERANCE
+                and math.dist(q, r) <= UV_CONTINUITY_TOLERANCE
+                and overlap <= math.dist(p, q) * UV_CONTINUITY_TOLERANCE
+            ):
+                return True
+    return False
+
+
 def overlaps(triangles: list[Triangle]) -> dict[tuple[str, int, str, int], float]:
     bounds = [
         (
@@ -224,7 +245,7 @@ def overlaps(triangles: list[Triangle]) -> dict[tuple[str, int, str, int], float
             if checks > MAX_PAIR_CHECKS:
                 raise ValueError("UV overlap analysis exceeds bounded pair capacity")
             overlap = intersection_area(a.uv, b.uv)
-            if overlap > EPS:
+            if overlap > EPS and not shared_edge_roundoff(a, b, overlap):
                 first, second = sorted(
                     [(a.object_name, a.face_index), (b.object_name, b.face_index)]
                 )
@@ -301,7 +322,7 @@ def analyze(
     surfaces: list[Surface], resolution: int, evaluated: bool
 ) -> tuple[UVLayoutResult, list[Triangle]]:
     if sum(len(s.faces) for s in surfaces) > MAX_FACES:
-        raise ValueError("UV inspection exceeds 12000 faces")
+        raise ValueError(f"UV inspection exceeds {MAX_FACES} faces")
     reports: list[dict[str, Any]] = []
     triangles = []
     all_groups = []
@@ -410,7 +431,7 @@ def analyze(
     if not all_points:
         raise ValueError("UV inspection requires mapped faces")
     if len(triangles) > MAX_TRIANGLES:
-        raise ValueError("UV inspection exceeds 24000 triangles")
+        raise ValueError(f"UV inspection exceeds {MAX_TRIANGLES} triangles")
     if len(reports) > 512:
         raise ValueError("UV inspection exceeds 512 islands")
     intersections = overlaps(triangles)
@@ -459,7 +480,9 @@ def analyze(
                 "Density is pixels per world unit; metric percentiles are unweighted "
                 "face/triangle samples.",
                 "Overlap means positive triangle intersection area above 1e-12 UV "
-                "units squared; touching edges do not overlap. Intentional stacking "
+                "units squared, excluding 1e-7-coordinate rounding strips on "
+                "continuous shared edges within one object's UV island. Touching "
+                "edges do not overlap. Intentional stacking "
                 "must be classified by the client.",
                 "Island identifiers and face references belong to this mesh snapshot. "
                 "Evaluated references cannot select authored faces.",
