@@ -630,7 +630,8 @@ _DECLARATIONS = (
         lambda b, a, q: b.file_open(a),
         "Open a native project with an explicit discard policy. Embedded "
         "script execution is disabled; project metadata re-registers after "
-        "the response drains.",
+        "the response drains. Wait for registration to report the resulting "
+        "project_path before sending further operations.",
         effect="mutating",
         execution="synchronous",
     ),
@@ -641,7 +642,8 @@ _DECLARATIONS = (
         lambda b, a, q: b.file_save(a),
         "Save the native project with explicit overwrite policy. Writes are "
         "external filesystem effects, not an atomic undo transaction; changed"
-        " paths refresh adapter registration.",
+        " paths refresh adapter registration. Wait for registration to report "
+        "the resulting project_path before sending further operations.",
         effect="mutating",
         execution="synchronous",
     ),

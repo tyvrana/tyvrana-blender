@@ -41,13 +41,22 @@ async def test_live_catalog_drives_filtered_inspection(
                 "tyvrana_list_operations",
                 {
                     "adapter_id": registered.instance_id,
-                    "names": ["blender.scene.inspect", "blender.camera.create"],
+                    "names": [
+                        "blender.scene.inspect",
+                        "blender.camera.create",
+                        "blender.file.save",
+                        "blender.file.open",
+                    ],
                     "include_schemas": True,
                 },
             )
             assert not catalog.is_error
             contracts = catalog.structured_content
             assert contracts["catalog_sha256"] == registered.catalog_sha256
+            for contract in contracts["operations"]:
+                if contract["name"].startswith("blender.file."):
+                    assert "Wait for registration" in contract["description"]
+                    assert "project_path" in contract["description"]
             inspect_contract = next(
                 entry
                 for entry in contracts["operations"]

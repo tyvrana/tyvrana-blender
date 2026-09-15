@@ -21,7 +21,7 @@ from tyvrana_blender.operations import OPERATIONS
 
 from ..png import assert_image_variation
 from .conftest import ROOT
-from .test_e2e import catalog_names, core_client
+from .test_e2e import catalog_names, core_client, wait_for_project
 
 
 def candidate_archive(
@@ -128,7 +128,12 @@ async def test_repeated_live_reload_and_registration_rollback(
                         },
                     )
                     assert not result.is_error, result.content
-                    return dict(result.structured_content["result"])
+                    value = dict(result.structured_content["result"])
+                    if name in {"file.save", "file.open"}:
+                        await wait_for_project(
+                            client, current["instance_id"], value["filepath"]
+                        )
+                    return value
 
                 initial = await call("extension.inspect")
                 completed = initial
