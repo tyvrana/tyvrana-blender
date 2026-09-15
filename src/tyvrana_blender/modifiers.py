@@ -426,6 +426,11 @@ def budget(
     strict: bool = False,
 ) -> None:
     size = data_size(obj.data) if source_size is None else source_size
+    # A triangulated quad adds one edge, one face and two corners. Even without
+    # manifold assumptions this is less than twice the original total size.
+    quads_only = source_size is None and all(
+        len(f.vertices) <= 4 for f in obj.data.polygons
+    )
     mesh.check_budget(size)
     for mod, patch in stack:
         if not value(mod, patch, "show_render" if render else "show_viewport"):
@@ -439,6 +444,7 @@ def budget(
                 mod.render_levels if render else max(mod.levels, mod.sculpt_levels)
             )
             size *= 2 * 4**level if level else 1
+            quads_only = quads_only or level > 0
         elif kind == "SUBSURF":
             level = value(mod, patch, "render_levels" if render else "levels")
             if level > MAX_SUBDIVISION_LEVEL or value(
@@ -450,15 +456,17 @@ def budget(
                 )
             # Conservative total-element estimate, including the first ngon split.
             size *= 2 * 4**level if level else 1
+            quads_only = quads_only or level > 0
         elif kind == "MIRROR":
             size *= 2 ** sum(value(mod, patch, "use_axis")) * 2
         elif kind == "TRIANGULATE":
-            # For a polygon with k corners, triangulation creates k-2 faces
-            # and k-3 edges; three times the total input element budget is safe.
-            size *= 3
+            # General ngons add at most four times their corner count; account
+            # for shared edges/vertices without assuming isolated polygons.
+            size *= 2 if quads_only else 5
         elif kind == "SOLIDIFY":
             size *= 6
         elif kind == "BOOLEAN":
+            quads_only = False
             if strict and value(mod, patch, "operand_type") != "OBJECT":
                 raise OperationError(
                     "invalid_context",
@@ -477,12 +485,14 @@ def budget(
                     "Shrinkwrap internal subdivision is outside the supported safety "
                     "policy",
                 )
-        elif strict and kind not in SAME_TOPOLOGY:
-            raise OperationError(
-                "invalid_context",
-                "Cannot bound an unsupported topology-generating modifier",
-                {"type": str(kind).lower()},
-            )
+        elif kind not in SAME_TOPOLOGY:
+            quads_only = False
+            if strict:
+                raise OperationError(
+                    "invalid_context",
+                    "Cannot bound an unsupported topology-generating modifier",
+                    {"type": str(kind).lower()},
+                )
         mesh.check_budget(size)
 
 

@@ -132,13 +132,16 @@ class ModifierTests(unittest.TestCase):
             settings={"levels": 2, "render_levels": 2},
         )
         quads = self.evaluated()
-        tri = self.add(
-            "triangulate",
-            quad_method="fixed",
-            ngon_method="clip",
-            min_vertices=4,
-            keep_custom_normals=True,
-        )
+        # A quad-aware bound admits this evaluated surface without multiplying
+        # unrelated worst cases for arbitrary ngons into its stack estimate.
+        with patch.object(api.mesh, "MAX_WORK_ELEMENTS", 4000):
+            tri = self.add(
+                "triangulate",
+                quad_method="fixed",
+                ngon_method="clip",
+                min_vertices=4,
+                keep_custom_normals=True,
+            )
         self.assertEqual(tri["settings"]["quad_method"], "fixed")
         result = self.call("mesh.inspect_evaluated", uv_map="UVMap")
         self.assertEqual(result["authored_basis"], before)
