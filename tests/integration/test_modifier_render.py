@@ -56,7 +56,9 @@ async def test_reversible_modifier_form_renders_through_mcp(
             material_before = await call("material.inspect")
             authored_before = await call("mesh.inspect", object_name="Surface")
             evaluated_before = await call(
-                "mesh.inspect_evaluated", object_name="Surface"
+                "mesh.inspect_evaluated",
+                object_name="Surface",
+                **({"uv_map": "UVMap"} if kind == "subdivision_surface" else {}),
             )
             operand_before = (
                 await call("mesh.inspect", object_name="Operand")
@@ -89,10 +91,21 @@ async def test_reversible_modifier_form_renders_through_mcp(
             assert modifier["type"] == kind and modifier["index"] == 0
             authored_after = await call("mesh.inspect", object_name="Surface")
             evaluated_after = await call(
-                "mesh.inspect_evaluated", object_name="Surface"
+                "mesh.inspect_evaluated",
+                object_name="Surface",
+                **({"uv_map": "UVMap"} if kind == "subdivision_surface" else {}),
             )
             second = await render(client, identifier)
             assert authored_after == authored_before
+            assert (
+                evaluated_after["authored_basis"] == evaluated_before["authored_basis"]
+            )
+            if kind == "subdivision_surface":
+                assert (
+                    evaluated_after["evaluated_basis"]["tangents_sha256"]
+                    != evaluated_before["evaluated_basis"]["tangents_sha256"]
+                )
+                assert evaluated_after["viewport_render_settings_differences"] == []
             assert evaluated_after["vertex_count"] > evaluated_before["vertex_count"]
             assert fixed_scene(await call("scene.inspect")) == fixed_scene(scene_before)
             assert await call("camera.inspect") == camera_before

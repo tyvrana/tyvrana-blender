@@ -237,7 +237,7 @@ Names are exact and are advertised in sorted order:
 | `blender.uv.pack_islands` | Objects/maps, relative density, unit-tile bounds, resolution and pixel padding | Joint packing result |
 | `blender.uv.inspect_layout` | Objects, optional map, authored/evaluated geometry and resolution | Island quality, distortion, overlap, density, margins; optional PNG artifact |
 | `blender.mesh.inspect` | Object name | Bounded authored mesh summary |
-| `blender.mesh.inspect_evaluated` | Object name | Bounded current viewport result after the modifier stack |
+| `blender.mesh.inspect_evaluated` | Object name, optional UV map | Bounded authored/evaluated surface and tangent signatures |
 | `blender.modifier.inspect` | Object name | Ordered object-owned modifier stack |
 | `blender.modifier.create` | Object name, type, typed settings; optional name/common flags | Created modifier summary |
 | `blender.modifier.configure` | Object/modifier names, existing type, partial settings/common flags | Updated modifier summary |
@@ -1561,7 +1561,7 @@ failures restore the changed fields.
 ### Authored and evaluated inspection
 
 `blender.mesh.inspect` continues to describe the editable **authored** Mesh.
-`blender.mesh.inspect_evaluated` takes only `{"object_name": "Surface"}` and returns:
+`blender.mesh.inspect_evaluated` takes `object_name` and optional `uv_map`, and returns:
 
 - `object_name`, `source_mesh_name`, `evaluation: "viewport"`;
 - `vertex_count`, `edge_count`, `face_count`, `loop_count`;
@@ -1572,7 +1572,26 @@ failures restore the changed fields.
 This is the current dependency-graph viewport result, including viewport enable
 state and viewport subdivision levels. Render levels can produce a different
 rendered mesh. No evaluated element indices, coordinates dump, RNA objects or
-temporary pointers are exposed. **Evaluated topology is inspection-only and cannot
+temporary pointers are exposed.
+
+`blender.mesh.inspect_evaluated` reports compact authored and evaluated surface
+signatures. Optional `uv_map` adds UV and native tangent/bitangent-sign fingerprints
+for triangle/quad meshes; without it, tangent generation is omitted. Reports include
+smooth-face, sharp-edge, seam and crease counts, custom-normal presence, and
+object-local ordered geometry, shading-flag and corner-normal fingerprints.
+Tangents are calculated only on temporary mesh copies, with cleanup on failures.
+Existing modeling/evaluation budgets apply.
+
+The operation evaluates the current viewport dependency graph and reports modifier
+visibility/subdivision-level differences from render settings. An empty difference
+list is not a promise of equivalence for every host feature or renderer. Fingerprints
+identify an exact local snapshot; they are not persistent mesh IDs or a perceptual
+quality verdict. A changed geometry, UV or normal/tangent signature requires renewed
+bake/render validation. In particular, a tangent normal map baked before changing
+subdivision or smoothing must not be assumed valid afterward. Keep authored and
+evaluated signatures separate when comparing unapplied modifiers.
+
+ **Evaluated topology is inspection-only and cannot
 be used as authored topology indices in direct mesh edits.** The evaluated object's
 temporary `to_mesh()` output is always cleared in `finally`, including failures;
 it is never attached to a real scene object.

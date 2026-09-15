@@ -1004,6 +1004,79 @@ class ModifierTests(unittest.TestCase):
         self.error("modifier.apply", "invalid_context", modifier_name="Shape")
         self.assertTrue(self.obj.data.has_custom_normals)
 
+    def test_surface_basis_tracks_subdivision_and_preserves_authored_data(self) -> None:
+        for face in self.obj.data.polygons:
+            face.use_smooth = True
+        before = authored(self.obj.data)
+        count = len(bpy.data.meshes)
+        base = self.call("mesh.inspect_evaluated", uv_map="UVMap")
+        self.add("subdivision_surface", levels=2, render_levels=2, uv_smooth="none")
+        result = self.call("mesh.inspect_evaluated", uv_map="UVMap")
+        self.assertEqual(base["authored_basis"], result["authored_basis"])
+        self.assertEqual(before, authored(self.obj.data))
+        self.assertEqual(len(bpy.data.meshes), count)
+        self.assertEqual(result["viewport_render_settings_differences"], [])
+        for key in ["geometry_sha256", "corner_normals_sha256", "tangents_sha256"]:
+            self.assertNotEqual(
+                base["evaluated_basis"][key], result["evaluated_basis"][key]
+            )
+        self.assertEqual(result["evaluated_basis"]["zero_tangent_count"], 0)
+        self.configure("subdivision_surface", render_levels=3)
+        self.assertEqual(
+            self.evaluated()["viewport_render_settings_differences"],
+            ["Shape: subdivision levels"],
+        )
+
+    def test_surface_basis_reports_flags_creases_and_custom_normals(self) -> None:
+        base = self.call("mesh.inspect_evaluated", uv_map="UVMap")
+        for face in self.obj.data.polygons:
+            face.use_smooth = True
+        self.obj.data.edges[0].use_edge_sharp = True
+        self.obj.data.edges[1].use_seam = True
+        self.obj.data.attributes.new("crease_edge", "FLOAT", "EDGE").data[0].value = 0.5
+        self.obj.data.normals_split_custom_set([(0, 0, 1)] * len(self.obj.data.loops))
+        result = self.call("mesh.inspect_evaluated", uv_map="UVMap")["authored_basis"]
+        self.assertEqual(
+            result["geometry_sha256"], base["authored_basis"]["geometry_sha256"]
+        )
+        self.assertNotEqual(
+            result["shading_flags_sha256"],
+            base["authored_basis"]["shading_flags_sha256"],
+        )
+        self.assertEqual(result["smooth_face_count"], 6)
+        self.assertEqual(result["sharp_edge_count"], 1)
+        self.assertEqual(result["seam_edge_count"], 1)
+        self.assertEqual(result["creased_edge_count"], 1)
+        self.assertTrue(result["has_custom_normals"])
+
+    def test_surface_basis_mirror_uv_and_failure_cleanup(self) -> None:
+        before = authored(self.obj.data)
+        base = self.call("mesh.inspect_evaluated", uv_map="UVMap")
+        self.add("mirror", axes=["x"], uv_flip_u=True)
+        result = self.call("mesh.inspect_evaluated", uv_map="UVMap")
+        self.assertEqual(result["authored_basis"], base["authored_basis"])
+        self.assertNotEqual(
+            result["evaluated_basis"]["uv_sha256"], base["evaluated_basis"]["uv_sha256"]
+        )
+        count = len(bpy.data.meshes)
+        self.error("mesh.inspect_evaluated", "uv_map_not_found", uv_map="Missing")
+        self.assertEqual(len(bpy.data.meshes), count)
+        self.assertEqual(authored(self.obj.data), before)
+        self.assertEqual(self.call("mesh.inspect_evaluated", uv_map="UVMap"), result)
+
+    def test_surface_basis_rejects_ngon_tangents_without_mutation(self) -> None:
+        bpy.data.objects.remove(self.obj, do_unlink=True)
+        bpy.ops.mesh.primitive_circle_add(vertices=5, fill_type="NGON")
+        self.obj = bpy.context.object
+        self.obj.name = "Surface"
+        self.obj.data.uv_layers.new(name="UVMap")
+        before = authored(self.obj.data)
+        count = len(bpy.data.meshes)
+        self.error("mesh.inspect_evaluated", "invalid_context", uv_map="UVMap")
+        self.assertEqual(len(bpy.data.meshes), count)
+        self.assertEqual(authored(self.obj.data), before)
+        self.assertEqual(self.evaluated()["face_count"], 1)
+
     def test_evaluated_repeated_inspection_clears_temporary_geometry(self) -> None:
         self.add("subdivision_surface")
         count = len(bpy.data.meshes)

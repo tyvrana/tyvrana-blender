@@ -85,6 +85,7 @@ from tyvrana_blender.models import (
 from tyvrana_blender.modifier_models import (
     EvaluatedMeshArguments,
     EvaluatedMeshSummary,
+    MeshSurfaceBasis,
     ModifierApplyArguments,
     ModifierApplyResult,
     ModifierConfigureArguments,
@@ -601,6 +602,22 @@ class Backend:
         self, arguments: EvaluatedMeshArguments
     ) -> EvaluatedMeshSummary:
         self.calls.append("mesh_inspect_evaluated")
+        basis = MeshSurfaceBasis(
+            geometry_sha256="0" * 64,
+            shading_flags_sha256="0" * 64,
+            corner_normals_sha256="0" * 64,
+            uv_map=None,
+            uv_sha256=None,
+            tangents_sha256=None,
+            smooth_face_count=0,
+            sharp_edge_count=0,
+            seam_edge_count=0,
+            has_custom_normals=False,
+            creased_edge_count=0,
+            creased_vertex_count=0,
+            negative_bitangent_count=None,
+            zero_tangent_count=None,
+        )
         return EvaluatedMeshSummary(
             object_name=arguments.object_name,
             source_mesh_name="Mesh",
@@ -619,6 +636,9 @@ class Backend:
             ),
             modifier_count=0,
             modifier_stack=[],
+            authored_basis=basis,
+            evaluated_basis=basis,
+            viewport_render_settings_differences=[],
         )
 
     def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary:

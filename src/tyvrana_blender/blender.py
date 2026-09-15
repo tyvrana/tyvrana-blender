@@ -768,7 +768,9 @@ class BlenderBackend:
         self, arguments: EvaluatedMeshArguments
     ) -> EvaluatedMeshSummary:
         main_thread()
-        return modifiers.inspect_evaluated(modifiers.object_mesh(arguments.object_name))
+        return modifiers.inspect_evaluated(
+            modifiers.object_mesh(arguments.object_name), arguments.uv_map
+        )
 
     def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary:
         main_thread()

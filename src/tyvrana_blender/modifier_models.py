@@ -147,6 +147,7 @@ class ModifierInspectArguments(Arguments):
 
 class EvaluatedMeshArguments(Arguments):
     object_name: Name
+    uv_map: Name | None = None
 
 
 class ModifierNamedArguments(Arguments):
@@ -368,6 +369,23 @@ class ModifierStackEntry(Model):
     type: str
 
 
+class MeshSurfaceBasis(Model):
+    geometry_sha256: str
+    shading_flags_sha256: str
+    corner_normals_sha256: str
+    uv_map: str | None
+    uv_sha256: str | None
+    tangents_sha256: str | None
+    smooth_face_count: int
+    sharp_edge_count: int
+    seam_edge_count: int
+    has_custom_normals: bool
+    creased_edge_count: int
+    creased_vertex_count: int
+    negative_bitangent_count: int | None
+    zero_tangent_count: int | None
+
+
 class EvaluatedMeshSummary(Model):
     object_name: str
     source_mesh_name: str
@@ -381,3 +399,6 @@ class EvaluatedMeshSummary(Model):
     manifold_summary: ManifoldSummary
     modifier_count: int
     modifier_stack: list[ModifierStackEntry]
+    authored_basis: MeshSurfaceBasis
+    evaluated_basis: MeshSurfaceBasis
+    viewport_render_settings_differences: list[str]

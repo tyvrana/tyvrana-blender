@@ -23,7 +23,7 @@ def test_native_modifier_operations_and_evaluated_resource_safety(
     )
     (tmp_path / "modifier-native.log").write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_MODIFIER_TESTS_PASSED 58" in result.stdout
+    assert "BLENDER_MODIFIER_TESTS_PASSED 62" in result.stdout
     assert "Traceback" not in result.stdout + result.stderr
     assert "Warning:" not in result.stdout + result.stderr
     assert "WARNING" not in result.stdout + result.stderr

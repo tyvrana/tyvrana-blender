@@ -710,7 +710,9 @@ def remove(obj: Any, name: str) -> ModifierRemoveResult:
     return result
 
 
-def inspect_evaluated(obj: Any) -> EvaluatedMeshSummary:
+def inspect_evaluated(obj: Any, uv_map: str | None = None) -> EvaluatedMeshSummary:
+    from . import surface_basis
+
     if (
         obj.data.is_editmode
         or bpy.app.is_job_running("RENDER")
@@ -726,9 +728,11 @@ def inspect_evaluated(obj: Any) -> EvaluatedMeshSummary:
     budget(obj, stack(obj), strict=True)
     graph = bpy.context.evaluated_depsgraph_get()
     evaluated = obj.evaluated_get(graph)
+    authored_copy = None
     try:
+        mesh.check_budget(data_size(obj.data))
         mesh.check_budget(data_size(evaluated.data))
-        data = evaluated.to_mesh(preserve_all_data_layers=False, depsgraph=graph)
+        data = evaluated.to_mesh(preserve_all_data_layers=True, depsgraph=graph)
         if data is None:
             raise OperationError(
                 "invalid_context", "Dependency evaluation did not produce a Mesh"
@@ -741,6 +745,23 @@ def inspect_evaluated(obj: Any) -> EvaluatedMeshSummary:
             evaluated_summary = mesh.summary(obj, bm, data)
         finally:
             bm.free()
+        with mesh.snapshot(obj) as authored_bm:
+            authored_hash = mesh.summary(obj, authored_bm).geometry_sha256
+        authored_copy = obj.data.copy()
+        authored_basis = surface_basis.inspect(authored_copy, authored_hash, uv_map)
+        evaluated_basis = surface_basis.inspect(
+            data, evaluated_summary.geometry_sha256, uv_map
+        )
+        differences = []
+        for modifier in obj.modifiers:
+            if modifier.show_viewport != modifier.show_render:
+                differences.append(modifier.name + ": visibility")
+            if (
+                modifier.type in {"SUBSURF", "MULTIRES"}
+                and (modifier.show_viewport or modifier.show_render)
+                and modifier.levels != modifier.render_levels
+            ):
+                differences.append(modifier.name + ": subdivision levels")
         values = evaluated_summary.model_dump(
             include={
                 "vertex_count",
@@ -759,9 +780,14 @@ def inspect_evaluated(obj: Any) -> EvaluatedMeshSummary:
             modifier_stack=[
                 ModifierStackEntry(name=m.name, type=m.type) for m in state.modifiers
             ],
+            authored_basis=authored_basis,
+            evaluated_basis=evaluated_basis,
+            viewport_render_settings_differences=differences,
             **values,
         )
     finally:
+        if authored_copy is not None:
+            bpy.data.meshes.remove(authored_copy)
         evaluated.to_mesh_clear()
 
 
