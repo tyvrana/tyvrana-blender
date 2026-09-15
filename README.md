@@ -1289,7 +1289,7 @@ requires an explicit `selector`. A mutation matching nothing returns
 | `delete_elements` | Any selector domain. Vertices remove incident edges/faces; edges remove adjacent faces while retaining vertices. Face deletion defaults to `face_mode: "faces_only"`, retaining edges/vertices. `"faces_and_unused"` also removes edges/vertices made unused by those faces. `face_mode` is valid only for a face selector. |
 | `merge_vertices` | Vertex selector with at least two matches. `mode` is `"center"` (default). Welds selected vertices to their arithmetic mean; averages vertex custom data through native point-merge semantics. It does not perform distance-based deduplication or implicitly weld UV seams. |
 | `mark_seam` | Edge selector and required boolean `seam`. Sets or clears seam flags; idempotent calls report zero changed edges. Use followed by `blender.uv.unwrap` with `angle_based` or `conformal`. |
-| `set_shading` | Face selector and required boolean `smooth`. Sets native face shading; false restores flat shading. Reports `changed_faces`, including zero for idempotent calls. Face queries expose `smooth`. Preserves positions, connectivity, winding, edge sharpness, UVs, materials and supported attributes; this does not smooth geometry or clear sharp edges. Uses the same staged edit and shared-Mesh isolation policy, including rejection of custom normals, modifiers and shape keys. |
+| `set_shading` | Face selector and required boolean `smooth`. Sets native face shading; false restores flat shading. Reports `changed_faces`, including zero for idempotent calls. Face queries expose `smooth`. Preserves positions, connectivity, winding, edge sharpness, UVs, materials and supported attributes; this does not smooth geometry or clear sharp edges. Edits flags directly and isolates shared meshes; unapplied modifiers and shape keys are preserved. |
 | `recalculate_normals` | No selector. `inside` defaults to false. Recalculates whole-mesh face winding with native connected-region logic; true reverses the result. Closed orientable shells support outside/inside interpretation; open, degenerate or non-manifold surfaces have no guaranteed outward direction. |
 
 `mesh.transform` changes vertex coordinates while `object.set_transform` changes
@@ -1300,6 +1300,11 @@ vertices' arithmetic mean (`median`), the mesh origin, or the explicit local
 pivot. Identity transforms are permitted if supplied explicitly. Zero/negative
 scales follow Blender geometry semantics and can collapse or reflect geometry.
 No cursor, viewport, global orientation, or UI pivot influences the result.
+Coordinate transforms support unapplied modifiers and edit the authored cage.
+Only native vertex coordinates are written to the staged Mesh copy; ordered
+connectivity, UVs, seam/sharp flags, weights and other attributes are preserved
+exactly. Modifiers remain in place and reevaluate the corrected cage. Inspect
+the resulting evaluated surface and rebake normal maps when their basis changes.
 
 For a smooth directional adjustment, translation also accepts optional
 `falloff: {"center": [x,y,z], "radii": [rx,ry,rz]}`. Center and positive ellipsoid
@@ -1362,11 +1367,13 @@ contain at most 256 indices and report their full total and truncation separatel
 Mutations require Object Mode and editable local objects/Mesh data in an editable
 scene, with no active render. Linked, read-only and library-override data remain
 inspectable but cannot be mutated or silently localized. Shape-key meshes are
-rejected by **all current mesh mutations**, including coordinate transforms,
-seams and normals, with `mesh_has_shape_keys`. Deliberate shape-key-aware editing
-is deferred. Authored custom split normals, any object modifiers, mesh animation,
-and vertex-parented children also return `invalid_context`; this initial layer
-does not apply modifiers or invent topology remapping for those relationships.
+rejected by geometry mutations, including coordinate transforms and normals,
+with `mesh_has_shape_keys`. Deliberate shape-key-aware geometry editing is deferred.
+Authored custom split normals, mesh animation and vertex-parented children also
+return `invalid_context` for geometry edits. Topology/winding edits additionally
+reject object modifiers; coordinate-only transforms preserve unapplied stacks.
+Seam and smooth-shading flag edits preserve these relationships without changing
+coordinates or connectivity. No operation silently applies modifiers.
 
 Edits resolve selection, operate on a detached BMesh, refresh index tables and
 derived normals, and write to a temporary copy of the Mesh. The resulting summary

@@ -214,7 +214,7 @@ def query(obj: Any, arguments: MeshQueryArguments) -> MeshQueryResult:
                 return FaceQueryResult(**common, elements=faces)
 
 
-def editable(obj: Any) -> None:
+def editable(obj: Any, *, coordinate_only: bool = False) -> None:
     mesh = obj.data
     if (
         bpy.context.mode != "OBJECT"
@@ -242,7 +242,7 @@ def editable(obj: Any) -> None:
             "invalid_context",
             "Preserve authored custom normals before direct mesh editing",
         )
-    if obj.modifiers or mesh.animation_data is not None:
+    if (obj.modifiers and not coordinate_only) or mesh.animation_data is not None:
         raise OperationError(
             "invalid_context",
             "Direct mesh editing does not support modifiers or mesh animation",
@@ -382,7 +382,7 @@ def edit(
 ) -> MeshEditResult:
     if isinstance(arguments, MeshSeamArguments | MeshShadingArguments):
         return edit_flags(obj, arguments)
-    editable(obj)
+    editable(obj, coordinate_only=isinstance(arguments, MeshTransformArguments))
     original = obj.data
     with snapshot(obj) as bm:
         try:
@@ -556,7 +556,15 @@ def edit(
                     truncated=len(indices) > MAX_QUERY_RESULTS,
                 )
             candidate = original.copy()
-            bm.to_mesh(candidate)
+            if isinstance(arguments, MeshTransformArguments):
+                # Coordinates alone do not require a BMesh round trip. Keep
+                # ordered UVs, topology and every other native attribute exact,
+                # including data consumed by an unapplied modifier stack.
+                candidate.vertices.foreach_set(
+                    "co", [component for vertex in bm.verts for component in vertex.co]
+                )
+            else:
+                bm.to_mesh(candidate)
             candidate.update()
             # Reject unexpected loss of named custom-data schemas before commit.
             optional_native = {

@@ -304,6 +304,57 @@ class MeshTests(unittest.TestCase):
         )
         self.counts((8, 12, 6))
 
+    def test_coordinate_transform_preserves_modifier_stack_and_ordered_data(
+        self,
+    ) -> None:
+        original = self.obj.data
+        original.edges[0].use_seam = True
+        original.edges[1].use_edge_sharp = True
+        original.polygons[0].use_smooth = True
+        attribute = original.attributes.new("CornerIds", "INT", "CORNER")
+        attribute.data.foreach_set("value", list(range(len(original.loops))))
+        group = self.obj.vertex_groups.new(name="Influence")
+        group.add([0, 2], 0.75, "REPLACE")
+        mirror = self.obj.modifiers.new("Mirror", "MIRROR")
+        mirror.use_mirror_u = True
+        subdivision = self.obj.modifiers.new("Subdivision", "SUBSURF")
+        subdivision.levels = subdivision.render_levels = 2
+        sibling = bpy.data.objects.new("Sibling", original)
+        bpy.context.collection.objects.link(sibling)
+        before = state(original)
+        self.assertAlmostEqual(group.weight(0), 0.75)
+        result = self.call("transform", selector=UPPER, translation=[0.1, 0, 0])
+        self.assertEqual(result["transformed_vertices"], 4)
+        self.assertEqual(result["created"], dict(vertices=0, edges=0, faces=0))
+        self.assertEqual(result["removed"], dict(vertices=0, edges=0, faces=0))
+        self.assertEqual(state(original), before)
+        self.assertEqual(state(self.obj.data)[1:], before[1:])
+        self.assertEqual(list(self.obj.modifiers), [mirror, subdivision])
+        self.assertTrue(mirror.use_mirror_u)
+        self.assertEqual(subdivision.levels, 2)
+        self.assertEqual(
+            [p.value for p in self.obj.data.attributes["CornerIds"].data],
+            list(range(len(original.loops))),
+        )
+        self.assertAlmostEqual(self.obj.vertex_groups["Influence"].weight(0), 0.75)
+        self.assertEqual(sibling.data, original)
+        self.error("extrude_faces", "invalid_context", selector=TOP, offset=[0, 0, 1])
+
+    def test_coordinate_transform_with_modifiers_rejects_custom_normals_atomically(
+        self,
+    ) -> None:
+        self.obj.modifiers.new("Subdivision", "SUBSURF")
+        self.obj.data.normals_split_custom_set([(0, 0, 1)] * len(self.obj.data.loops))
+        before = state(self.obj.data)
+        original = self.obj.data
+        meshes = set(bpy.data.meshes)
+        self.error(
+            "transform", "invalid_context", selector=UPPER, translation=[1, 0, 0]
+        )
+        self.assertEqual(state(original), before)
+        self.assertEqual(self.obj.data, original)
+        self.assertEqual(set(bpy.data.meshes), meshes)
+
     def test_edge_and_face_transform_unique_vertices_once(self) -> None:
         for selector in (ALL_EDGES, ALL_FACES):
             self.reset()
@@ -705,10 +756,16 @@ class MeshTests(unittest.TestCase):
         original = self.obj.data
         before = state(original)
         mesh_count = len(bpy.data.meshes)
-        with patch.object(mesh_api, "MeshEditResult", side_effect=ValueError("result")):
+        with (
+            patch.object(mesh_api, "MeshEditResult", side_effect=ValueError("result")),
+            self.assertLogs(operations.__name__, level="ERROR") as captured,
+        ):
             self.error(
                 "set_shading", "operation_failed", selector=ALL_FACES, smooth=True
             )
+        self.assertIn(
+            "Unexpected failure executing blender.mesh.set_shading", captured.output[0]
+        )
         self.assertEqual(self.obj.data, original)
         self.assertEqual(state(original), before)
         self.assertEqual(len(bpy.data.meshes), mesh_count)

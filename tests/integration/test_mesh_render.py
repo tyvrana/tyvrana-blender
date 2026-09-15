@@ -17,7 +17,15 @@ from .test_e2e import core_client, discover, operation
 @pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
 @pytest.mark.parametrize(
     "edit",
-    ["extrude", "bevel", "inset_extrude", "regional_transform", "falloff", "shading"],
+    [
+        "extrude",
+        "bevel",
+        "inset_extrude",
+        "regional_transform",
+        "falloff",
+        "shading",
+        "subdiv_transform",
+    ],
 )
 async def test_modeling_changes_real_render_over_mcp(
     profile: dict[str, str], tmp_path: Path, ui: bool, edit: str
@@ -60,6 +68,28 @@ async def test_modeling_changes_real_render_over_mcp(
                     1,
                     1,
                 ]
+                modifier_before = None
+                if edit == "subdiv_transform":
+                    await operation(
+                        client,
+                        identifier,
+                        "blender.modifier.create",
+                        {
+                            "object_name": "Surface",
+                            "type": "subdivision_surface",
+                            "settings": {
+                                "mode": "catmull_clark",
+                                "levels": 2,
+                                "render_levels": 2,
+                            },
+                        },
+                    )
+                    modifier_before = await operation(
+                        client,
+                        identifier,
+                        "blender.modifier.inspect",
+                        {"object_name": "Surface"},
+                    )
                 before = await render(client, identifier)
                 vertices = await mesh(
                     "query", selector={"domain": "vertex", "mode": "all"}
@@ -134,6 +164,16 @@ async def test_modeling_changes_real_render_over_mcp(
                 changed = MeshEditResult.model_validate(result)
                 current = MeshSummary.model_validate(await mesh("inspect"))
                 assert current == changed.mesh
+                if modifier_before is not None:
+                    assert (
+                        await operation(
+                            client,
+                            identifier,
+                            "blender.modifier.inspect",
+                            {"object_name": "Surface"},
+                        )
+                        == modifier_before
+                    )
                 assert (
                     current.vertex_count,
                     current.edge_count,
