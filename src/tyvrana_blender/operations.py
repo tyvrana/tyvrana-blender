@@ -144,6 +144,16 @@ from .retopo_models import (
     RetopoSubdivideArguments,
     RetopoSummary,
 )
+from .rig_models import (
+    ArmatureBindArguments,
+    ArmatureCreateArguments,
+    ArmatureInspectArguments,
+    ArmaturePoseArguments,
+    ArmatureSummary,
+    BindingSummary,
+    DeformationInspectArguments,
+    DeformationSummary,
+)
 from .sculpt_models import (
     RAYCAST,
     CameraRayArguments,
@@ -200,6 +210,10 @@ from .uv_models import (
 
 logger = logging.getLogger(__name__)
 OPERATIONS = (
+    "blender.armature.bind",
+    "blender.armature.create",
+    "blender.armature.inspect",
+    "blender.armature.pose",
     "blender.bake.image",
     "blender.bake.inspect",
     "blender.bake.status",
@@ -207,6 +221,7 @@ OPERATIONS = (
     "blender.camera.create",
     "blender.camera.inspect",
     "blender.camera.set_active",
+    "blender.deformation.inspect",
     "blender.extension.inspect",
     "blender.extension.reload",
     "blender.file.inspect",
@@ -318,6 +333,18 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def armature_create(
+        self, arguments: ArmatureCreateArguments
+    ) -> ArmatureSummary: ...
+    def armature_inspect(
+        self, arguments: ArmatureInspectArguments
+    ) -> ArmatureSummary: ...
+    def armature_bind(self, arguments: ArmatureBindArguments) -> BindingSummary: ...
+    def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary: ...
+    def deformation_inspect(
+        self, arguments: DeformationInspectArguments
+    ) -> DeformationSummary: ...
+
     def mesh_create(self, arguments: MeshCreateArguments) -> MeshSummary: ...
     def surface_instances_create(
         self, arguments: SurfaceInstancesCreateArguments
@@ -494,6 +521,11 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         arguments: (
             MeshCreateArguments
+            | ArmatureCreateArguments
+            | ArmatureInspectArguments
+            | ArmatureBindArguments
+            | ArmaturePoseArguments
+            | DeformationInspectArguments
             | SurfaceInstancesCreateArguments
             | SurfaceInstancesConfigureArguments
             | SurfaceInstancesInspectArguments
@@ -564,6 +596,18 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.armature.create":
+                arguments = ArmatureCreateArguments.model_validate(request.arguments)
+            case "blender.armature.inspect":
+                arguments = ArmatureInspectArguments.model_validate(request.arguments)
+            case "blender.armature.bind":
+                arguments = ArmatureBindArguments.model_validate(request.arguments)
+            case "blender.armature.pose":
+                arguments = ArmaturePoseArguments.model_validate(request.arguments)
+            case "blender.deformation.inspect":
+                arguments = DeformationInspectArguments.model_validate(
+                    request.arguments
+                )
             case "blender.mesh.create":
                 arguments = MeshCreateArguments.model_validate(request.arguments)
             case "blender.surface_instances.create":
@@ -793,7 +837,17 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
-        if isinstance(arguments, MeshCreateArguments):
+        if isinstance(arguments, ArmatureCreateArguments):
+            result = backend.armature_create(arguments)
+        elif isinstance(arguments, ArmatureInspectArguments):
+            result = backend.armature_inspect(arguments)
+        elif isinstance(arguments, ArmatureBindArguments):
+            result = backend.armature_bind(arguments)
+        elif isinstance(arguments, ArmaturePoseArguments):
+            result = backend.armature_pose(arguments)
+        elif isinstance(arguments, DeformationInspectArguments):
+            result = backend.deformation_inspect(arguments)
+        elif isinstance(arguments, MeshCreateArguments):
             result = backend.mesh_create(arguments)
         elif isinstance(arguments, SurfaceInstancesCreateArguments):
             result = backend.surface_instances_create(arguments)

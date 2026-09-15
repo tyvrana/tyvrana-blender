@@ -3082,6 +3082,87 @@ semantics. Native tests cover surface motion, orientation, source preservation,
 invalid/overlapping UVs, staged failure, ownership protection and save/reopen;
 MCP tests exercise construction, update, inspection and real image transport.
 
+## Armatures and deformation
+
+Five operations provide bounded forward kinematics (FK): a parented bone chain
+whose local rotations articulate the mesh. They do not create animation, IK,
+constraints, corrective shapes or an automatic production rig.
+
+| Operation | Input | Result |
+| --- | --- | --- |
+| `blender.armature.create` | Unique object name and complete rest-bone hierarchy | Rest/pose summaries and world-space joints |
+| `blender.armature.inspect` | Armature name; optional bone names and sample limit | Hierarchy, joints, stable content digests and owned binding summaries |
+| `blender.armature.bind` | Mesh, armature, envelope or explicit weights, modifier index | Coverage, influence counts, weight sums/digest and binding duration |
+| `blender.armature.pose` | Armature, batched bone channels; optional reset | Updated pose and joint positions |
+| `blender.deformation.inspect` | Armature and up to eight bound meshes | Evaluated rest/pose displacement, bounds, topology and distortion |
+
+### Rest hierarchy, skinning and pose
+
+Creation accepts 1–128 bones in any order. Each has `name`, armature-local `head`
+and `tail`, optional `parent`, `connected`, `roll` in radians, `deform`,
+`head_radius`, `tail_radius` and `envelope_distance`. Defaults are disconnected,
+zero roll, deform enabled, radii 0.1 and envelope distance 0.25. Connected heads
+must match parent tails. Names must fit 63 UTF-8 bytes; bones must have positive
+length. Duplicate names, missing parents and hierarchy cycles fail before mutation.
+The new armature has an identity object transform; generic object operations own
+subsequent object transforms.
+
+```json
+{"operation":"blender.armature.create","arguments":{"name":"Rig","bones":[{"name":"Base","head":[0,0,0],"tail":[0,1,0]},{"name":"End","head":[0,1,0],"tail":[0,2,0],"parent":"Base","connected":true}]}}
+{"operation":"blender.armature.bind","arguments":{"object_name":"Surface","armature_object":"Rig","weights":{"method":"envelopes","bones":["Base","End"]}}}
+{"operation":"blender.armature.pose","arguments":{"object_name":"Rig","bones":[{"name":"End","rotation":[0,0,0.8]}]}}
+{"operation":"blender.deformation.inspect","arguments":{"armature_object":"Rig","objects":["Surface"],"sample_limit":4}}
+{"operation":"blender.armature.pose","arguments":{"object_name":"Rig","reset":true}}
+```
+
+Binding evaluates Blender's native rest-bone envelopes in armature space, selects
+up to `max_influences` (1–4, default 4), and normalizes weights inside Blender.
+It is deterministic geometric weighting, not automatic heat weighting or a claim
+of good deformation. Explicit weights instead use
+`{"method":"explicit","vertices":[{"vertex":0,"influences":[{"bone":"Base","weight":1.0}]}]}`.
+Each listed vertex has 1–4 unique, positive influences summing to one within 1e-5.
+Omitted vertices are unweighted; any unweighted vertex fails unless
+`allow_unweighted: true` is explicit. Bindings support up to 100,000 authored
+vertices and one million envelope vertex/bone evaluations.
+
+The operation stages mesh data and publishes one owned Armature modifier,
+preserving object identity, authored geometry, UVs, materials, transforms and
+unrelated vertex groups. `modifier_index` defaults to 0; `preserve_volume`
+defaults to true. Rebinding replaces weights for the same rig. Unowned Armature
+modifiers and conflicting bone-named groups are protected. All deform-bone groups
+are created, including empty groups: paired `.L`/`.R` names can therefore follow
+Blender Mirror's vertex-group swapping when Mirror precedes the Armature modifier.
+Choose and verify modifier order deliberately.
+
+Pose channels are complete local, rest-relative channels for each listed bone:
+`location` defaults to zero, `rotation` to XYZ Euler radians zero, and `scale` to
+one. Omitted bones retain their pose; `reset: true` first resets every bone.
+Connected bones reject translation. Missing bones, locked channels and conflicting
+animation/drivers/constraints fail before applying any channels. A failed update
+restores the prior pose. Creation restores selection, active object and Object Mode;
+binding stages weights with rollback before publishing. Operations require idle
+Object Mode. Editing shared/linked rigs, shared meshes or meshes with shape keys is
+outside this operation's scope. Invalid native context returns `rig_context_invalid`.
+
+### Verification and persistence
+
+Armature inspection returns bounded world-space rest/posed joints, rest/pose hashes,
+and coverage/weight summaries for up to 16 owned meshes. It does not return full
+weight arrays. Deformation inspection temporarily evaluates the rig in rest position
+and always restores its previous position, including on failure. Each mesh is
+bounded to 250,000 evaluated vertices and 500,000 triangles. Rest and pose must have
+identical evaluated topology. Results include maximum/mean displacement, changed
+vertex count above 1e-6, edge-length and triangle-area ratios, triangles below 1%
+of rest area, and up to 16 largest-displacement samples per mesh. These measurements
+flag distortion; they do not detect self-intersection or establish visual quality.
+
+Native bones, weights, modifiers and poses persist through `blender.file.save` and
+`.open`. Tests cover transaction failures, hierarchy validation, missing resources,
+transformed objects, mirrored groups, actual surface-instance root/orientation
+following under internal articulation, persistence and real rendered MCP images.
+Sampled surface normals are normalized before applying instance offsets, retaining
+the requested root separation when the carrier bends.
+
 ## Development and packaging
 
 Requires uv, Python 3.12+, Git, and Blender 5.2.1. Create this repository's own

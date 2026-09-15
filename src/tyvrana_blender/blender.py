@@ -25,6 +25,7 @@ from . import (
     raycast,
     remesh,
     retopo,
+    rig,
     sculpt,
     sculpt_regions,
     shader,
@@ -146,6 +147,16 @@ from .retopo_models import (
     RetopoEditResult,
     RetopoInspectArguments,
     RetopoSummary,
+)
+from .rig_models import (
+    ArmatureBindArguments,
+    ArmatureCreateArguments,
+    ArmatureInspectArguments,
+    ArmaturePoseArguments,
+    ArmatureSummary,
+    BindingSummary,
+    DeformationInspectArguments,
+    DeformationSummary,
 )
 from .sculpt_models import (
     FaceSetsAssignArguments,
@@ -779,6 +790,32 @@ class BlenderBackend:
         return modifiers.inspect_evaluated(
             modifiers.object_mesh(arguments.object_name), arguments.uv_map
         )
+
+    def armature_create(self, arguments: ArmatureCreateArguments) -> ArmatureSummary:
+        main_thread()
+        return rig.create(arguments)
+
+    def armature_inspect(self, arguments: ArmatureInspectArguments) -> ArmatureSummary:
+        main_thread()
+        return rig.inspect(
+            rig.armature(arguments.object_name),
+            arguments.bone_names,
+            arguments.sample_limit,
+        )
+
+    def armature_bind(self, arguments: ArmatureBindArguments) -> BindingSummary:
+        main_thread()
+        return rig.bind(arguments)
+
+    def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary:
+        main_thread()
+        return rig.pose(arguments)
+
+    def deformation_inspect(
+        self, arguments: DeformationInspectArguments
+    ) -> DeformationSummary:
+        main_thread()
+        return rig.deformation(arguments)
 
     def mesh_create(self, arguments: MeshCreateArguments) -> MeshSummary:
         main_thread()

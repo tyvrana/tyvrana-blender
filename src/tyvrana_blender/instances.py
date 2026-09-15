@@ -342,6 +342,9 @@ def graph(source: Any, prototype: Any, spec: SurfaceDistribution) -> Any:
         root = sample("Root", root_uv, position, "Position")
         direction = sample("Direction", direction_uv, position, "Position")
         normals = sample("Surface normal", root_uv, normal, "Normal")
+        unit_normal = node("ShaderNodeVectorMath", "Unit normal")
+        unit_normal.operation = "NORMALIZE"
+        links.new(normals.outputs["Value"], unit_normal.inputs[0])
         tangent = node("ShaderNodeVectorMath", "Tangent")
         tangent.operation = "SUBTRACT"
         links.new(direction.outputs["Value"], tangent.inputs[0])
@@ -349,11 +352,11 @@ def graph(source: Any, prototype: Any, spec: SurfaceDistribution) -> Any:
         rotation = node("FunctionNodeAxesToRotation", "Frame")
         rotation.primary_axis = "Z"
         rotation.secondary_axis = "Y"
-        wire(normals, "Value", rotation, "Primary Axis")
+        wire(unit_normal, "Vector", rotation, "Primary Axis")
         wire(tangent, "Vector", rotation, "Secondary Axis")
         offset = node("ShaderNodeVectorMath", "Root offset")
         offset.operation = "SCALE"
-        links.new(normals.outputs["Value"], offset.inputs[0])
+        links.new(unit_normal.outputs["Vector"], offset.inputs[0])
         offset.inputs["Scale"].default_value = spec.surface_offset
         points = node("GeometryNodeSetPosition", "Attached roots")
         wire(original, "Geometry", points, "Geometry")

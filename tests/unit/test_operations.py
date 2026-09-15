@@ -105,6 +105,16 @@ from tyvrana_blender.modifier_models import (
     ModifierSummary,
 )
 from tyvrana_blender.operations import OperationError, execute
+from tyvrana_blender.rig_models import (
+    ArmatureBindArguments,
+    ArmatureCreateArguments,
+    ArmatureInspectArguments,
+    ArmaturePoseArguments,
+    ArmatureSummary,
+    BindingSummary,
+    DeformationInspectArguments,
+    DeformationSummary,
+)
 from tyvrana_blender.sculpt_models import (
     BaseTopology,
     MultiresConfigureArguments,
@@ -147,6 +157,23 @@ from tyvrana_blender.uv_models import (
 
 
 class Backend:
+    def armature_create(self, arguments: ArmatureCreateArguments) -> ArmatureSummary:
+        raise NotImplementedError
+
+    def armature_inspect(self, arguments: ArmatureInspectArguments) -> ArmatureSummary:
+        raise NotImplementedError
+
+    def armature_bind(self, arguments: ArmatureBindArguments) -> BindingSummary:
+        raise NotImplementedError
+
+    def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary:
+        raise NotImplementedError
+
+    def deformation_inspect(
+        self, arguments: DeformationInspectArguments
+    ) -> DeformationSummary:
+        raise NotImplementedError
+
     def mesh_create(self, arguments: MeshCreateArguments) -> MeshSummary:
         raise NotImplementedError
 

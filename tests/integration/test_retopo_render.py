@@ -27,7 +27,7 @@ async def test_build_grow_project_relax_and_render_cage(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=True):
             registered = await discover(client)
-            assert registered is not None and len(registered.operations) == 96
+            assert registered is not None and len(registered.operations) == 101
             identifier = registered.instance_id
 
             async def call(op: str, **args: JsonValue) -> Any:
