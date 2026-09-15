@@ -18,7 +18,7 @@ from tyvrana_blender.material_models import (
 from tyvrana_blender.numeric import FLOAT32_MAX, binary32
 from tyvrana_blender.operations import OPERATIONS, OperationError
 
-from .test_operations import Backend, call
+from .test_operations import EMPTY_PAGE, Backend, call
 
 SCALARS = set(PRINCIPLED_SOCKETS) - {
     "base_color",
@@ -28,7 +28,10 @@ SCALARS = set(PRINCIPLED_SOCKETS) - {
 
 
 def test_empty_inspection_and_canonical_registration() -> None:
-    assert MaterialInspectResult(materials=[]).model_dump() == {"materials": []}
+    assert MaterialInspectResult(materials=[], page=EMPTY_PAGE).model_dump() == {
+        "materials": [],
+        "page": EMPTY_PAGE.model_dump(),
+    }
     assert tuple(sorted(OPERATIONS)) == OPERATIONS
     assert [op for op in OPERATIONS if op.startswith("blender.material.")] == [
         "blender.material.assign",
@@ -38,7 +41,8 @@ def test_empty_inspection_and_canonical_registration() -> None:
     ]
     response = call(Backend(), "blender.material.inspect", {})
     assert isinstance(response, OperationSuccess) and response.result == {
-        "materials": []
+        "materials": [],
+        "page": EMPTY_PAGE.model_dump(),
     }
 
 
@@ -144,6 +148,8 @@ def test_summary_serialization(surface: str) -> None:
             "name": "Material",
             "surface": surface,
             "principled": principled,
+            "assignment_count": 2,
+            "assignments_truncated": False,
             "assignments": [
                 MaterialAssignment(object="Body", slot=0),
                 MaterialAssignment(object="Eyes", slot=1),

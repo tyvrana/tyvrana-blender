@@ -6,6 +6,7 @@ import hashlib
 import subprocess
 from pathlib import Path
 
+import pytest
 from tyvrana_protocol import JsonValue
 
 from .conftest import ROOT, running_blender
@@ -33,6 +34,7 @@ def test_native_bake_preservation(profile: dict[str, str], tmp_path: Path) -> No
     assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))
 
 
+@pytest.mark.interactive
 async def test_baked_png_reaches_mcp_and_survives_reopen(
     profile: dict[str, str], tmp_path: Path
 ) -> None:

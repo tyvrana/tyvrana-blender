@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any
 
+import pytest
 from tyvrana_protocol import JsonValue
 
 from ..png import mean_pixel_difference
@@ -12,6 +13,7 @@ from .test_e2e import core_client, discover, operation
 from .test_modifier_render import fixed_scene
 
 
+@pytest.mark.interactive
 async def test_remesh_then_sculpt_through_mcp(
     profile: dict[str, str], tmp_path: Path
 ) -> None:
@@ -20,7 +22,7 @@ async def test_remesh_then_sculpt_through_mcp(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=True):
             registered = await discover(client)
-            assert registered is not None and len(registered.operations) == 103
+            assert registered is not None and registered.operation_count == 103
             identifier = registered.instance_id
 
             async def call(op: str, **args: JsonValue) -> Any:

@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any
 
+import pytest
 from tyvrana_protocol import JsonValue
 
 from ..png import mean_pixel_difference, rgb_pixels
@@ -19,6 +20,7 @@ def cage_pixels(data: bytes) -> int:
     )
 
 
+@pytest.mark.interactive
 async def test_build_grow_project_relax_and_render_cage(
     profile: dict[str, str], tmp_path: Path
 ) -> None:
@@ -27,7 +29,7 @@ async def test_build_grow_project_relax_and_render_cage(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=True):
             registered = await discover(client)
-            assert registered is not None and len(registered.operations) == 103
+            assert registered is not None and registered.operation_count == 103
             identifier = registered.instance_id
 
             async def call(op: str, **args: JsonValue) -> Any:
@@ -123,6 +125,7 @@ async def test_build_grow_project_relax_and_render_cage(
         await discover(client, empty=True)
 
 
+@pytest.mark.interactive
 async def test_bridge_curved_bands_through_mcp(
     profile: dict[str, str], tmp_path: Path
 ) -> None:

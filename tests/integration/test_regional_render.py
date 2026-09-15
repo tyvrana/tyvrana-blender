@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any
 
+import pytest
 from tyvrana_protocol import JsonValue
 
 from ..png import mean_pixel_difference
@@ -12,6 +13,7 @@ from .test_e2e import core_client, discover, operation
 from .test_modifier_render import fixed_scene
 
 
+@pytest.mark.interactive
 async def test_regions_through_mcp_core_and_blender(
     profile: dict[str, str], tmp_path: Path
 ) -> None:

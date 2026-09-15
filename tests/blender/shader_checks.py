@@ -107,7 +107,7 @@ class ShaderTests(unittest.TestCase):
         return self.call("shader.inspect", material_name="Material")
 
     def test_generated_types_dimensions_alpha_and_precision(self) -> None:
-        self.assertEqual(self.call("image.inspect"), {"images": []})
+        self.assertEqual(self.call("image.inspect")["images"], [])
         for kind in ("blank", "uv_grid", "color_grid"):
             for alpha in (False, True):
                 for floating in (False, True):
@@ -665,7 +665,9 @@ class ShaderTests(unittest.TestCase):
         tree = self.material()
         self.node("mapping", "Mapping")
         tree.nodes["Mapping"].inputs["Scale"].default_value = [float("nan"), 1, 1]
-        result = self.graph()
+        result = self.call(
+            "shader.inspect", material_name="Material", include_sockets=True
+        )
         mapping = next(
             node for node in result["nodes"] if node["node_name"] == "Mapping"
         )

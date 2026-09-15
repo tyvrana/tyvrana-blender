@@ -18,7 +18,7 @@ from tyvrana_blender.light_models import (
 from tyvrana_blender.numeric import FLOAT32_MAX, binary32
 from tyvrana_blender.operations import OPERATIONS, OperationError
 
-from .test_operations import Backend, call, light_summary
+from .test_operations import EMPTY_PAGE, Backend, call, light_summary
 
 
 @pytest.mark.parametrize("kind", ["point", "sun", "spot", "area"])
@@ -49,7 +49,10 @@ def test_native_creation_defaults_and_serialized_summary(kind: LightType) -> Non
 
 
 def test_empty_inspection_and_registration() -> None:
-    assert LightInspectResult(lights=[]).model_dump() == {"lights": []}
+    assert LightInspectResult(lights=[], page=EMPTY_PAGE).model_dump() == {
+        "lights": [],
+        "page": EMPTY_PAGE.model_dump(),
+    }
     assert [op for op in OPERATIONS if op.startswith("blender.light.")] == [
         "blender.light.configure",
         "blender.light.create",
@@ -57,7 +60,10 @@ def test_empty_inspection_and_registration() -> None:
     ]
     assert tuple(sorted(OPERATIONS)) == OPERATIONS
     result = call(Backend(), "blender.light.inspect", {})
-    assert isinstance(result, OperationSuccess) and result.result == {"lights": []}
+    assert isinstance(result, OperationSuccess) and result.result == {
+        "lights": [],
+        "page": EMPTY_PAGE.model_dump(),
+    }
 
 
 @pytest.mark.parametrize(

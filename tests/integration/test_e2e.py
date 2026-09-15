@@ -14,8 +14,8 @@ import pytest
 from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import ImageContent
-from pydantic import TypeAdapter
-from tyvrana_protocol import AdapterRegistration, ArtifactDescriptor, JsonValue
+from pydantic import BaseModel, TypeAdapter
+from tyvrana_protocol import ArtifactDescriptor, JsonValue
 
 from tyvrana_blender.models import DeleteResult, ObjectSummary, SceneSummary
 from tyvrana_blender.operations import OPERATIONS
@@ -147,27 +147,72 @@ async def test_real_render_reaches_mcp_image_content(
     assert "Failed to parse" not in caplog.text
 
 
-async def discover(
-    client: Client, *, empty: bool = False
-) -> AdapterRegistration | None:
-    async with asyncio.timeout(12):
+class DiscoveredAdapter(BaseModel):
+    instance_id: str
+    application: str
+    application_version: str
+    project_path: str | None = None
+    operation_count: int
+    catalog_sha256: str
+
+
+async def discover(client: Client, *, empty: bool = False) -> DiscoveredAdapter | None:
+    query: dict[str, JsonValue] = {
+        "application": "blender",
+        "wait_seconds": 0 if empty else 12,
+    }
+    async with asyncio.timeout(15):
         while True:
-            response = await client.call_tool("tyvrana_list_adapters")
+            response = await client.call_tool("tyvrana_list_adapters", query)
             assert not response.is_error
             adapters = response.structured_content["adapters"]
             if empty and not adapters:
                 return None
             if not empty and adapters:
                 assert len(adapters) == 1
-                result = AdapterRegistration.model_validate(
-                    {"type": "adapter.register", **adapters[0]}
-                )
+                result = DiscoveredAdapter.model_validate(adapters[0])
                 assert result.application == "blender"
-                assert result.application_version is not None
                 assert result.application_version.startswith("5.2.1")
-                assert result.operations == OPERATIONS
+                assert result.operation_count == len(OPERATIONS)
+                assert len(result.catalog_sha256) == 64
                 return result
-            await asyncio.sleep(0.02)
+            query["after_revision"] = response.structured_content["revision"]
+            query["wait_seconds"] = 12
+
+
+async def catalog_names(client: Client, adapter_id: str, prefix: str = "") -> set[str]:
+    names: set[str] = set()
+    offset = 0
+    while True:
+        response = await client.call_tool(
+            "tyvrana_list_operations",
+            {
+                "adapter_id": adapter_id,
+                "prefix": prefix,
+                "offset": offset,
+                "limit": 50,
+            },
+        )
+        assert not response.is_error
+        result = response.structured_content
+        names.update(item["name"] for item in result["operations"])
+        if result["next_offset"] is None:
+            return names
+        offset = result["next_offset"]
+
+
+async def wait_for_project(client: Client, adapter_id: str, filepath: str) -> None:
+    query: dict[str, JsonValue] = {"adapter_id": adapter_id}
+    async with asyncio.timeout(15):
+        while True:
+            response = await client.call_tool("tyvrana_list_adapters", query)
+            assert not response.is_error
+            snapshot = response.structured_content
+            if any(
+                item.get("project_path") == filepath for item in snapshot["adapters"]
+            ):
+                return
+            query.update(after_revision=snapshot["revision"], wait_seconds=12)
 
 
 async def operation(
@@ -178,7 +223,14 @@ async def operation(
         {"adapter_id": adapter_id, "operation": name, "arguments": arguments},
     )
     assert not result.is_error, result.content
-    return TypeAdapter(JsonValue).validate_python(result.structured_content["result"])
+    value: JsonValue = TypeAdapter(JsonValue).validate_python(
+        result.structured_content["result"]
+    )
+    if name in {"blender.file.save", "blender.file.open"} and isinstance(value, dict):
+        filepath = value.get("filepath")
+        assert isinstance(filepath, str)
+        await wait_for_project(client, adapter_id, filepath)
+    return value
 
 
 @pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
@@ -261,6 +313,7 @@ async def test_full_mcp_core_blender_vertical_slice(
         os.kill(ready["worker_pid"], 0)
 
 
+@pytest.mark.interactive
 async def test_ui_remains_responsive_and_reconnects_when_core_restarts(
     profile: dict[str, str], tmp_path: Path
 ) -> None:

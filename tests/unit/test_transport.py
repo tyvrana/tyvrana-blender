@@ -190,7 +190,8 @@ def test_stop_discards_an_incomplete_parent_frame() -> None:
         ConnectionConfig(port=1), registration("test-process", "5.2.1 LTS", "")
     )
     try:
-        process.poll()
+        # Isolate EOF on an incomplete frame, independent of catalog/pipe size.
+        process._outgoing.clear()
         assert process.process.stdin is not None
         os.write(process.process.stdin.fileno(), b'{"type":')
     finally:

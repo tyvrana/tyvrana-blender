@@ -21,7 +21,7 @@ from tyvrana_blender.operations import OPERATIONS
 
 from ..png import assert_image_variation
 from .conftest import ROOT
-from .test_e2e import core_client
+from .test_e2e import catalog_names, core_client
 
 
 def candidate_archive(
@@ -36,8 +36,12 @@ def candidate_archive(
                 text = data.decode()
                 # A deterministic capability proves child operation code changed.
                 text += (
-                    "\nOPERATIONS = tuple(sorted((*OPERATIONS, "
-                    f'"blender.test.{marker}")))\n'
+                    "\n_spec = REGISTRY['blender.scene.inspect']\n"
+                    "_contract = _spec.contract.model_copy(update="
+                    f"{{'name': 'blender.test.{marker}'}})\n"
+                    "REGISTRY[_contract.name] = OperationSpec("
+                    "_contract, _spec.parse, _spec.invoke)\n"
+                    "OPERATIONS = tuple(sorted(REGISTRY))\n"
                 )
                 data = text.encode()
             if source.name == "blender.py" and broken:
@@ -59,14 +63,16 @@ async def isolated_thread(function: Callable[..., Any], *args: object) -> Any:
 
 
 async def adapter(client: Client, previous: str | None = None) -> dict[str, Any]:
+    query: dict[str, Any] = {"application": "blender", "wait_seconds": 12}
     async with asyncio.timeout(30):
         while True:
-            result = await client.call_tool("tyvrana_list_adapters")
+            result = await client.call_tool("tyvrana_list_adapters", query)
+            assert not result.is_error
             values = result.structured_content["adapters"]
             assert len(values) <= 1, "Duplicate live adapter connections"
             if values and values[0]["instance_id"] != previous:
                 return dict(values[0])
-            await asyncio.sleep(0.03)
+            query["after_revision"] = result.structured_content["revision"]
 
 
 @pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
@@ -157,8 +163,9 @@ async def test_repeated_live_reload_and_registration_rollback(
                     )
                     assert response["status"] == "scheduled"
                     current = await adapter(client, before_id)
-                    assert "blender.test." + marker in current["operations"]
-                    assert set(OPERATIONS) <= set(current["operations"])
+                    names = await catalog_names(client, current["instance_id"])
+                    assert "blender.test." + marker in names
+                    assert set(OPERATIONS) <= names
                     async with asyncio.timeout(10):
                         while True:
                             completed = await call("extension.inspect")
@@ -199,7 +206,9 @@ async def test_repeated_live_reload_and_registration_rollback(
                 assert restored["status"] == "rolled_back"
                 assert restored["build"] == good_build
                 assert "deliberate registration failure" in restored["error"]
-                assert "blender.test.broken" not in current["operations"]
+                assert "blender.test.broken" not in await catalog_names(
+                    client, current["instance_id"], "blender.test."
+                )
                 assert (
                     restored["runtime_timer_count"] == 1
                     and restored["handler_count"] == 5

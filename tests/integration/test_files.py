@@ -10,7 +10,7 @@ from tyvrana_blender.file_models import FileState
 from tyvrana_blender.models import SceneSummary
 
 from .conftest import running_blender
-from .test_e2e import core_client, discover, operation
+from .test_e2e import core_client, discover, operation, wait_for_project
 
 
 @pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
@@ -23,7 +23,7 @@ async def test_project_persistence_over_mcp(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=ui):
             registered = await discover(client)
-            assert registered is not None and len(registered.operations) == 103
+            assert registered is not None and registered.operation_count == 103
             identifier = registered.instance_id
 
             async def call(name: str, arguments: dict[str, object]) -> object:
@@ -39,14 +39,7 @@ async def test_project_persistence_over_mcp(
                 return result.structured_content["result"]
 
             async def current_project(path: Path) -> None:
-                async with asyncio.timeout(10):
-                    while True:
-                        response = await client.call_tool("tyvrana_list_adapters")
-                        adapters = response.structured_content["adapters"]
-                        if adapters and adapters[0].get("project_path") == str(path):
-                            assert adapters[0]["instance_id"] == identifier
-                            return
-                        await asyncio.sleep(0.05)
+                await wait_for_project(client, identifier, str(path))
 
             unsaved = await call("file.inspect", {})
             assert isinstance(unsaved, dict) and unsaved["filepath"] is None
@@ -204,16 +197,6 @@ async def test_project_open_preserves_mcp_session(
                     },
                 )
                 assert FileState.model_validate(opened).filepath == str(destination)
-                async with asyncio.timeout(10):
-                    while True:
-                        response = await client.call_tool("tyvrana_list_adapters")
-                        adapters = response.structured_content["adapters"]
-                        if adapters and adapters[0].get("project_path") == str(
-                            destination
-                        ):
-                            assert adapters[0]["instance_id"] == identifier
-                            break
-                        await asyncio.sleep(0.05)
                 scene = await call("scene.inspect", {})
                 saved = next(
                     obj

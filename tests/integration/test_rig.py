@@ -41,7 +41,7 @@ async def test_articulated_mesh_render_and_persistence_over_mcp(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=False):
             registered = await discover(client)
-            assert registered is not None and len(registered.operations) == 103
+            assert registered is not None and registered.operation_count == 103
             identifier = registered.instance_id
 
             async def call(op: str, **args: JsonValue) -> Any:

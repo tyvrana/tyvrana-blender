@@ -221,7 +221,9 @@ class ArmatureSummary(Model):
     pose_sha256: str
     bones: list[BoneSummary]
     bones_truncated: bool
-    bindings: list[BindingSummary]
+    bindings: list[BindingSummary] = Field(max_length=16)
+    binding_count: int
+    bindings_truncated: bool
 
 
 class DeformationSample(Model):

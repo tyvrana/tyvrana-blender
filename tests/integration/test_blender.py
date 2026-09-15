@@ -53,6 +53,7 @@ def test_blender_exit_handler_reaps_an_active_worker(profile: dict[str, str]) ->
         os.kill(int(line.split()[1]), 0)
 
 
+@pytest.mark.interactive
 def test_native_script_reload_preserves_unsaved_project(
     profile: dict[str, str],
 ) -> None:

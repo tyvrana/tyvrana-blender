@@ -4,7 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from .models import Model, ObjectName
+from .models import Model, ObjectName, PageInfo
 from .numeric import Float32, Nonnegative32, Vector32
 
 type ShaderColor = Annotated[list[Nonnegative32], Field(min_length=3, max_length=3)]
@@ -53,7 +53,9 @@ class MaterialSummary(Model):
     name: str
     surface: Surface
     principled: PrincipledSummary | None
-    assignments: list[MaterialAssignment]
+    assignments: list[MaterialAssignment] = Field(max_length=32)
+    assignment_count: int
+    assignments_truncated: bool
 
     @model_validator(mode="after")
     def matching_surface(self) -> Self:
@@ -65,6 +67,7 @@ class MaterialSummary(Model):
 
 
 class MaterialInspectResult(Model):
+    page: PageInfo
     materials: list[MaterialSummary]
 
 

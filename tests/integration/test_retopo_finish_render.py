@@ -17,6 +17,7 @@ def edge_selector(values: list[int]) -> dict[str, JsonValue]:
     return {"mode": "indices", "domain": "edge", "indices": [v for v in values]}
 
 
+@pytest.mark.interactive
 @pytest.mark.parametrize("mode", ["loop", "flow", "seam", "gap"])
 async def test_finishing_real_render(
     profile: dict[str, str], tmp_path: Path, mode: str
@@ -26,7 +27,7 @@ async def test_finishing_real_render(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=True):
             registered = await discover(client)
-            assert registered is not None and len(registered.operations) == 103
+            assert registered is not None and registered.operation_count == 103
             identifier = registered.instance_id
 
             async def call(op: str, **args: JsonValue) -> Any:

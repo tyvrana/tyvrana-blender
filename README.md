@@ -162,15 +162,77 @@ least five seconds resets the backoff. Disable the extension to stop its work.
 Unexpected worker failures are logged and shown in preferences; **Apply and
 reconnect** starts a new worker after the cause is resolved.
 
+After a successful Save As or open that changes the native project path, wait for
+adapter discovery to report that `project_path` before the next operation. The
+response drains before re-registration; immediately sending another mutation can
+race disconnection. Read a snapshot, then use its `revision` as `after_revision`
+with a bounded `wait_seconds` while checking the returned path. Ordinary saves to
+the current path do not require a new registration. This uses the generic core
+registry wait; it does not require repeated timer-based polling or blind retries.
+
 ## Operations
 
-Names are exact and are advertised in sorted order:
+Names are exact. A single typed registry supplies request validation, result
+validation, dispatch, descriptions and registration contracts. Discover a compact
+adapter snapshot through core, then use `tyvrana_list_operations` with selected
+names and `include_schemas: true`. Cache by `catalog_sha256`; refresh after a
+contract change. Schemas describe enums, required fields, bounds and defaults;
+preserve omitted fields when configuring existing resources. Descriptions also
+identify effects, native jobs, interactive requirements and input/output artifacts.
+
+### Bounded inspection
+
+`scene.inspect`, `camera.inspect`, `light.inspect`, `material.inspect` and
+`image.inspect` accept `names` (1–64 unique exact names), `prefix`, `offset`
+(default 0) and `limit` (default 32, maximum 128). Name and prefix filters intersect;
+missing names simply do not match. Scene inspection additionally accepts native
+object `types`, such as `["MESH", "ARMATURE"]`. Results are sorted by name and
+summarized only after selection. Each contains:
+
+```text
+page: {total_count, matched_count, offset, returned_count, next_offset}
+```
+
+`next_offset: null` means the matched set is exhausted. Counts are explicit even
+for empty pages. For scene queries, `total_count` is the type-filtered population;
+`object_count` remains the whole scene count. Pagination is a live read: changing
+or renaming resources between pages can shift offsets. Cache unchanged snapshots
+and restart pagination after mutations.
+
+Scene selection metadata is limited to 32 names, with `selected_object_count`
+and `selected_objects_truncated`. Camera `active_camera` remains global even
+when that camera is outside the requested page. Material summaries report at most
+32 effective assignments plus `assignment_count` and `assignments_truncated`.
+Native data scans still contribute execution cost; bounded output does not imply
+constant-time computation.
+
+Shader inspection uses the same node filters/pages, plus `include_sockets`
+(default false), `link_offset` and `link_limit` (default 32, maximum 128). Links
+incident to the matched node set have a separate `link_page`; nodes have
+`node_page`. Detailed socket requests cap each page at eight nodes. Each node
+reports input/output counts, `sockets_included` and `sockets_truncated`; at most
+64 input and 64 output sockets are returned. Unknown/custom nodes remain readable.
+Request exact node names with sockets when preparing connections.
+
+Armature inspection returns at most 16 owned mesh-binding summaries, sorted by
+mesh name, with `binding_count` and `bindings_truncated`. Additional bindings do
+not prevent inspection of the rig's bones. Inspect a selected mesh's weights
+through `weights.inspect`; full weight arrays are never returned by default.
+
+Validation errors identify the operation and at most eight field diagnostics,
+including constraint reason/message and a bounded received-value summary. Full
+unexpected exception details remain in the host log. A native bake's ownership
+guard applies before dispatch.
+
+### Operation index
+
+Names are advertised in sorted order:
 
 | Operation | Arguments | Result |
 | --- | --- | --- |
 | `blender.extension.inspect` | `{}` | Active/staged build, transition state and owned resources |
 | `blender.extension.reload` | Required staged `expected_build` SHA-256 | Scheduled reload acknowledgement; verify completion after rediscovery |
-| `blender.scene.inspect` | `{}` | Scene summary |
+| `blender.scene.inspect` | Optional names/prefix/types/offset/limit | Bounded scene summary |
 | `blender.scene.raycast` | World origin/direction or normalized camera image coordinates | Evaluated surface hit or miss |
 | `blender.multires.inspect` | Object name | Base topology, levels and diagnostics |
 | `blender.multires.create` | Object name; optional modifier name | Created zero-level Multires state |
@@ -302,8 +364,8 @@ An object summary contains:
 Visibility refers to the current view layer. Blender stores transforms with
 finite precision, so returned floating-point values can differ slightly from the
 input. A scene summary contains `name`, `filepath` (null when unsaved),
-`active_object` (name or null), sorted `selected_objects`, `object_count`, and
-`objects` sorted by name. It summarizes objects without dumping mesh geometry.
+`active_object` (name or null), bounded sorted `selected_objects` with count/
+truncation metadata, `object_count`, `page`, and `objects` sorted by name. It summarizes objects without dumping mesh geometry.
 
 Failures use canonical protocol `OperationFailure` messages with these local
 codes: `invalid_arguments`, `object_not_found`, `object_not_camera`, `object_not_light`,
@@ -315,8 +377,9 @@ sanitized message. Core maps these failures to MCP tool errors.
 
 ## Lights
 
-`blender.light.inspect` takes `{}` and returns `{"lights": [...]}`, sorted by
-object name in the current scene. No lights returns `{"lights": []}`.
+`blender.light.inspect` accepts the bounded inspection filters and returns
+`{"page": {...}, "lights": [...]}`, sorted by object name in the current scene.
+With no matches, `lights` is empty and page counts explain the result.
 `blender.light.create` and `blender.light.configure` return the resulting
 `LightSummary`. Every summary has these common fields:
 
@@ -485,15 +548,17 @@ material. Creation and assignment are separate. Object transforms remain
 `blender.object.set_transform`; assigning slots does not edit face-material
 indices.
 
-`blender.material.inspect` takes `{}` and returns `{"materials": [...]}`, sorted
-by material name, including unused and linked materials. Each material has:
+`blender.material.inspect` accepts the bounded inspection filters and returns
+`{"page": {...}, "materials": [...]}`, sorted by material name, including unused
+and linked materials. Each material has:
 
 ```text
 {
   name: string,
   surface: "principled" | "custom" | "none",
   principled: PrincipledSummary | null,
-  assignments: [{object: string, slot: integer}, ...]
+  assignments: [{object: string, slot: integer}, ...],
+  assignment_count: integer, assignments_truncated: boolean
 }
 ```
 
@@ -794,11 +859,13 @@ material, including custom and linked trees, without mutating it:
 ```text
 ShaderGraphSummary {
   material_name: string, node_tree_present: boolean,
-  nodes: NodeSummary[], links: LinkSummary[]
+  nodes: NodeSummary[], links: LinkSummary[], node_page: PageInfo, link_page: PageInfo
 }
 NodeSummary {
   node_name: string, node_type: string, label: string, muted: boolean,
-  inputs: SocketSummary[], outputs: SocketSummary[], settings: NodeSettings | null
+  inputs: SocketSummary[], outputs: SocketSummary[], settings: NodeSettings | null,
+  input_count: integer, output_count: integer,
+  sockets_included: boolean, sockets_truncated: boolean
 }
 SocketSummary {
   name: string, identifier: string, socket_type: string,
@@ -2680,10 +2747,11 @@ through the same main-thread queue as object operations.
 
 ### Inspection
 
-`blender.camera.inspect` takes `{}` and returns:
+`blender.camera.inspect` accepts the bounded inspection filters and returns:
 
 ```json
 {
+  "page": {"total_count": 1, "matched_count": 1, "offset": 0, "returned_count": 1, "next_offset": null},
   "active_camera": "Camera",
   "cameras": [{
     "name": "Camera",
@@ -2706,7 +2774,7 @@ through the same main-thread queue as object operations.
 ```
 
 Only objects in the current scene are listed, sorted by name. An empty scene
-returns `{"active_camera": null, "cameras": []}`. Transforms describe authored
+returns null `active_camera`, empty `cameras`, and zero page counts. Transforms describe authored
 local object state, consistently with scene inspection; they are not evaluated
 world matrices. Existing parenting, constraints, animation, sensor settings, and
 render settings continue to affect Blender's evaluated rendering.
@@ -3329,7 +3397,7 @@ git diff --check
 After building the extension, run native Blender and full-stack tests:
 
 ```sh
-TYVRANA_CORE_EXECUTABLE=/path/to/core/.venv/bin/tyvrana-core uv run --locked pytest tests/integration -s
+TYVRANA_CORE_EXECUTABLE=/path/to/core/.venv/bin/tyvrana-core uv run --locked pytest tests/integration --headless-only -s
 ```
 
 Integration tests require `xvfb-run` for isolated UI execution. They use temporary
@@ -3409,3 +3477,8 @@ subdivided loop bridges. Native checks cover source production data/current
 Multires, target data guards, shared Mesh isolation, staged failures, evaluated
 resource/BVH cleanup, quality diagnostics and live Mirror/Shrinkwrap behavior.
 MCP render tests inspect visible quad cages and bridge growth on curved sources.
+
+For the complete native suite, omit `--headless-only`; tests marked `interactive`
+or parameterized with `ui=True` require a Blender UI event loop (the Linux test
+harness uses an isolated virtual display). Background-only runs explicitly skip
+those cases and do not establish interactive sculpting or user-session acceptance.

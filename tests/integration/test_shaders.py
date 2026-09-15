@@ -12,7 +12,7 @@ from tyvrana_blender.shader_models import NodeSummary, ShaderGraphSummary
 from ..png import mean_pixel_difference, texture_statistics
 from .conftest import running_blender
 from .test_cameras import error, render
-from .test_e2e import core_client, discover, operation
+from .test_e2e import catalog_names, core_client, discover, operation
 
 
 @pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
@@ -28,7 +28,9 @@ async def test_image_shader_graph_and_texture_renders_over_mcp(
                 registration = await discover(client)
                 assert registration is not None
                 identifier = registration.instance_id
-                assert set(registration.operations) == set(OPERATIONS)
+                assert await catalog_names(client, registration.instance_id) == set(
+                    OPERATIONS
+                )
 
                 async def call(name: str, /, **arguments: JsonValue) -> JsonValue:
                     return await operation(

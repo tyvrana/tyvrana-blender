@@ -13,7 +13,7 @@ from tyvrana_blender.models import ObjectSummary
 
 from ..png import inspect_png, red_bounds, rgb_pixels
 from .conftest import running_blender
-from .test_e2e import core_client, discover, operation
+from .test_e2e import catalog_names, core_client, discover, operation
 
 
 async def render(client: Client, identifier: str, **options: JsonValue) -> bytes:
@@ -71,8 +71,9 @@ async def test_camera_controls_and_render_framing_over_mcp(
             registered = await discover(client)
             assert registered is not None
             identifier = registered.instance_id
+            names = await catalog_names(client, identifier, "blender.camera.")
             assert all(
-                "blender.camera." + name in registered.operations
+                "blender.camera." + name in names
                 for name in ("inspect", "create", "configure", "set_active")
             )
             initial = CameraInspectResult.model_validate(
@@ -83,7 +84,8 @@ async def test_camera_controls_and_render_framing_over_mcp(
                     client, identifier, "blender.object.delete", {"name": camera.name}
                 )
             empty = await operation(client, identifier, "blender.camera.inspect", {})
-            assert empty == {"active_camera": None, "cameras": []}
+            assert isinstance(empty, dict)
+            assert empty["active_camera"] is None and empty["cameras"] == []
             pose: dict[str, JsonValue] = {
                 "location": [0, -8, 4.5],
                 "rotation": [1.1583858728408813, 0, 0],

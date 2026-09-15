@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from tyvrana_blender.compatibility import require_blender
 from tyvrana_blender.image_models import ImageConfigureArguments, ImageCreateArguments
+from tyvrana_blender.models import PageInfo
 from tyvrana_blender.shader_models import (
     ConnectArguments,
     NodeConfigureArguments,
@@ -289,6 +290,15 @@ def test_connect_requires_explicit_replacement() -> None:
 
 def test_empty_graph_serialization() -> None:
     summary = ShaderGraphSummary(
-        material_name="M", node_tree_present=False, nodes=[], links=[]
+        material_name="M",
+        node_tree_present=False,
+        nodes=[],
+        links=[],
+        node_page=PageInfo(
+            total_count=0, matched_count=0, offset=0, returned_count=0, next_offset=None
+        ),
+        link_page=PageInfo(
+            total_count=0, matched_count=0, offset=0, returned_count=0, next_offset=None
+        ),
     )
     assert ShaderGraphSummary.model_validate_json(summary.model_dump_json()) == summary

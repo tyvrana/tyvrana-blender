@@ -87,7 +87,7 @@ def test_registration_is_canonical_and_optional_filepath_is_omitted() -> None:
     message = registration("process-id", "5.2.1 LTS", "")
     assert message.application == "blender"
     assert message.application_version == "5.2.1 LTS"
-    assert message.operations == tuple(sorted(OPERATIONS))
+    assert message.operation_names == tuple(sorted(OPERATIONS))
     assert "project_path" not in message.model_dump()
     assert (
         registration("other", "5.2.1 LTS", "example.blend").project_path

@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from .inspection import page
+from .models import PageInfo
 from .operations import OperationError
 from .shader_models import (
     NODE_SOCKETS,
@@ -24,6 +26,7 @@ from .shader_models import (
     NodeSummary,
     NormalMapSettings,
     ShaderGraphSummary,
+    ShaderInspectArguments,
     SocketSummary,
     TextureCoordinateSettings,
     compatible_sockets,
@@ -116,7 +119,7 @@ def settings(node: Any) -> NodeSettings | None:
     return None
 
 
-def node_summary(node: Any) -> NodeSummary:
+def node_summary(node: Any, include_sockets: bool = True) -> NodeSummary:
     try:
         state = settings(node)
     except ValidationError:
@@ -126,8 +129,17 @@ def node_summary(node: Any) -> NodeSummary:
         node_type=str(node.bl_idname),
         label=str(node.label),
         muted=bool(node.mute),
-        inputs=[socket_summary(s) for s in node.inputs],
-        outputs=[socket_summary(s) for s in node.outputs],
+        inputs=[socket_summary(s) for s in list(node.inputs)[:64]]
+        if include_sockets
+        else [],
+        outputs=[socket_summary(s) for s in list(node.outputs)[:64]]
+        if include_sockets
+        else [],
+        input_count=len(node.inputs),
+        output_count=len(node.outputs),
+        sockets_included=include_sockets,
+        sockets_truncated=include_sockets
+        and (len(node.inputs) > 64 or len(node.outputs) > 64),
         settings=state,
     )
 
@@ -143,28 +155,54 @@ def link_summary(link: Any) -> LinkSummary:
     )
 
 
-def graph_summary(material: Any) -> ShaderGraphSummary:
+def graph_summary(
+    material: Any, arguments: ShaderInspectArguments | None = None
+) -> ShaderGraphSummary:
+    query = arguments or ShaderInspectArguments(material_name=str(material.name))
     tree = material.node_tree
+    items = list(tree.nodes) if tree is not None else []
+    node_query = (
+        query.model_copy(update={"limit": min(query.limit, 8)})
+        if query.include_sockets
+        else query
+    )
+    nodes, node_page = page(items, node_query, lambda item: str(item.name))
+    matching = {
+        str(item.name)
+        for item in items
+        if (query.names is None or item.name in query.names)
+        and item.name.startswith(query.prefix)
+    }
+    links = list(tree.links) if tree is not None else []
+    matched_links = sorted(
+        (
+            link
+            for link in links
+            if link.from_node.name in matching or link.to_node.name in matching
+        ),
+        key=lambda link: (
+            link.from_node.name,
+            link.from_socket.identifier,
+            link.to_node.name,
+            link.to_socket.identifier,
+        ),
+    )
+    end = query.link_offset + query.link_limit
+    selected_links = matched_links[query.link_offset : end]
+    link_page = PageInfo(
+        total_count=len(links),
+        matched_count=len(matched_links),
+        offset=query.link_offset,
+        returned_count=len(selected_links),
+        next_offset=end if end < len(matched_links) else None,
+    )
     return ShaderGraphSummary(
         material_name=str(material.name),
         node_tree_present=tree is not None,
-        nodes=[]
-        if tree is None
-        else [node_summary(n) for n in sorted(tree.nodes, key=lambda n: n.name)],
-        links=[]
-        if tree is None
-        else [
-            link_summary(link)
-            for link in sorted(
-                tree.links,
-                key=lambda link: (
-                    link.from_node.name,
-                    link.from_socket.identifier,
-                    link.to_node.name,
-                    link.to_socket.identifier,
-                ),
-            )
-        ],
+        nodes=[node_summary(n, query.include_sockets) for n in nodes],
+        links=[link_summary(link) for link in selected_links],
+        node_page=node_page,
+        link_page=link_page,
     )
 
 

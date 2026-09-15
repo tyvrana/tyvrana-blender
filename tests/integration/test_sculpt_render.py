@@ -13,6 +13,7 @@ from .test_e2e import core_client, discover, operation
 from .test_modifier_render import fixed_scene
 
 
+@pytest.mark.interactive
 @pytest.mark.parametrize("brush", ["draw", "smooth"])
 async def test_render_pick_sculpt_and_verify_through_mcp(
     profile: dict[str, str], tmp_path: Path, brush: str

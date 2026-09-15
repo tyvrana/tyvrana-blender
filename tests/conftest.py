@@ -28,3 +28,32 @@ async def no_leaks() -> AsyncIterator[None]:
         assert set(threading.enumerate()) <= threads
     finally:
         loop.set_exception_handler(handler)
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--headless-only",
+        action="store_true",
+        help="Skip tests requiring an interactive Blender host",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "interactive: requires an interactive Blender event loop"
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    if not config.getoption("--headless-only"):
+        return
+    for item in items:
+        parameters = getattr(getattr(item, "callspec", None), "params", {})
+        if parameters.get("ui") is True or item.get_closest_marker("interactive"):
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="Interactive Blender excluded by --headless-only"
+                )
+            )

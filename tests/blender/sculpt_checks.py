@@ -385,8 +385,8 @@ class MultiresTests(NativeCase):
         self.assertEqual(sibling.data, original)
         self.assertEqual(authored(sibling), before)
 
-    def test_topology_and_coordinate_edits_remain_blocked(self) -> None:
-        self.add_multires(2)
+    def test_topology_guards_and_coordinate_only_multires_edit(self) -> None:
+        modifier = self.add_multires(2)
         before = authored(self.obj)
         cases: list[tuple[str, dict[str, Any]]] = [
             (
@@ -410,18 +410,27 @@ class MultiresTests(NativeCase):
                 "mesh.merge_vertices",
                 {"selector": {"domain": "vertex", "mode": "all"}, "mode": "center"},
             ),
-            (
-                "mesh.transform",
-                {
-                    "selector": {"domain": "vertex", "mode": "all"},
-                    "translation": [0, 0, 1],
-                },
-            ),
         ]
         for op, args in cases:
             with self.subTest(operation=op):
                 self.error(op, "invalid_context", **args)
         self.assertEqual(authored(self.obj), before)
+        # Coordinate-only cage edits preserve modifiers and ordered native data.
+        # This policy predates the registry; topology edits above remain forbidden.
+        evaluated_before = coordinates(self.obj)
+        result = self.call(
+            "mesh.transform",
+            selector={"domain": "vertex", "mode": "all"},
+            translation=[0, 0, 1],
+        )
+        self.assertEqual(result["transformed_vertices"], len(before[0]))
+        self.assertEqual(authored(self.obj)[1:], before[1:])
+        self.assertEqual(list(self.obj.modifiers), [modifier])
+        self.assertEqual(modifier.total_levels, 2)
+        evaluated_after = coordinates(self.obj)
+        self.assertEqual(len(evaluated_before), len(evaluated_after))
+        for old, new in zip(evaluated_before, evaluated_after, strict=True):
+            self.assertLess((new - old - Vector((0, 0, 1))).length, 1e-5)
 
     def test_headless_stroke_rejection(self) -> None:
         if not bpy.app.background:

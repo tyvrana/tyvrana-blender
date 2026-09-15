@@ -5,7 +5,7 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, field_validator, model_validator
 from tyvrana_protocol import ArtifactId
 
-from .models import Model, ObjectName
+from .models import Model, ObjectName, PageInfo
 from .numeric import Float32
 
 type GeneratedType = Literal["blank", "uv_grid", "color_grid"]
@@ -39,6 +39,7 @@ class ImageSummary(Model):
 
 
 class ImageInspectResult(Model):
+    page: PageInfo
     images: list[ImageSummary]
 
 

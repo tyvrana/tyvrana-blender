@@ -19,6 +19,7 @@ def fixed_scene(state: Any) -> Any:
     ]
 
 
+@pytest.mark.interactive
 @pytest.mark.parametrize(
     "kind", ["mirror", "subdivision_surface", "solidify", "boolean"]
 )

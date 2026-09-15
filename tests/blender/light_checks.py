@@ -49,7 +49,7 @@ class LightTests(unittest.TestCase):
         return response
 
     def test_empty_inspection_and_default_types(self) -> None:
-        self.assertEqual(self.backend.light_inspect().model_dump(), {"lights": []})
+        self.assertEqual(self.backend.light_inspect().lights, [])
         for kind in ("point", "sun", "spot", "area"):
             summary = self.backend.light_create(
                 models.LightCreateArguments(type=kind, name=kind)

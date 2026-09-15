@@ -12,7 +12,7 @@ from pydantic import (
 )
 from tyvrana_protocol import JsonValue
 
-from .models import Model, ObjectName, Vector
+from .models import Model, ObjectName, PageInfo, Vector
 from .numeric import Float32, Nonnegative32, Vector32, binary32
 
 ANGLE_MAX = binary32(math.pi)
@@ -111,6 +111,7 @@ class LightSummary(LightState):
 
 
 class LightInspectResult(Model):
+    page: PageInfo
     lights: list[LightSummary]
 
 

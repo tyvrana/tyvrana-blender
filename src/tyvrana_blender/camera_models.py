@@ -10,7 +10,7 @@ from pydantic import (
     model_validator,
 )
 
-from .models import Model, ObjectName, Vector
+from .models import Model, ObjectName, PageInfo, Vector
 from .numeric import FLOAT32_MAX, Float32, Vector32, binary32
 
 CLIP_MIN = binary32(1e-6)
@@ -139,5 +139,6 @@ class CameraSummary(Model):
 
 
 class CameraInspectResult(Model):
+    page: PageInfo
     active_camera: str | None
     cameras: list[CameraSummary]

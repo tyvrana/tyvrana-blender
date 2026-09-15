@@ -11,7 +11,7 @@ from tyvrana_blender.models import SceneSummary
 from ..png import channel_means, mean_pixel_difference
 from .conftest import running_blender
 from .test_cameras import error, render
-from .test_e2e import core_client, discover, operation
+from .test_e2e import catalog_names, core_client, discover, operation
 
 
 @pytest.mark.parametrize("ui", [False, True], ids=["background", "ui-timer"])
@@ -26,13 +26,15 @@ async def test_light_controls_and_real_illumination_over_mcp(
                 registered = await discover(client)
                 assert registered is not None
                 identifier = registered.instance_id
+                names = await catalog_names(client, identifier, "blender.light.")
                 assert all(
-                    "blender.light." + name in registered.operations
+                    "blender.light." + name in names
                     for name in ("inspect", "create", "configure")
                 )
-                assert await operation(
+                empty_lights = await operation(
                     client, identifier, "blender.light.inspect", {}
-                ) == {"lights": []}
+                )
+                assert isinstance(empty_lights, dict) and empty_lights["lights"] == []
                 scene_before = SceneSummary.model_validate(
                     await operation(client, identifier, "blender.scene.inspect", {})
                 )

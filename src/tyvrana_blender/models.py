@@ -41,7 +41,31 @@ class ConnectionConfig(Model):
 
 
 class InspectArguments(Model):
-    pass
+    names: list[ObjectName] | None = Field(default=None, min_length=1, max_length=64)
+    prefix: str = Field(default="", max_length=128)
+    offset: int = Field(default=0, ge=0, le=1000000)
+    limit: int = Field(default=32, ge=1, le=128)
+
+    @field_validator("names")
+    @classmethod
+    def unique_names(cls, names: list[str] | None) -> list[str] | None:
+        if names is not None and len(set(names)) != len(names):
+            raise ValueError("Names must be unique")
+        return names
+
+
+class SceneInspectArguments(InspectArguments):
+    types: list[Annotated[str, Field(min_length=1, max_length=64)]] | None = Field(
+        default=None, min_length=1, max_length=32
+    )
+
+
+class PageInfo(Model):
+    total_count: int = Field(ge=0)
+    matched_count: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    returned_count: int = Field(ge=0)
+    next_offset: int | None
 
 
 class CreateArguments(Model):
@@ -89,8 +113,11 @@ class SceneSummary(Model):
     filepath: str | None
     active_object: str | None
     selected_objects: list[str]
+    selected_object_count: int
+    selected_objects_truncated: bool
     object_count: int
     objects: list[ObjectSummary]
+    page: PageInfo
 
 
 class DeleteResult(Model):

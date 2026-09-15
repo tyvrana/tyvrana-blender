@@ -70,6 +70,7 @@ from .image_models import (
     ImageSummary,
 )
 from .incoming import input_path
+from .inspection import page
 from .instance_models import (
     MeshCreateArguments,
     SurfaceInstancesConfigureArguments,
@@ -113,9 +114,11 @@ from .models import (
     CreateArguments,
     DeleteArguments,
     DeleteResult,
+    InspectArguments,
     ObjectSummary,
     RenderArguments,
     RenderResult,
+    SceneInspectArguments,
     SceneSummary,
     TransformArguments,
 )
@@ -472,16 +475,22 @@ def material_summary(material: Any) -> MaterialSummary:
         except ValidationError:
             # Non-finite externally authored state cannot be represented as JSON.
             surface = "custom"
+    assignments = [
+        (str(obj.name), index)
+        for obj in sorted(bpy.data.objects, key=lambda obj: obj.name)
+        for index, slot in enumerate(obj.material_slots)
+        if slot.material == material
+    ]
     return MaterialSummary(
         name=str(material.name),
         surface=surface,
         principled=values,
         assignments=[
-            MaterialAssignment(object=str(obj.name), slot=index)
-            for obj in sorted(bpy.data.objects, key=lambda obj: obj.name)
-            for index, slot in enumerate(obj.material_slots)
-            if slot.material == material
+            MaterialAssignment(object=name, slot=slot)
+            for name, slot in assignments[:32]
         ],
+        assignment_count=len(assignments),
+        assignments_truncated=len(assignments) > 32,
     )
 
 
@@ -940,13 +949,14 @@ class BlenderBackend:
 
         return uv_layout.inspect(arguments, self.spool)
 
-    def image_inspect(self) -> ImageInspectResult:
+    def image_inspect(
+        self, arguments: InspectArguments | None = None
+    ) -> ImageInspectResult:
         main_thread()
+        arguments = arguments or InspectArguments()
+        selected, info = page(bpy.data.images, arguments, lambda item: str(item.name))
         return ImageInspectResult(
-            images=[
-                image_summary(image)
-                for image in sorted(bpy.data.images, key=lambda image: image.name)
-            ]
+            images=[image_summary(item) for item in selected], page=info
         )
 
     def image_from_artifact(
@@ -1159,7 +1169,7 @@ class BlenderBackend:
     def shader_inspect(self, arguments: ShaderInspectArguments) -> ShaderGraphSummary:
         main_thread()
         bpy.context.view_layer.update()
-        return shader.graph_summary(find_material(arguments.material_name))
+        return shader.graph_summary(find_material(arguments.material_name), arguments)
 
     def shader_create(self, arguments: NodeCreateArguments) -> NodeSummary:
         data_mutation_context()
@@ -1193,16 +1203,17 @@ class BlenderBackend:
         tree = shader.editable_tree(find_material(arguments.material_name))
         return shader.disconnect(tree, arguments)
 
-    def material_inspect(self) -> MaterialInspectResult:
+    def material_inspect(
+        self, arguments: InspectArguments | None = None
+    ) -> MaterialInspectResult:
         main_thread()
+        arguments = arguments or InspectArguments()
         bpy.context.view_layer.update()
+        selected, info = page(
+            bpy.data.materials, arguments, lambda item: str(item.name)
+        )
         return MaterialInspectResult(
-            materials=[
-                material_summary(material)
-                for material in sorted(
-                    bpy.data.materials, key=lambda material: material.name
-                )
-            ]
+            materials=[material_summary(item) for item in selected], page=info
         )
 
     def material_create(self, arguments: MaterialCreateArguments) -> MaterialSummary:
@@ -1394,15 +1405,19 @@ class BlenderBackend:
             bpy.context.view_layer.update()
             raise
 
-    def light_inspect(self) -> LightInspectResult:
+    def light_inspect(
+        self, arguments: InspectArguments | None = None
+    ) -> LightInspectResult:
         main_thread()
+        arguments = arguments or InspectArguments()
         bpy.context.view_layer.update()
+        selected, info = page(
+            (obj for obj in bpy.context.scene.objects if obj.type == "LIGHT"),
+            arguments,
+            lambda item: str(item.name),
+        )
         return LightInspectResult(
-            lights=[
-                light_summary(obj)
-                for obj in sorted(bpy.context.scene.objects, key=lambda obj: obj.name)
-                if obj.type == "LIGHT"
-            ]
+            lights=[light_summary(obj) for obj in selected], page=info
         )
 
     def light_create(self, arguments: LightCreateArguments) -> LightSummary:
@@ -1512,17 +1527,22 @@ class BlenderBackend:
             bpy.context.view_layer.update()
             raise
 
-    def camera_inspect(self) -> CameraInspectResult:
+    def camera_inspect(
+        self, arguments: InspectArguments | None = None
+    ) -> CameraInspectResult:
         main_thread()
+        arguments = arguments or InspectArguments()
         bpy.context.view_layer.update()
-        cameras = [
-            camera_summary(obj)
-            for obj in sorted(bpy.context.scene.objects, key=lambda obj: obj.name)
-            if obj.type == "CAMERA"
-        ]
+        selected, info = page(
+            (obj for obj in bpy.context.scene.objects if obj.type == "CAMERA"),
+            arguments,
+            lambda item: str(item.name),
+        )
+        active = bpy.context.scene.camera
         return CameraInspectResult(
-            active_camera=next((obj.name for obj in cameras if obj.active), None),
-            cameras=cameras,
+            active_camera=str(active.name) if active else None,
+            cameras=[camera_summary(obj) for obj in selected],
+            page=info,
         )
 
     def camera_create(self, arguments: CameraCreateArguments) -> CameraSummary:
@@ -1634,21 +1654,29 @@ class BlenderBackend:
             raise OperationError("invalid_context", "Render storage is unavailable")
         return render_image(arguments, self.spool)
 
-    def inspect(self) -> SceneSummary:
+    def inspect(self, arguments: SceneInspectArguments | None = None) -> SceneSummary:
         main_thread()
+        arguments = arguments or SceneInspectArguments()
         bpy.context.view_layer.update()
-        objects = [
-            object_summary(obj)
-            for obj in sorted(bpy.context.scene.objects, key=lambda item: item.name)
-        ]
+        objects = bpy.context.scene.objects
+        types = set(arguments.types) if arguments.types is not None else None
+        selected, info = page(
+            (obj for obj in objects if types is None or obj.type in types),
+            arguments,
+            lambda item: str(item.name),
+        )
         active = bpy.context.view_layer.objects.active
+        selected_names = sorted(str(obj.name) for obj in objects if obj.select_get())
         return SceneSummary(
             name=str(bpy.context.scene.name),
             filepath=str(bpy.data.filepath) or None,
             active_object=str(active.name) if active else None,
-            selected_objects=sorted(obj.name for obj in objects if obj.selected),
+            selected_objects=selected_names[:32],
+            selected_object_count=len(selected_names),
+            selected_objects_truncated=len(selected_names) > 32,
             object_count=len(objects),
-            objects=objects,
+            objects=[object_summary(obj) for obj in selected],
+            page=info,
         )
 
     def create(self, arguments: CreateArguments) -> ObjectSummary:

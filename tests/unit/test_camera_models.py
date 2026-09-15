@@ -18,7 +18,7 @@ from tyvrana_blender.models import Model
 from tyvrana_blender.numeric import FLOAT32_MAX
 from tyvrana_blender.operations import OPERATIONS, OperationError, registration
 
-from .test_operations import Backend, call, camera_summary
+from .test_operations import EMPTY_PAGE, Backend, call, camera_summary
 
 
 def test_default_perspective_and_orthographic_creation() -> None:
@@ -45,10 +45,20 @@ def test_projection_normalization(native: str, expected: str) -> None:
 
 
 def test_summary_serialization_and_empty_inspection() -> None:
-    empty = CameraInspectResult(active_camera=None, cameras=[])
-    assert json.loads(empty.model_dump_json()) == {"active_camera": None, "cameras": []}
+    empty = CameraInspectResult(active_camera=None, cameras=[], page=EMPTY_PAGE)
+    assert json.loads(empty.model_dump_json()) == {
+        "active_camera": None,
+        "cameras": [],
+        "page": EMPTY_PAGE.model_dump(),
+    }
     summary = camera_summary("Camera")
-    result = CameraInspectResult(active_camera=summary.name, cameras=[summary])
+    result = CameraInspectResult(
+        active_camera=summary.name,
+        cameras=[summary],
+        page=EMPTY_PAGE.model_copy(
+            update={"total_count": 1, "matched_count": 1, "returned_count": 1}
+        ),
+    )
     assert CameraInspectResult.model_validate_json(result.model_dump_json()) == result
     assert result.model_dump(mode="json")["cameras"][0]["ortho_scale"] is None
     for mode in ("panoramic", "custom"):
@@ -150,7 +160,7 @@ def test_set_active_validation(fields: dict[str, JsonValue]) -> None:
 def test_camera_registration_and_dispatch_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    advertised = registration("example", "5.2.1", "").operations
+    advertised = registration("example", "5.2.1", "").operation_names
     assert advertised == tuple(sorted(OPERATIONS))
     assert len([name for name in advertised if name.startswith("blender.camera.")]) == 4
     backend = Backend()
@@ -159,7 +169,11 @@ def test_camera_registration_and_dispatch_errors(
     assert backend.calls == []
     good = call(backend, "blender.camera.inspect", {})
     assert isinstance(good, OperationSuccess)
-    assert good.result == {"active_camera": None, "cameras": []}
+    assert good.result == {
+        "active_camera": None,
+        "cameras": [],
+        "page": EMPTY_PAGE.model_dump(),
+    }
 
     def wrong_type(arguments: CameraSetActiveArguments) -> CameraSummary:
         raise OperationError(

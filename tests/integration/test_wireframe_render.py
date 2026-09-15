@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 from tyvrana_protocol import JsonValue
 
 from .conftest import ROOT, running_blender
@@ -34,6 +35,7 @@ def test_native_wireframe_guards(profile: dict[str, str], tmp_path: Path) -> Non
     assert "Traceback" not in log, log
 
 
+@pytest.mark.interactive
 async def test_wire_display_preserves_source_target_and_scene(
     profile: dict[str, str], tmp_path: Path
 ) -> None:

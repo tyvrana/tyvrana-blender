@@ -83,9 +83,12 @@ from tyvrana_blender.models import (
     CreateArguments,
     DeleteArguments,
     DeleteResult,
+    InspectArguments,
     ObjectSummary,
+    PageInfo,
     RenderArguments,
     RenderResult,
+    SceneInspectArguments,
     SceneSummary,
     TransformArguments,
 )
@@ -159,6 +162,10 @@ from tyvrana_blender.weight_models import (
     WeightsAssignment,
     WeightsInspectArguments,
     WeightsSummary,
+)
+
+EMPTY_PAGE = PageInfo(
+    total_count=0, matched_count=0, offset=0, returned_count=0, next_offset=None
 )
 
 
@@ -839,9 +846,9 @@ class Backend:
         self.calls.append("image_remove")
         return DeleteResult(deleted=arguments.name)
 
-    def image_inspect(self) -> ImageInspectResult:
+    def image_inspect(self, arguments: InspectArguments) -> ImageInspectResult:
         self.calls.append("image_inspect")
-        return ImageInspectResult(images=[])
+        return ImageInspectResult(images=[], page=EMPTY_PAGE)
 
     def image_create(self, arguments: ImageCreateArguments) -> ImageSummary:
         self.calls.append("image_create")
@@ -864,6 +871,8 @@ class Backend:
             node_tree_present=True,
             nodes=[],
             links=[],
+            node_page=EMPTY_PAGE,
+            link_page=EMPTY_PAGE,
         )
 
     def shader_create(self, arguments: NodeCreateArguments) -> NodeSummary:
@@ -900,9 +909,9 @@ class Backend:
             removed=0,
         )
 
-    def material_inspect(self) -> MaterialInspectResult:
+    def material_inspect(self, arguments: InspectArguments) -> MaterialInspectResult:
         self.calls.append("material_inspect")
-        return MaterialInspectResult(materials=[])
+        return MaterialInspectResult(materials=[], page=EMPTY_PAGE)
 
     def material_create(self, arguments: MaterialCreateArguments) -> MaterialSummary:
         self.calls.append("material_create")
@@ -911,6 +920,8 @@ class Backend:
             surface="none",
             principled=None,
             assignments=[],
+            assignment_count=0,
+            assignments_truncated=False,
         )
 
     def material_configure(
@@ -918,7 +929,12 @@ class Backend:
     ) -> MaterialSummary:
         self.calls.append("material_configure")
         return MaterialSummary(
-            name=arguments.name, surface="none", principled=None, assignments=[]
+            name=arguments.name,
+            surface="none",
+            principled=None,
+            assignments=[],
+            assignment_count=0,
+            assignments_truncated=False,
         )
 
     def material_assign(
@@ -932,9 +948,9 @@ class Backend:
             slots=[arguments.material_name],
         )
 
-    def light_inspect(self) -> LightInspectResult:
+    def light_inspect(self, arguments: InspectArguments) -> LightInspectResult:
         self.calls.append("light_inspect")
-        return LightInspectResult(lights=[])
+        return LightInspectResult(lights=[], page=EMPTY_PAGE)
 
     def light_create(self, arguments: LightCreateArguments) -> LightSummary:
         self.calls.append("light_create")
@@ -944,9 +960,9 @@ class Backend:
         self.calls.append("light_configure")
         return light_summary(arguments.name)
 
-    def camera_inspect(self) -> CameraInspectResult:
+    def camera_inspect(self, arguments: InspectArguments) -> CameraInspectResult:
         self.calls.append("camera_inspect")
-        return CameraInspectResult(active_camera=None, cameras=[])
+        return CameraInspectResult(active_camera=None, cameras=[], page=EMPTY_PAGE)
 
     def camera_create(self, arguments: CameraCreateArguments) -> CameraSummary:
         self.calls.append("camera_create")
@@ -970,13 +986,16 @@ class Backend:
             artifact_id="1" * 32, media_type="image/png", byte_size=1, sha256="0" * 64
         )
 
-    def inspect(self) -> SceneSummary:
+    def inspect(self, arguments: SceneInspectArguments) -> SceneSummary:
         self.calls.append("inspect")
         return SceneSummary(
             name="Scene",
             filepath=None,
             active_object=None,
             selected_objects=[],
+            selected_object_count=0,
+            selected_objects_truncated=False,
+            page=EMPTY_PAGE,
             object_count=0,
             objects=[],
         )
@@ -1033,6 +1052,10 @@ def node_summary(name: str) -> NodeSummary:
         muted=False,
         inputs=[],
         outputs=[],
+        input_count=0,
+        output_count=0,
+        sockets_included=True,
+        sockets_truncated=False,
         settings=None,
     )
 

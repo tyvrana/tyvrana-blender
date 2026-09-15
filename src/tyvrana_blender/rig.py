@@ -124,8 +124,7 @@ def inspect(
         and KEY in o
         and any(m.type == "ARMATURE" and m.object == obj for m in o.modifiers)
     ]
-    if len(bound) > 16:
-        fail("Armature summary is limited to 16 owned bound meshes")
+    bound.sort(key=lambda item: item.name)
     return ArmatureSummary(
         object_name=obj.name,
         bone_count=len(obj.data.bones),
@@ -137,7 +136,9 @@ def inspect(
         ),
         bones=samples,
         bones_truncated=len(bones) > limit,
-        bindings=[binding_summary(o) for o in bound],
+        bindings=[binding_summary(o) for o in bound[:16]],
+        binding_count=len(bound),
+        bindings_truncated=len(bound) > 16,
     )
 
 

@@ -6,7 +6,7 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import Field, FiniteFloat, field_validator, model_validator
 from tyvrana_protocol import JsonValue
 
-from .models import Model, ObjectName
+from .models import InspectArguments, Model, ObjectName, PageInfo
 from .numeric import Float32, Vector32
 
 type NodeType = Literal[
@@ -104,8 +104,12 @@ class NodeSummary(Model):
     node_type: str
     label: str
     muted: bool
-    inputs: list[SocketSummary]
-    outputs: list[SocketSummary]
+    inputs: list[SocketSummary] = Field(max_length=64)
+    input_count: int
+    output_count: int
+    sockets_included: bool
+    sockets_truncated: bool
+    outputs: list[SocketSummary] = Field(max_length=64)
     settings: NodeSettings | None
 
 
@@ -122,11 +126,16 @@ class ShaderGraphSummary(Model):
     material_name: str
     node_tree_present: bool
     nodes: list[NodeSummary]
+    node_page: PageInfo
+    link_page: PageInfo
     links: list[LinkSummary]
 
 
-class ShaderInspectArguments(Model):
+class ShaderInspectArguments(InspectArguments):
     material_name: ObjectName
+    include_sockets: bool = False
+    link_offset: int = Field(default=0, ge=0, le=1000000)
+    link_limit: int = Field(default=32, ge=1, le=128)
 
 
 class NodePatch(Model):

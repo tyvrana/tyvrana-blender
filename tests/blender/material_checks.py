@@ -88,9 +88,7 @@ class MaterialTests(unittest.TestCase):
         )
 
     def test_empty_and_native_defaults(self) -> None:
-        self.assertEqual(
-            self.backend.material_inspect().model_dump(), {"materials": []}
-        )
+        self.assertEqual(self.backend.material_inspect().materials, [])
         created = self.create()
         tree, shader, output = self.graph()
         self.assertEqual(len(tree.nodes), 2)

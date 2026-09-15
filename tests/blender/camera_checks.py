@@ -63,7 +63,7 @@ class CameraTests(unittest.TestCase):
 
     def test_empty_camera_inspection(self) -> None:
         self.assertEqual(
-            self.backend.camera_inspect().model_dump(),
+            self.backend.camera_inspect().model_dump(exclude={"page"}),
             {"active_camera": None, "cameras": []},
         )
 
