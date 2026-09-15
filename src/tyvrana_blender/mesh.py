@@ -380,8 +380,8 @@ def apply_transform(
 def edit(
     obj: Any, arguments: MeshSelectionArguments | MeshNormalsArguments
 ) -> MeshEditResult:
-    if isinstance(arguments, MeshSeamArguments):
-        return mark_seam(obj, arguments)
+    if isinstance(arguments, MeshSeamArguments | MeshShadingArguments):
+        return edit_flags(obj, arguments)
     editable(obj)
     original = obj.data
     with snapshot(obj) as bm:
@@ -504,12 +504,6 @@ def edit(
                 # Native point merge averages vertex custom data; loop UV data
                 # remains per face corner rather than welding UV seams implicitly.
                 bmesh.ops.pointmerge(bm, verts=selected, merge_co=center(selected))
-            elif isinstance(arguments, MeshShadingArguments):
-                changed_faces = sum(
-                    face.smooth != arguments.smooth for face in selected
-                )
-                for face in selected:
-                    face.smooth = arguments.smooth
             else:
                 assert isinstance(arguments, MeshNormalsArguments)
                 bmesh.ops.recalc_face_normals(bm, faces=selected)
@@ -624,8 +618,10 @@ def edit(
         return response
 
 
-def mark_seam(obj: Any, arguments: MeshSeamArguments) -> MeshEditResult:
-    """Edit only edge flags; modifiers and geometry/custom data remain untouched."""
+def edit_flags(
+    obj: Any, arguments: MeshSeamArguments | MeshShadingArguments
+) -> MeshEditResult:
+    """Edit only native flags; modifiers and ordered custom data remain intact."""
     if (
         bpy.context.mode != "OBJECT"
         or not obj.is_editable
@@ -637,31 +633,40 @@ def mark_seam(obj: Any, arguments: MeshSeamArguments) -> MeshEditResult:
         or bpy.app.is_job_running("RENDER")
     ):
         raise OperationError(
-            "invalid_context", "Seam editing requires editable local Object Mode data"
+            "invalid_context", "Flag editing requires editable local Object Mode data"
         )
     with snapshot(obj) as bm:
         try:
-            indices = [edge.index for edge in select(bm, arguments.selector)]
+            indices = [element.index for element in select(bm, arguments.selector)]
         except SelectionError as exc:
             raise OperationError("invalid_arguments", str(exc)) from exc
         if not indices:
-            raise OperationError("mesh_selection_empty", "Selector matched no edges")
+            raise OperationError("mesh_selection_empty", "Selector matched no elements")
         result = summary(obj, bm)
     original = obj.data
     copied = original.copy() if mesh_users(original) > 1 else None
     target = copied if copied is not None else original
-    saved = [(i, target.edges[i].use_seam) for i in indices]
+    seam = isinstance(arguments, MeshSeamArguments)
+    elements = target.edges if seam else target.polygons
+    attribute = "use_seam" if seam else "use_smooth"
+    value = (
+        arguments.seam if isinstance(arguments, MeshSeamArguments) else arguments.smooth
+    )
+    saved = [(i, getattr(elements[i], attribute)) for i in indices]
     try:
         for i in indices:
-            target.edges[i].use_seam = arguments.seam
+            setattr(elements[i], attribute, value)
         target.update()
         response = MeshEditResult(
             object_name=obj.name,
-            selected=ElementSelection(domain="edge", count=len(indices)),
+            selected=ElementSelection(
+                domain=arguments.selector.domain, count=len(indices)
+            ),
             created=ElementCounts(vertices=0, edges=0, faces=0),
             removed=ElementCounts(vertices=0, edges=0, faces=0),
             mesh=result.model_copy(update={"mesh_users": 1, "mesh_name": target.name}),
-            changed_edges=sum(value != arguments.seam for _, value in saved),
+            changed_edges=sum(old != value for _, old in saved) if seam else None,
+            changed_faces=sum(old != value for _, old in saved) if not seam else None,
         )
         if copied is not None:
             obj.data = copied
@@ -671,7 +676,7 @@ def mark_seam(obj: Any, arguments: MeshSeamArguments) -> MeshEditResult:
             obj.data = original
             bpy.data.meshes.remove(copied)
         else:
-            for i, value in saved:
-                target.edges[i].use_seam = value
+            for i, old in saved:
+                setattr(elements[i], attribute, old)
             target.update()
         raise

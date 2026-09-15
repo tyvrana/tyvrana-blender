@@ -751,7 +751,7 @@ class MeshTests(unittest.TestCase):
         self.call("query", selector=TOP)
         for operation, arguments in MUTATIONS:
             with self.subTest(operation=operation):
-                if operation == "mark_seam":
+                if operation in {"mark_seam", "set_shading"}:
                     self.call(operation, **arguments)
                 else:
                     self.error(operation, "mesh_has_shape_keys", **arguments)

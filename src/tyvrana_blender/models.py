@@ -135,9 +135,14 @@ class SurfaceRenderOptions(Model):
     exclude_objects: list[ObjectName] = Field(default_factory=list, max_length=64)
     uv_map: ObjectName = "UVMap"
     normal_image: ObjectName | None = None
+    preserve_materials: bool = False
 
     @model_validator(mode="after")
     def distinct(self) -> Self:
+        if self.preserve_materials and self.normal_image is not None:
+            raise ValueError(
+                "Existing material isolation cannot override a normal image"
+            )
         if len(set(self.objects + self.exclude_objects)) != len(
             self.objects + self.exclude_objects
         ):

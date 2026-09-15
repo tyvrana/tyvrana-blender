@@ -206,6 +206,42 @@ class BakeTests(unittest.TestCase):
         self.spool.release(result.artifacts)
         path.unlink()
 
+    def test_shading_flags_preserve_mirror_geometry_and_uvs(self) -> None:
+        before = self.state()
+        original = self.low.data
+        self.call(
+            "mesh.set_shading",
+            object_name="Low",
+            selector={"domain": "face", "mode": "all"},
+            smooth=True,
+        )
+        self.assertIs(self.low.data, original)
+        self.assertTrue(all(p.use_smooth for p in original.polygons))
+        self.assertEqual(self.state(), before)
+        self.call(
+            "mesh.set_shading",
+            object_name="Low",
+            selector={"domain": "face", "mode": "all"},
+            smooth=False,
+        )
+        self.assertFalse(any(p.use_smooth for p in original.polygons))
+
+    def test_existing_material_isolation_restores_state(self) -> None:
+        before = self.state()
+        original = self.low.data
+        with self.assertRaisesRegex(RuntimeError, "isolated"):
+            with checker.display(
+                render_models.SurfaceRenderOptions(
+                    objects=["Low"],
+                    exclude_objects=["High"],
+                    preserve_materials=True,
+                )
+            ):
+                self.assertIs(self.low.data, original)
+                self.assertTrue(self.high.hide_render)
+                raise RuntimeError("isolated")
+        self.assertEqual(self.state(), before)
+
     def test_remove_unused_image_protects_references(self) -> None:
         image = bpy.data.images.new("Discarded", width=64, height=64)
         image.use_fake_user = True

@@ -1161,6 +1161,16 @@ objects and modifier stacks. It uses EEVEE unless explicit Cycles options are
 provided, and cannot combine with checker/wireframe diagnostics. Mesh resources,
 material assignments, visibility and view-layer overrides are restored. Use the
 same camera for isolated source, target without normals, and target with normals.
+Set `surface.preserve_materials: true` to isolate the named objects using their
+existing materials instead of an override. This cannot combine with `normal_image`.
+
+`blender.mesh.set_shading` edits only selected face smooth/flat flags, preserving
+ordered geometry, UVs and modifiers. Like seam edits, it isolates shared meshes
+and supports unapplied modifier stacks. Plan the target shading basis before
+baking: hard normal boundaries crossing continuous UVs can produce filtering
+seams. Any shading-basis change requires rebaking the tangent map against that
+same evaluated target; a normal map baked for flat faces cannot simply be reused
+after changing them to smooth shading.
 
 ## Mesh inspection and modeling
 

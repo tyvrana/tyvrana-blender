@@ -57,55 +57,62 @@ def display(
     overrides = [
         (layer, layer.material_override) for layer in bpy.context.scene.view_layers
     ]
+    preserving = (
+        isinstance(options, SurfaceRenderOptions) and options.preserve_materials
+    )
     try:
-        material = bpy.data.materials.new("Surface diagnostic")
-        tree = material.node_tree
-        bsdf = tree.nodes.get("Principled BSDF")
-        bsdf.inputs["Roughness"].default_value = 0.7
-        bsdf.inputs["Base Color"].default_value = (0.32, 0.34, 0.36, 1)
-        if isinstance(options, UVCheckerRenderOptions):
-            image = bpy.data.images.new("UV diagnostic grid", width=1024, height=1024)
-            image.generated_type = "COLOR_GRID"
-            coordinates = tree.nodes.new("ShaderNodeUVMap")
-            coordinates.uv_map = options.uv_map
-            scale = tree.nodes.new("ShaderNodeVectorMath")
-            scale.operation = "SCALE"
-            scale.inputs["Scale"].default_value = options.grid_scale
-            texture = tree.nodes.new("ShaderNodeTexImage")
-            texture.image = image
-            tree.links.new(coordinates.outputs["UV"], scale.inputs[0])
-            tree.links.new(scale.outputs["Vector"], texture.inputs["Vector"])
-            tree.links.new(texture.outputs["Color"], bsdf.inputs["Base Color"])
-            tree.links.new(texture.outputs["Color"], bsdf.inputs["Emission Color"])
-            bsdf.inputs["Emission Strength"].default_value = 0.12
-        elif options.normal_image is not None:
-            normal_image = bpy.data.images.get(options.normal_image)
-            if normal_image is None or not normal_image.colorspace_settings.is_data:
-                raise OperationError(
-                    "image_invalid",
-                    "Diagnostic normal image must exist with non-color interpretation",
+        if not preserving:
+            material = bpy.data.materials.new("Surface diagnostic")
+            tree = material.node_tree
+            bsdf = tree.nodes.get("Principled BSDF")
+            bsdf.inputs["Roughness"].default_value = 0.7
+            bsdf.inputs["Base Color"].default_value = (0.32, 0.34, 0.36, 1)
+            if isinstance(options, UVCheckerRenderOptions):
+                image = bpy.data.images.new(
+                    "UV diagnostic grid", width=1024, height=1024
                 )
-            coordinates = tree.nodes.new("ShaderNodeUVMap")
-            coordinates.uv_map = options.uv_map
-            texture = tree.nodes.new("ShaderNodeTexImage")
-            texture.image = normal_image
-            texture.interpolation = "Linear"
-            normal = tree.nodes.new("ShaderNodeNormalMap")
-            normal.space = "TANGENT"
-            normal.uv_map = options.uv_map
-            tree.links.new(coordinates.outputs["UV"], texture.inputs["Vector"])
-            tree.links.new(texture.outputs["Color"], normal.inputs["Color"])
-            tree.links.new(normal.outputs["Normal"], bsdf.inputs["Normal"])
+                image.generated_type = "COLOR_GRID"
+                coordinates = tree.nodes.new("ShaderNodeUVMap")
+                coordinates.uv_map = options.uv_map
+                scale = tree.nodes.new("ShaderNodeVectorMath")
+                scale.operation = "SCALE"
+                scale.inputs["Scale"].default_value = options.grid_scale
+                texture = tree.nodes.new("ShaderNodeTexImage")
+                texture.image = image
+                tree.links.new(coordinates.outputs["UV"], scale.inputs[0])
+                tree.links.new(scale.outputs["Vector"], texture.inputs["Vector"])
+                tree.links.new(texture.outputs["Color"], bsdf.inputs["Base Color"])
+                tree.links.new(texture.outputs["Color"], bsdf.inputs["Emission Color"])
+                bsdf.inputs["Emission Strength"].default_value = 0.12
+            elif options.normal_image is not None:
+                normal_image = bpy.data.images.get(options.normal_image)
+                if normal_image is None or not normal_image.colorspace_settings.is_data:
+                    raise OperationError(
+                        "image_invalid",
+                        "Diagnostic normal image needs non-color interpretation",
+                    )
+                coordinates = tree.nodes.new("ShaderNodeUVMap")
+                coordinates.uv_map = options.uv_map
+                texture = tree.nodes.new("ShaderNodeTexImage")
+                texture.image = normal_image
+                texture.interpolation = "Linear"
+                normal = tree.nodes.new("ShaderNodeNormalMap")
+                normal.space = "TANGENT"
+                normal.uv_map = options.uv_map
+                tree.links.new(coordinates.outputs["UV"], texture.inputs["Vector"])
+                tree.links.new(texture.outputs["Color"], normal.inputs["Color"])
+                tree.links.new(normal.outputs["Normal"], bsdf.inputs["Normal"])
         for obj, original, _, _ in saved:
-            copied = original.copy()
-            copies.append(copied)
-            copied.materials.clear()
-            copied.materials.append(material)
-            for face in copied.polygons:
-                face.material_index = 0
-            obj.data = copied
-            for slot in obj.material_slots:
-                slot.link = "DATA"
+            if not preserving:
+                copied = original.copy()
+                copies.append(copied)
+                copied.materials.clear()
+                copied.materials.append(material)
+                for face in copied.polygons:
+                    face.material_index = 0
+                obj.data = copied
+                for slot in obj.material_slots:
+                    slot.link = "DATA"
             obj.hide_render = False
         for obj, _ in hidden:
             obj.hide_render = True
