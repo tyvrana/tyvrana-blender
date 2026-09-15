@@ -141,6 +141,7 @@ def test_render_defaults_and_dimension_bounds() -> None:
         "cycles": None,
         "wireframe": None,
         "uv_checker": None,
+        "surface": None,
         "show_result": False,
     }
     assert RenderArguments(width=64, height=1024).height == 1024

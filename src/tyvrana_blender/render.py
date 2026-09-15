@@ -87,7 +87,9 @@ def render_image(
         (image, "color_mode", "RGBA"),
         (image, "color_depth", "8"),
     ]
-    if arguments.uv_checker is not None:
+    if arguments.uv_checker is not None or (
+        arguments.surface is not None and arguments.cycles is None
+    ):
         overrides.append((render, "engine", "BLENDER_EEVEE"))
     if arguments.cycles is not None:
         options = arguments.cycles
@@ -118,7 +120,7 @@ def render_image(
                     setattr(obj, key, value)
                 with (
                     display(arguments.wireframe),
-                    checker_display(arguments.uv_checker),
+                    checker_display(arguments.uv_checker or arguments.surface),
                 ):
                     outcome = bpy.ops.render.render("EXEC_DEFAULT", write_still=False)
                 result = bpy.data.images.get("Render Result")

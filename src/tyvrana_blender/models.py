@@ -130,6 +130,21 @@ class UVCheckerRenderOptions(Model):
         return self
 
 
+class SurfaceRenderOptions(Model):
+    objects: list[ObjectName] = Field(min_length=1, max_length=16)
+    exclude_objects: list[ObjectName] = Field(default_factory=list, max_length=64)
+    uv_map: ObjectName = "UVMap"
+    normal_image: ObjectName | None = None
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        if len(set(self.objects + self.exclude_objects)) != len(
+            self.objects + self.exclude_objects
+        ):
+            raise ValueError("Surface and excluded objects must be distinct")
+        return self
+
+
 class RenderArguments(Model):
     width: int = Field(default=512, ge=64, le=1024)
     height: int = Field(default=512, ge=64, le=1024)
@@ -137,9 +152,10 @@ class RenderArguments(Model):
     cycles: CyclesRenderOptions | None = None
     wireframe: WireframeRenderOptions | None = None
     uv_checker: UVCheckerRenderOptions | None = None
+    surface: SurfaceRenderOptions | None = None
     show_result: bool = False
 
-    @field_validator("cycles", "wireframe", "uv_checker", mode="before")
+    @field_validator("cycles", "wireframe", "uv_checker", "surface", mode="before")
     @classmethod
     def non_null_cycles(cls, value: object) -> object:
         if value is None:
@@ -150,6 +166,10 @@ class RenderArguments(Model):
 
     @model_validator(mode="after")
     def diagnostic_options(self) -> Self:
+        if self.surface is not None and (
+            self.wireframe is not None or self.uv_checker is not None
+        ):
+            raise ValueError("Use one surface diagnostic per render")
         if self.uv_checker is not None and (
             self.wireframe is not None or self.cycles is not None
         ):

@@ -30,6 +30,14 @@ from . import (
     uv,
 )
 from .artifacts import ArtifactSpool
+from .bake_models import (
+    BakeImageArguments,
+    BakeImageResult,
+    BakeInspectArguments,
+    BakeInspectResult,
+    ImageSaveArguments,
+    ImageSaveResult,
+)
 from .camera_models import (
     CameraConfigureArguments,
     CameraCreateArguments,
@@ -774,6 +782,30 @@ class BlenderBackend:
     ) -> MeshEditResult:
         main_thread()
         return mesh.edit(uv.mesh_object(arguments.object_name), arguments)
+
+    def bake_inspect(self, arguments: BakeInspectArguments) -> BakeInspectResult:
+        main_thread()
+        from . import bake
+
+        return bake.inspect(arguments)
+
+    def bake_image(self, arguments: BakeImageArguments) -> BakeImageResult:
+        main_thread()
+        from . import bake
+
+        return bake.bake_image(arguments)
+
+    def image_save(
+        self, arguments: ImageSaveArguments
+    ) -> tuple[ImageSaveResult, ArtifactDescriptor]:
+        main_thread()
+        from . import image_output
+
+        if self.spool is None:
+            raise OperationError(
+                "invalid_context", "Image artifact storage is unavailable"
+            )
+        return image_output.save(arguments, self.spool)
 
     def uv_inspect(self, arguments: UVInspectArguments) -> UVInspectResult:
         main_thread()

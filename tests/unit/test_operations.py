@@ -12,6 +12,14 @@ from tyvrana_protocol import (
 from tyvrana_blender import remesh_models as voxel
 from tyvrana_blender import retopo_models as retopology
 from tyvrana_blender import sculpt_models as regional
+from tyvrana_blender.bake_models import (
+    BakeImageArguments,
+    BakeImageResult,
+    BakeInspectArguments,
+    BakeInspectResult,
+    ImageSaveArguments,
+    ImageSaveResult,
+)
 from tyvrana_blender.camera_models import (
     CameraConfigureArguments,
     CameraCreateArguments,
@@ -718,6 +726,17 @@ class Backend:
             resolution=arguments.resolution,
             padding_pixels=arguments.padding_pixels,
         )
+
+    def bake_inspect(self, arguments: BakeInspectArguments) -> BakeInspectResult:
+        raise NotImplementedError
+
+    def bake_image(self, arguments: BakeImageArguments) -> BakeImageResult:
+        raise NotImplementedError
+
+    def image_save(
+        self, arguments: ImageSaveArguments
+    ) -> tuple[ImageSaveResult, ArtifactDescriptor]:
+        raise NotImplementedError
 
     def uv_layout(
         self, arguments: UVLayoutArguments

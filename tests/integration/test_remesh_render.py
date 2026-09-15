@@ -20,7 +20,7 @@ async def test_remesh_then_sculpt_through_mcp(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=True):
             registered = await discover(client)
-            assert registered is not None and len(registered.operations) == 87
+            assert registered is not None and len(registered.operations) == 90
             identifier = registered.instance_id
 
             async def call(op: str, **args: JsonValue) -> Any:

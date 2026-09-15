@@ -14,6 +14,14 @@ from tyvrana_protocol import (
     ProtocolError,
 )
 
+from .bake_models import (
+    BakeImageArguments,
+    BakeImageResult,
+    BakeInspectArguments,
+    BakeInspectResult,
+    ImageSaveArguments,
+    ImageSaveResult,
+)
 from .camera_models import (
     CameraConfigureArguments,
     CameraCreateArguments,
@@ -184,6 +192,8 @@ from .uv_models import (
 
 logger = logging.getLogger(__name__)
 OPERATIONS = (
+    "blender.bake.image",
+    "blender.bake.inspect",
     "blender.camera.configure",
     "blender.camera.create",
     "blender.camera.inspect",
@@ -197,6 +207,7 @@ OPERATIONS = (
     "blender.image.create_from_artifact",
     "blender.image.create_generated",
     "blender.image.inspect",
+    "blender.image.save",
     "blender.light.configure",
     "blender.light.create",
     "blender.light.inspect",
@@ -376,6 +387,11 @@ class SceneBackend(Protocol):
     def mesh_edit(
         self, arguments: MeshSelectionArguments | MeshNormalsArguments
     ) -> MeshEditResult: ...
+    def bake_inspect(self, arguments: BakeInspectArguments) -> BakeInspectResult: ...
+    def bake_image(self, arguments: BakeImageArguments) -> BakeImageResult: ...
+    def image_save(
+        self, arguments: ImageSaveArguments
+    ) -> tuple[ImageSaveResult, ArtifactDescriptor]: ...
     def uv_inspect(self, arguments: UVInspectArguments) -> UVInspectResult: ...
     def uv_create(self, arguments: UVCreateArguments) -> UVInspectResult: ...
     def uv_set_active(self, arguments: UVSetActiveArguments) -> UVInspectResult: ...
@@ -485,6 +501,9 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | NodeDeleteArguments
             | ConnectArguments
             | DisconnectArguments
+            | BakeInspectArguments
+            | BakeImageArguments
+            | ImageSaveArguments
             | UVInspectArguments
             | UVCreateArguments
             | UVSetActiveArguments
@@ -501,6 +520,12 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.bake.inspect":
+                arguments = BakeInspectArguments.model_validate(request.arguments)
+            case "blender.bake.image":
+                arguments = BakeImageArguments.model_validate(request.arguments)
+            case "blender.image.save":
+                arguments = ImageSaveArguments.model_validate(request.arguments)
             case "blender.extension.inspect":
                 arguments = ExtensionInspectArguments.model_validate(request.arguments)
             case "blender.extension.reload":
@@ -800,6 +825,13 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             result = backend.mesh_edit(arguments)
         elif isinstance(arguments, MeshInspectArguments):
             result = backend.mesh_inspect(arguments)
+        elif isinstance(arguments, BakeInspectArguments):
+            result = backend.bake_inspect(arguments)
+        elif isinstance(arguments, BakeImageArguments):
+            result = backend.bake_image(arguments)
+        elif isinstance(arguments, ImageSaveArguments):
+            result, image_artifact = backend.image_save(arguments)
+            artifacts = (image_artifact,)
         elif isinstance(arguments, UVCreateArguments):
             result = backend.uv_create(arguments)
         elif isinstance(arguments, UVSetActiveArguments):

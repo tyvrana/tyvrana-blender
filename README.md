@@ -1083,6 +1083,64 @@ Behavior is checked against Blender's [UV operator source](https://github.com/bl
 [Mirror source](https://github.com/blender/blender/blob/v5.2.1/source/blender/blenkernel/intern/mesh_mirror.cc)
 and [BMesh selection API](https://docs.blender.org/api/5.2/bmesh.types.html).
 
+## Geometric normal baking
+
+`blender.bake.inspect` analyzes explicit `targets`, each with `target`, `sources`
+and `uv_map`. Optional paired `cage_extrusion` and `max_ray_distance` test a
+particular projection; omitted values produce conservative initial suggestions.
+Extrusion is in target-local units; ray distance and nearest distances are world
+units. Positive finite ray distance is mandatory for execution. `use_cage`
+defaults to true. Samples include vertices and native triangle centroids with a
+bounded `sample_limit` (64–32768, default 8192). Results include nearest-distance,
+normal-angle and directional-hit statistics, miss/backface counts, bounded face
+references, and authored/evaluated UV and seam fingerprints. Recommendations
+require inspection: thin parts, cavities and overhangs may need narrower settings.
+
+`blender.bake.image` produces one new named normal image from the same targets,
+with explicit ray settings on every target. It supports a single nonoverlapping
+unit-tile atlas, `resolution` 64–4096 (default 4096), `margin` 0–64 (default 12),
+`margin_type` extend/adjacent_faces, `device` cpu/gpu and `samples` 1–64. The current
+supported type is `normal`, in `tangent` space with native OpenGL +X/+Y/+Z axes.
+Existing images are never overwritten. No speculative bake-type aliases exist.
+
+Baking freezes the current evaluated source and target meshes into a temporary
+scene. Production modifiers remain unapplied, including Mirror UV transforms and
+Shrinkwrap. Viewport/render modifier visibility and subdivision levels must
+agree. A disposable target material owns the bake image node; native
+selected-to-active runs separately for each explicit source set, accumulating
+into one float Non-Color image. Original selection, scenes, visibility, materials,
+UVs, geometry and render settings remain untouched. Temporary scenes, objects,
+meshes and materials are removed even on failure. The successful image is a
+retained resource; save it before closing the project.
+
+Results report per-target native bake duration, total operation duration,
+configured device/backend, and image QA. `bake.inspect` accepts optional `image`
+to repeat QA: target UV pixel coverage, alpha gaps, invalid normal-vector length,
+negative tangent Z, tilt statistics and per-target counts. Pixel-center raster
+boundaries can differ from native rasterization. Padding can cover tiny ray
+misses; sampled ray tests, map inspection and rendered comparisons are necessary
+alongside these metrics. Normal maps do not repair silhouettes or certify future
+subdivision, rigging or export tangent conventions. GPU requests require an
+enabled configured device; there is no silent CPU fallback or preference change.
+
+`blender.image.save` persists a loaded RGBA Non-Color data image to an explicit
+absolute or Blender-relative `.png` `filepath`. `bit_depth` is 8 or 16 (default
+16), `overwrite` defaults false, and `pack` defaults true. Native encoding is
+staged and decoded for numeric quantization verification before atomic file
+publication. The map is referenced relative to the saved project where possible
+and may be packed for portability. The response includes file metadata and the
+actual PNG through the normal bounded artifact transfer, never bytes in JSON or
+a shared temporary path. Parent directories must exist; symlink destinations are
+rejected. Current output is intentionally PNG data, not a general image encoder.
+
+`blender.render.image` accepts `surface` with `objects`, optional
+`exclude_objects`, and optional `normal_image` plus its matching `uv_map`. This
+produces a temporary uniform clay or tangent-normal diagnostic on the real
+objects and modifier stacks. It uses EEVEE unless explicit Cycles options are
+provided, and cannot combine with checker/wireframe diagnostics. Mesh resources,
+material assignments, visibility and view-layer overrides are restored. Use the
+same camera for isolated source, target without normals, and target with normals.
+
 ## Mesh inspection and modeling
 
 `blender.mesh.inspect` includes triangle/quad/ngon counts and a `geometry_sha256`
