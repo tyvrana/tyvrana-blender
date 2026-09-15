@@ -1,9 +1,16 @@
 """Blender operation arguments and small result summaries."""
 
 from ipaddress import ip_address
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    field_validator,
+    model_validator,
+)
 
 type Vector = Annotated[list[FiniteFloat], Field(min_length=3, max_length=3)]
 type ObjectName = Annotated[str, Field(min_length=1, pattern=r"\S")]
@@ -109,15 +116,30 @@ class WireframeRenderOptions(Model):
         return value
 
 
+class UVCheckerRenderOptions(Model):
+    objects: list[ObjectName] = Field(min_length=1, max_length=16)
+    uv_map: ObjectName
+    exclude_objects: list[ObjectName] = Field(default_factory=list, max_length=64)
+    grid_scale: FiniteFloat = Field(default=1, ge=0.125, le=16)
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        names = self.objects + self.exclude_objects
+        if len(set(names)) != len(names):
+            raise ValueError("Checker and excluded objects must be distinct")
+        return self
+
+
 class RenderArguments(Model):
     width: int = Field(default=512, ge=64, le=1024)
     height: int = Field(default=512, ge=64, le=1024)
     format: Literal["png"] = "png"
     cycles: CyclesRenderOptions | None = None
     wireframe: WireframeRenderOptions | None = None
+    uv_checker: UVCheckerRenderOptions | None = None
     show_result: bool = False
 
-    @field_validator("cycles", "wireframe", mode="before")
+    @field_validator("cycles", "wireframe", "uv_checker", mode="before")
     @classmethod
     def non_null_cycles(cls, value: object) -> object:
         if value is None:
@@ -125,6 +147,16 @@ class RenderArguments(Model):
                 "Omit render options to use scene settings; null is invalid"
             )
         return value
+
+    @model_validator(mode="after")
+    def diagnostic_options(self) -> Self:
+        if self.uv_checker is not None and (
+            self.wireframe is not None or self.cycles is not None
+        ):
+            raise ValueError(
+                "UV checker uses Eevee and cannot combine with wireframe or Cycles"
+            )
+        return self
 
 
 class RenderResult(Model):

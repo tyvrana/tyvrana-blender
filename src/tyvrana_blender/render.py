@@ -11,6 +11,7 @@ from tyvrana_protocol import ArtifactDescriptor
 from .artifacts import ArtifactSpool, ArtifactTooLarge, SpoolFull
 from .models import RenderArguments, RenderResult
 from .operations import OperationError
+from .uv_checker import display as checker_display
 from .wireframe import display
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,8 @@ def render_image(
         (image, "color_mode", "RGBA"),
         (image, "color_depth", "8"),
     ]
+    if arguments.uv_checker is not None:
+        overrides.append((render, "engine", "BLENDER_EEVEE"))
     if arguments.cycles is not None:
         options = arguments.cycles
         cycles = getattr(scene, "cycles", None)
@@ -113,7 +116,10 @@ def render_image(
             try:
                 for obj, key, value in overrides:
                     setattr(obj, key, value)
-                with display(arguments.wireframe):
+                with (
+                    display(arguments.wireframe),
+                    checker_display(arguments.uv_checker),
+                ):
                     outcome = bpy.ops.render.render("EXEC_DEFAULT", write_still=False)
                 result = bpy.data.images.get("Render Result")
                 if "FINISHED" not in outcome or result is None:

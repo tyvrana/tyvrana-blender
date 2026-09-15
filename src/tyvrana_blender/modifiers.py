@@ -48,6 +48,13 @@ COMMON = {
 }
 FIELDS = {
     "mirror": {
+        "uv_flip_u": "use_mirror_u",
+        "uv_flip_v": "use_mirror_v",
+        "uv_flip_per_tile": "use_mirror_udim",
+        "uv_flip_offset_u": "mirror_offset_u",
+        "uv_flip_offset_v": "mirror_offset_v",
+        "uv_offset_u": "offset_u",
+        "uv_offset_v": "offset_v",
         "axes": "use_axis",
         "bisect_axes": "use_bisect_axis",
         "bisect_flip_axes": "use_bisect_flip_axis",

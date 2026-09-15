@@ -240,6 +240,10 @@ class ManifoldSummary(Model):
 
 
 class MeshSummary(Model):
+    geometry_sha256: str
+    triangle_count: int
+    quad_count: int
+    ngon_count: int
     object_name: str
     mesh_name: str
     mesh_users: int

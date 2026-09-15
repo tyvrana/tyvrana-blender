@@ -234,7 +234,8 @@ Names are exact and are advertised in sorted order:
 | `blender.uv.create_map` | Object name; optional map name and activation flags | Updated UV inspection |
 | `blender.uv.set_active` | Object/map names; editing and render activation flags | Updated UV inspection |
 | `blender.uv.unwrap` | Object name, method; optional map and applicable settings | Updated UV inspection |
-| `blender.uv.pack_islands` | Object name; optional map, margin, rotation and scaling | Updated UV inspection |
+| `blender.uv.pack_islands` | Objects/maps, relative density, unit-tile bounds, resolution and pixel padding | Joint packing result |
+| `blender.uv.inspect_layout` | Objects, optional map, authored/evaluated geometry and resolution | Island quality, distortion, overlap, density, margins; optional PNG artifact |
 | `blender.mesh.inspect` | Object name | Bounded authored mesh summary |
 | `blender.mesh.inspect_evaluated` | Object name | Bounded current viewport result after the modifier stack |
 | `blender.modifier.inspect` | Object name | Ordered object-owned modifier stack |
@@ -990,11 +991,12 @@ aspect correction. Set false to work without that correction.
 | Method | Additional optional settings and behavior |
 | --- | --- |
 | `angle_based`, `conformal` | Existing seams/pins; `margin` default 0.001, `fill_holes` default false |
+| `minimum_stretch` | Seam-aware SLIM solver; `margin` and `fill_holes` as above; `iterations` 1–100 (default 20), `no_flip` default true |
 | `smart_project` | `angle_limit` default about 1.15191734 radians, `island_margin` default 0, `area_weight` default 0, `scale_to_bounds` default false |
 | `cube_project` | Object-local axes around the mesh bounds center; optional `cube_size`, otherwise fitted to mesh bounds; `scale_to_bounds` default false |
 | `cylinder_project`, `sphere_project` | Fixed object-local Z pole/X orientation around the mesh bounds center; native pinched poles and existing seam-separated islands; `scale_to_bounds` default false |
 
-All six methods run native production UV operators. Sphere/cylinder direction is
+All seven methods run native production UV operators. Sphere/cylinder direction is
 fixed to `ALIGN_TO_OBJECT`; viewport-directed projection is not exposed. Projection
 can create overlapping islands or coordinates outside the unit square; inspect
 and pack when appropriate. Angle/conformal methods need suitable topology and
@@ -1008,34 +1010,85 @@ Blender's native unit-size behavior. Numeric strings/booleans, non-finite number
 float32 overflow/underflow, nulls, and settings irrelevant to the chosen method
 are rejected. Margin settings use native `FRACTION`, a fraction of final UV space.
 
-`blender.uv.pack_islands` requires `object_name`; optional `uv_map` chooses the map
-without changing its active roles. `margin` defaults to 0.001 (`[0, 1]`), `rotate`
-and `scale` default to true. It packs all islands to the origin unit tile using
-fractional margins, native concave island shapes, and unrestricted rotation when
-enabled. Overlapping islands remain separate. Pin flags remain set but packing
-moves all islands, including pinned ones. Turning scaling off can prevent a large
-layout from fitting the tile; inspect returned bounds.
+`blender.uv.pack_islands` jointly packs 1–16 `objects`, each specifying
+`object_name`, optional `uv_map`, and optional linear `density_weight` (default 1,
+positive and at most 10). Optional `island_weights` entries use one existing
+`face_index` per island and a multiplicative `weight`. The map must already be
+unwrapped. Whole islands remain rigid; native triangulated world/UV areas normalize
+relative density. `rotate` (default true) permits a 90-degree orientation change to
+fit the requested aspect. Blender's native rectangle packer arranges the island
+bounding boxes, preserving spacing without filling concave holes. This favors
+predictable margins and rigid islands over maximum utilization.
 
-Mutations require a visible, selectable, editable local mesh in the current view
-layer, with no active render job. Linked data and library overrides are rejected.
-If more than one object
-uses the mesh, the target receives its own mesh copy before mutation; siblings
-retain their data and UVs. Failures restore UV coordinates/map roles and discard a
-failed shared-data copy. Empty meshes can have maps but cannot unwrap or pack.
+`bounds_min`/`bounds_max` default to `[0,0]`/`[1,1]` and describe a nonempty rectangle
+inside the unit tile. `resolution` defaults to 4096 (64–16384), and
+`padding_pixels` defaults to 16 (1–256). Padding surrounds each rectangle, giving
+at least twice that separation between islands and at least that border padding.
+This is an explicit single-atlas contract, not implicit UDIM assignment. Pin flags
+remain intact, but joint packing relocates all islands. Degenerate UV triangles,
+empty meshes, duplicate targets/weight references, and impossible padding fail
+before publishing UV edits. A batch rolls back all affected UV maps on failure.
+Shared meshes are isolated, editing/render map roles are preserved, and topology,
+seams, material assignments and object transforms are unchanged.
 
-Operations support Object Mode or single-object Edit Mode on the target. Other
-modes and another object's or multi-object Edit Mode return `invalid_context`.
-They restore mode, active object, object selection, mesh/UV selection, hidden
-flags, and selection history. Operators run synchronously with no UV-editor or
-viewport context. Errors include `object_not_mesh`, `uv_map_not_found`, and
-`uv_unwrap_failed`, alongside normal argument/context errors.
+`blender.uv.inspect_layout` accepts 1–16 distinct object names in `objects`, an
+optional common `uv_map` (otherwise each editing-active map), `evaluated` (default
+false), and texture `resolution` (default 4096). It reports connected UV islands,
+bounded face references, UV/world area, pixels per world unit, density percentiles,
+triangle Jacobian singular-value ratios (1 is isotropic), maximum corner-angle
+errors, signed flipped/degenerate faces, positive-area triangle overlap pairs
+including cross-object overlaps, tile-centroid identifiers, unit-tile bounds,
+and minimum island/border spacing in pixels. Overlaps are not automatically
+classified as intentional. Touching boundaries are not positive-area overlap;
+the numerical area tolerance is 1e-12 UV units squared. Density percentiles are
+unweighted face samples; distortion percentiles are unweighted native triangles.
 
-This is a whole-mesh UV layer. Use `blender.mesh.mark_seam` with an explicit typed
-selector to author seams before angle-based or conformal unwrapping. Behavior is
-checked against Blender's [UV operator source](https://github.com/blender/blender/blob/v5.2.1/source/blender/editors/uvedit/uvedit_unwrap_ops.cc)
+`layout_image: true` additionally returns a colored PNG through the ordinary
+bounded artifact transport; `image_size` is 128–1024, default 1024. The image shows
+native triangulation, island colors and a UV grid; it requires no UV editor or
+filesystem-path transport. Inspection is limited to 12,000 faces, 24,000 triangles,
+512 islands and two million overlap/margin candidate comparisons. Evaluated
+references are inspection-only and cannot address authored edits. Results describe
+the current viewport evaluation, including Mirror and Shrinkwrap; they do not
+certify future subdivision, deformation, bake rays or export tangent conventions.
+
+`blender.render.image` supports `uv_checker` with `objects`, an explicit `uv_map`,
+optional `exclude_objects` and `grid_scale` (0.125–16, default 1). It renders a
+native color grid on the actual object's modifier stack with Eevee. Temporary
+material/mesh copies and grid images are removed; original material slots, object
+visibility, layer material overrides and engine settings are restored even on
+failure. Use `show_result` for native render display. Checker diagnostics cannot
+combine with Cycles or wireframe options in the same render.
+
+UV mutations require editable local mesh objects in the current view layer, with
+no active render. Per-object hide/select locks are temporarily lifted and restored;
+excluded collections and globally disabled objects are not exposed. Linked data
+and library overrides are rejected. Shared-mesh siblings retain their original UVs.
+Unwrap/map operations preserve single-object Edit Mode and selection; joint packing
+and layout inspection require Object Mode and leave selection/active objects intact.
+Errors include `object_not_mesh`, `uv_map_not_found`, `uv_unwrap_failed`,
+`uv_analysis_failed` and normal argument/context limits.
+
+Use `blender.mesh.mark_seam` with a typed edge selector before seam-aware unwrap.
+This operation changes edge flags directly and safely supports unapplied modifiers,
+shape keys and custom data without topology replacement; shared meshes are isolated.
+Mirror configuration/inspection exposes `uv_flip_u`, `uv_flip_v`,
+`uv_flip_per_tile`, `uv_flip_offset_u/v` and `uv_offset_u/v`. With per-tile flipping
+disabled, native U flipping computes `1 - U + uv_flip_offset_u + uv_offset_u` for
+the generated side. Offsets are bounded to [-10,10] for edits. Flags affect every
+UV map on the object. Keep geometric Mirror settings separate from this UV policy,
+and verify evaluated UVs before baking.
+
+Behavior is checked against Blender's [UV operator source](https://github.com/blender/blender/blob/v5.2.1/source/blender/editors/uvedit/uvedit_unwrap_ops.cc),
+[Mirror source](https://github.com/blender/blender/blob/v5.2.1/source/blender/blenkernel/intern/mesh_mirror.cc)
 and [BMesh selection API](https://docs.blender.org/api/5.2/bmesh.types.html).
 
 ## Mesh inspection and modeling
+
+`blender.mesh.inspect` includes triangle/quad/ngon counts and a `geometry_sha256`
+fingerprint of ordered float32 local coordinates, edges and face vertex loops.
+UVs, seams and materials are excluded, allowing topology-preservation checks
+without complete mesh downloads. The fingerprint is snapshot-specific.
 
 All mesh operations address an exact `object_name` in the current scene. They
 inspect or edit the authored Mesh, before modifiers and evaluated deformation.

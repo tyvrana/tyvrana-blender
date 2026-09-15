@@ -120,7 +120,10 @@ from tyvrana_blender.uv_models import (
     UVCreateArguments,
     UVInspectArguments,
     UVInspectResult,
+    UVLayoutArguments,
+    UVLayoutResult,
     UVPackArguments,
+    UVPackResult,
     UVSetActiveArguments,
     UVUnwrapArguments,
 )
@@ -138,7 +141,7 @@ class Backend:
             error=None,
             adapter_id="test",
             connection_state="connected",
-            operation_count=86,
+            operation_count=87,
             worker_pid=1,
             runtime_timer_count=1,
             lifecycle_timer_count=0,
@@ -612,6 +615,10 @@ class Backend:
     def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary:
         self.calls.append("mesh_inspect")
         return MeshSummary(
+            geometry_sha256="0" * 64,
+            triangle_count=0,
+            quad_count=6,
+            ngon_count=0,
             object_name=arguments.object_name,
             mesh_name="Mesh",
             mesh_users=1,
@@ -701,10 +708,21 @@ class Backend:
         self.calls[-1] = "uv_unwrap"
         return result
 
-    def uv_pack(self, arguments: UVPackArguments) -> UVInspectResult:
-        result = self.uv_inspect(arguments)
-        self.calls[-1] = "uv_pack"
-        return result
+    def uv_pack(self, arguments: UVPackArguments) -> UVPackResult:
+        self.calls.append("uv_pack")
+        return UVPackResult(
+            objects=[],
+            island_count=0,
+            bounds_min=arguments.bounds_min,
+            bounds_max=arguments.bounds_max,
+            resolution=arguments.resolution,
+            padding_pixels=arguments.padding_pixels,
+        )
+
+    def uv_layout(
+        self, arguments: UVLayoutArguments
+    ) -> tuple[UVLayoutResult, ArtifactDescriptor | None]:
+        raise NotImplementedError
 
     def image_inspect(self) -> ImageInspectResult:
         self.calls.append("image_inspect")

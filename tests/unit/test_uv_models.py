@@ -111,7 +111,11 @@ def test_canonical_unwrap_methods(method: str) -> None:
         ),
         (
             UVPackArguments,
-            {"object_name": "Mesh", "margin": 0, "rotate": False, "scale": False},
+            {
+                "objects": [{"object_name": "Mesh"}],
+                "padding_pixels": 16,
+                "rotate": False,
+            },
         ),
     ],
 )
@@ -168,10 +172,12 @@ def test_invalid_methods_settings_and_names(arguments: dict[str, object]) -> Non
         UVUnwrapArguments.model_validate(arguments)
 
 
-@pytest.mark.parametrize("value", [None, "0.1", True, -0.1, 1.1, math.nan, math.inf])
+@pytest.mark.parametrize("value", [None, "0.1", True, -1, 257, math.nan, math.inf])
 def test_pack_margin_validation(value: object) -> None:
     with pytest.raises(ValidationError):
-        UVPackArguments.model_validate({"object_name": "Mesh", "margin": value})
+        UVPackArguments.model_validate(
+            {"objects": [{"object_name": "Mesh"}], "padding_pixels": value}
+        )
 
 
 def test_active_flags_must_select_at_least_one_role() -> None:
@@ -198,7 +204,7 @@ def test_active_flags_must_select_at_least_one_role() -> None:
             {"object_name": "Mesh", "method": "smart_project"},
             "uv_unwrap",
         ),
-        ("blender.uv.pack_islands", {"object_name": "Mesh"}, "uv_pack"),
+        ("blender.uv.pack_islands", {"objects": [{"object_name": "Mesh"}]}, "uv_pack"),
     ],
 )
 def test_registered_dispatch(

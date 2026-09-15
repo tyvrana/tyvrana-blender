@@ -12,7 +12,6 @@ from .operations import OperationError
 from .uv_models import (
     UVCreateArguments,
     UVInspectResult,
-    UVPackArguments,
     UVSetActiveArguments,
     UVUnwrapArguments,
     map_summary,
@@ -172,8 +171,6 @@ def mutation(obj: Any) -> Iterator[Any]:
         or obj.data.library is not None
         or obj.override_library is not None
         or obj.data.override_library is not None
-        or not obj.visible_get()
-        or obj.hide_select
     ):
         raise OperationError(
             "invalid_context", "UV editing requires a visible editable local mesh"
@@ -188,6 +185,8 @@ def mutation(obj: Any) -> Iterator[Any]:
         )
     active = context.view_layer.objects.active
     selected = [(item, item.select_get()) for item in context.view_layer.objects]
+    hidden = obj.hide_get()
+    hide_select = obj.hide_select
     prior_selection = _Selection(bmesh.from_edit_mesh(obj.data)) if editing else None
     if editing:
         bpy.ops.object.mode_set(mode="OBJECT")
@@ -195,6 +194,15 @@ def mutation(obj: Any) -> Iterator[Any]:
     state = _UVState(original)
     copied = None
     try:
+        obj.hide_set(False)
+        obj.hide_select = False
+        if not obj.visible_get():
+            obj.hide_set(hidden)
+            obj.hide_select = hide_select
+            raise OperationError(
+                "invalid_context",
+                "UV editing cannot expose excluded collections or disabled objects",
+            )
         for item, _ in selected:
             item.select_set(False)
         obj.select_set(True)
@@ -224,6 +232,8 @@ def mutation(obj: Any) -> Iterator[Any]:
             assert prior_selection is not None
             prior_selection.restore(bmesh.from_edit_mesh(obj.data))
             bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+        obj.hide_set(hidden)
+        obj.hide_select = hide_select
 
 
 def layer_for(mesh: Any, name: str | None) -> Any:
@@ -320,14 +330,19 @@ def unwrap(obj: Any, arguments: UVUnwrapArguments) -> UVInspectResult:
             "area_weight",
             "cube_size",
             "scale_to_bounds",
+            "iterations",
+            "no_flip",
         ):
             value = getattr(arguments, key)
             if value is not None:
                 settings[key] = value
-        if arguments.method in {"angle_based", "conformal"}:
+        if arguments.method in {"angle_based", "conformal", "minimum_stretch"}:
             settings.update(method=arguments.method.upper(), margin_method="FRACTION")
             settings.setdefault("margin", 0.001)
             settings.setdefault("fill_holes", False)
+            if arguments.method == "minimum_stretch":
+                settings.setdefault("iterations", 20)
+                settings.setdefault("no_flip", True)
             operator = bpy.ops.uv.unwrap
         else:
             operator = getattr(bpy.ops.uv, arguments.method)
@@ -343,31 +358,5 @@ def unwrap(obj: Any, arguments: UVUnwrapArguments) -> UVInspectResult:
                     seam=True,
                 )
         _operator(obj, lambda: operator("EXEC_DEFAULT", **settings))
-        mesh.uv_layers.active = mesh.uv_layers[previous]
-    return inspect(obj)
-
-
-def pack(obj: Any, arguments: UVPackArguments) -> UVInspectResult:
-    layer_for(obj.data, arguments.uv_map)
-    if not len(obj.data.polygons):
-        raise OperationError("invalid_context", "UV packing requires mesh faces")
-    with mutation(obj) as mesh:
-        previous = mesh.uv_layers.active.name
-        mesh.uv_layers.active = layer_for(mesh, arguments.uv_map)
-        _operator(
-            obj,
-            lambda: bpy.ops.uv.pack_islands(
-                "EXEC_DEFAULT",
-                udim_source="ACTIVE_UDIM",
-                margin_method="FRACTION",
-                margin=arguments.margin,
-                rotate=arguments.rotate,
-                scale=arguments.scale,
-                rotate_method="ANY",
-                merge_overlap=False,
-                pin=False,
-                shape_method="CONCAVE",
-            ),
-        )
         mesh.uv_layers.active = mesh.uv_layers[previous]
     return inspect(obj)

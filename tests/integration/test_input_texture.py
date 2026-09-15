@@ -19,7 +19,7 @@ from websockets.asyncio.client import connect
 from websockets.asyncio.server import ServerConnection, serve
 
 from tyvrana_blender.image_models import ImageSummary
-from tyvrana_blender.uv_models import UVInspectResult
+from tyvrana_blender.uv_models import UVPackResult
 
 from ..png import checker_png, mean_pixel_difference, texture_statistics
 from .conftest import running_blender
@@ -197,9 +197,14 @@ async def test_external_texture_binary_inputs_uvs_and_packed_render(
                     method="smart_project",
                     island_margin=0.01,
                 )
-                uv_state = UVInspectResult.model_validate(
-                    await call("uv.pack_islands", object_name="Surface", margin=0.01)
+                packed = UVPackResult.model_validate(
+                    await call(
+                        "uv.pack_islands",
+                        objects=[{"object_name": "Surface"}],
+                        padding_pixels=16,
+                    )
                 )
+                uv_state = packed.objects[0]
                 assert uv_state.active_map == uv_state.active_render_map == "SurfaceMap"
                 assert all(item.out_of_unit_square_count == 0 for item in uv_state.maps)
                 textured = await render(client, identifier)

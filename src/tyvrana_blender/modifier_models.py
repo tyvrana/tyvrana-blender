@@ -53,6 +53,13 @@ MAX_MODIFIERS = 128
 
 
 class MirrorPatch(Arguments):
+    uv_flip_u: bool | None = None
+    uv_flip_v: bool | None = None
+    uv_flip_per_tile: bool | None = None
+    uv_flip_offset_u: Annotated[Number, Field(ge=-10, le=10)] | None = None
+    uv_flip_offset_v: Annotated[Number, Field(ge=-10, le=10)] | None = None
+    uv_offset_u: Annotated[Number, Field(ge=-10, le=10)] | None = None
+    uv_offset_v: Annotated[Number, Field(ge=-10, le=10)] | None = None
     axes: Axes | None = None
     bisect_axes: Axes | None = None
     bisect_flip_axes: Axes | None = None
@@ -261,6 +268,13 @@ CONFIGURE: TypeAdapter[ModifierConfigureArguments] = TypeAdapter(
 # Snapshots describe native state, including values outside input safety limits and
 # incomplete modifiers made in Blender. Inspection must not "repair" that state.
 class MirrorSettings(Model):
+    uv_flip_u: bool
+    uv_flip_v: bool
+    uv_flip_per_tile: bool
+    uv_flip_offset_u: Number
+    uv_flip_offset_v: Number
+    uv_offset_u: Number
+    uv_offset_v: Number
     axes: Axes
     bisect_axes: Axes
     bisect_flip_axes: Axes

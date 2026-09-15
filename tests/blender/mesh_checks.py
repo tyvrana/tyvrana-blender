@@ -751,7 +751,10 @@ class MeshTests(unittest.TestCase):
         self.call("query", selector=TOP)
         for operation, arguments in MUTATIONS:
             with self.subTest(operation=operation):
-                self.error(operation, "mesh_has_shape_keys", **arguments)
+                if operation == "mark_seam":
+                    self.call(operation, **arguments)
+                else:
+                    self.error(operation, "mesh_has_shape_keys", **arguments)
                 self.assertEqual(self.obj.data, original)
                 self.assertEqual(original.shape_keys, keys)
                 self.assertEqual(
@@ -778,7 +781,14 @@ class MeshTests(unittest.TestCase):
         self,
     ) -> None:
         self.obj.data.normals_split_custom_set([(0, 0, 1)] * len(self.obj.data.loops))
-        self.error("mark_seam", "invalid_context", selector=ALL_EDGES, seam=True)
+        original = self.obj.data
+        before = [tuple(normal.vector) for normal in original.corner_normals]
+        self.call("mark_seam", selector=ALL_EDGES, seam=True)
+        self.assertEqual(self.obj.data, original)
+        self.assertTrue(original.has_custom_normals)
+        self.assertEqual(
+            [tuple(normal.vector) for normal in original.corner_normals], before
+        )
         self.reset()
         modifier = self.obj.modifiers.new("Subdivision", "SUBSURF")
         self.error("extrude_faces", "invalid_context", selector=TOP, offset=[0, 0, 1])

@@ -174,7 +174,10 @@ from .uv_models import (
     UVCreateArguments,
     UVInspectArguments,
     UVInspectResult,
+    UVLayoutArguments,
+    UVLayoutResult,
     UVPackArguments,
+    UVPackResult,
     UVSetActiveArguments,
     UVUnwrapArguments,
 )
@@ -788,9 +791,19 @@ class BlenderBackend:
         main_thread()
         return uv.unwrap(uv.mesh_object(arguments.object_name), arguments)
 
-    def uv_pack(self, arguments: UVPackArguments) -> UVInspectResult:
+    def uv_pack(self, arguments: UVPackArguments) -> UVPackResult:
         main_thread()
-        return uv.pack(uv.mesh_object(arguments.object_name), arguments)
+        from . import uv_layout
+
+        return uv_layout.pack(arguments)
+
+    def uv_layout(
+        self, arguments: UVLayoutArguments
+    ) -> tuple[UVLayoutResult, ArtifactDescriptor | None]:
+        main_thread()
+        from . import uv_layout
+
+        return uv_layout.inspect(arguments, self.spool)
 
     def image_inspect(self) -> ImageInspectResult:
         main_thread()

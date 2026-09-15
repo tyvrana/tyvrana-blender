@@ -287,6 +287,13 @@ def test_inspection_preserves_unsupported_and_out_of_policy_native_state() -> No
         }
     )
     mirror = MirrorSettings(
+        uv_flip_u=False,
+        uv_flip_v=False,
+        uv_flip_per_tile=False,
+        uv_flip_offset_u=0,
+        uv_flip_offset_v=0,
+        uv_offset_u=0,
+        uv_offset_v=0,
         axes=[],
         bisect_axes=[],
         bisect_flip_axes=[],

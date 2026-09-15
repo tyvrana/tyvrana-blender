@@ -174,7 +174,10 @@ from .uv_models import (
     UVCreateArguments,
     UVInspectArguments,
     UVInspectResult,
+    UVLayoutArguments,
+    UVLayoutResult,
     UVPackArguments,
+    UVPackResult,
     UVSetActiveArguments,
     UVUnwrapArguments,
 )
@@ -264,6 +267,7 @@ OPERATIONS = (
     "blender.shader.node.delete",
     "blender.uv.create_map",
     "blender.uv.inspect",
+    "blender.uv.inspect_layout",
     "blender.uv.pack_islands",
     "blender.uv.set_active",
     "blender.uv.unwrap",
@@ -376,7 +380,10 @@ class SceneBackend(Protocol):
     def uv_create(self, arguments: UVCreateArguments) -> UVInspectResult: ...
     def uv_set_active(self, arguments: UVSetActiveArguments) -> UVInspectResult: ...
     def uv_unwrap(self, arguments: UVUnwrapArguments) -> UVInspectResult: ...
-    def uv_pack(self, arguments: UVPackArguments) -> UVInspectResult: ...
+    def uv_pack(self, arguments: UVPackArguments) -> UVPackResult: ...
+    def uv_layout(
+        self, arguments: UVLayoutArguments
+    ) -> tuple[UVLayoutResult, ArtifactDescriptor | None]: ...
     def image_inspect(self) -> ImageInspectResult: ...
     def image_create(self, arguments: ImageCreateArguments) -> ImageSummary: ...
     def image_from_artifact(
@@ -482,6 +489,7 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | UVCreateArguments
             | UVSetActiveArguments
             | UVUnwrapArguments
+            | UVLayoutArguments
             | UVPackArguments
             | ModifierCreateArguments
             | ModifierConfigureArguments
@@ -607,6 +615,8 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 arguments = MeshShadingArguments.model_validate(request.arguments)
             case "blender.mesh.recalculate_normals":
                 arguments = MeshNormalsArguments.model_validate(request.arguments)
+            case "blender.uv.inspect_layout":
+                arguments = UVLayoutArguments.model_validate(request.arguments)
             case "blender.uv.inspect":
                 arguments = UVInspectArguments.model_validate(request.arguments)
             case "blender.uv.create_map":
@@ -796,6 +806,9 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             result = backend.uv_set_active(arguments)
         elif isinstance(arguments, UVUnwrapArguments):
             result = backend.uv_unwrap(arguments)
+        elif isinstance(arguments, UVLayoutArguments):
+            result, layout_artifact = backend.uv_layout(arguments)
+            artifacts = (layout_artifact,) if layout_artifact is not None else ()
         elif isinstance(arguments, UVPackArguments):
             result = backend.uv_pack(arguments)
         elif isinstance(arguments, UVInspectArguments):

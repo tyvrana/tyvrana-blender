@@ -46,20 +46,32 @@ class UVTests(unittest.TestCase):
             self.assertFalse(worker.spool.root.exists())
 
     def response(self, operation: str, **arguments: Any) -> Any:
+        payload = {"object_name": self.obj.name, **arguments}
+        if operation == "pack_islands":
+            target = {
+                key: payload.pop(key)
+                for key in ("object_name", "uv_map")
+                if key in payload
+            }
+            payload = {"objects": [target], **payload}
         return operations.execute(
             self.backend,
             OperationRequest(
                 type="operation.request",
                 request_id="uv-test",
                 operation="blender.uv." + operation,
-                arguments={"object_name": self.obj.name, **arguments},
+                arguments=payload,
             ),
         )
 
     def call(self, operation: str, **arguments: Any) -> Any:
         result = self.response(operation, **arguments)
         self.assertIsInstance(result, OperationSuccess, str(result))
-        return result.result
+        return (
+            result.result["objects"][0]
+            if operation == "pack_islands"
+            else result.result
+        )
 
     def error(self, operation: str, code: str, **arguments: Any) -> None:
         result = self.response(operation, **arguments)
@@ -140,12 +152,13 @@ class UVTests(unittest.TestCase):
                 self.assertEqual(after, before)
                 bpy.data.objects.remove(sibling, do_unlink=True)
 
-    def test_all_six_methods_distribute_collapsed_uvs(self) -> None:
+    def test_all_seven_methods_distribute_collapsed_uvs(self) -> None:
         for edge in self.obj.data.edges:
             edge.use_seam = True
         for method in [
             "angle_based",
             "conformal",
+            "minimum_stretch",
             "smart_project",
             "cube_project",
             "cylinder_project",
@@ -179,12 +192,12 @@ class UVTests(unittest.TestCase):
 
     def test_pack_unit_square_and_explicit_settings(self) -> None:
         self.call("unwrap", method="cube_project", cube_size=0.5)
-        result = self.call("pack_islands", margin=0.02, rotate=False, scale=True)
+        result = self.call("pack_islands", padding_pixels=82, rotate=False)
         summary = result["maps"][0]
         self.assertEqual(summary["out_of_unit_square_count"], 0)
         self.assertGreaterEqual(min(summary["uv_min"]), 0.019)
         self.assertLessEqual(max(summary["uv_max"]), 0.981)
-        self.call("pack_islands", margin=0, rotate=True, scale=False)
+        self.call("pack_islands", padding_pixels=1, rotate=True)
 
     def test_empty_faces_reject_operators(self) -> None:
         mesh = bpy.data.meshes.new("Empty")
@@ -239,9 +252,9 @@ class UVTests(unittest.TestCase):
         before = uv._Selection(bm)
         result = self.call("inspect")
         self.assertEqual(result["maps"][0]["loop_count"], 24)
+        self.error("pack_islands", "invalid_context")
         for operation, arguments in [
             ("unwrap", {"method": "smart_project"}),
-            ("pack_islands", {}),
         ]:
             result = self.call(operation, **arguments)
             self.assertEqual(result["maps"][0]["loop_count"], 24)
