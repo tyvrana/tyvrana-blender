@@ -143,6 +143,13 @@ class BakeTests(unittest.TestCase):
         self.assertLess(out.result["maximum_roundtrip_error"], 2 / 65535)
         self.assertTrue(image.packed_file)
         self.assertEqual(len(out.artifacts), 1)
+        preview_path = self.spool.root / (out.artifacts[0].artifact_id + ".png")
+        preview = bpy.data.images.load(str(preview_path), check_existing=False)
+        preview.colorspace_settings.name = "Non-Color"
+        preview_values = bake.image_pixels(preview)
+        self.assertLess(preview_values[32, 16, 1], 0.48)
+        self.assertLess(preview_values[32, 48, 1], 0.48)
+        bpy.data.images.remove(preview)
         self.spool.release(out.artifacts)
         self.assertEqual(self.state(), before)
 
@@ -203,6 +210,11 @@ class BakeTests(unittest.TestCase):
         self.assertLess(result.result["byte_size"], artifacts.MAX_DATA_IMAGE_BYTES)
         self.assertLess(result.artifacts[0].byte_size, 1024 * 1024)
         self.assertEqual(result.result["preview_width"], 512)
+        preview_path = self.spool.root / (result.artifacts[0].artifact_id + ".png")
+        preview = bpy.data.images.load(str(preview_path), check_existing=False)
+        preview.colorspace_settings.name = "Non-Color"
+        self.assertGreater(float(np.std(bake.image_pixels(preview)[:, :, :3])), 0.01)
+        bpy.data.images.remove(preview)
         self.spool.release(result.artifacts)
         path.unlink()
 

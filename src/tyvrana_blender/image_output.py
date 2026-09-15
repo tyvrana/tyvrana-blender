@@ -93,7 +93,9 @@ def save(
         with spool.reserve() as (artifact_id, artifact_path):
             # File persistence retains full precision. The agent receives an explicit
             # bounded data preview, avoiding an oversized MCP inline-image response.
-            preview = image.copy()
+            # Copy the decoded file, not a GENERATED image: Blender regenerates
+            # the latter's fill instead of copying its baked pixel buffer.
+            preview = probe.copy()
             scale = min(1.0, 512 / max(image.size))
             width = max(1, round(image.size[0] * scale))
             height = max(1, round(image.size[1] * scale))
