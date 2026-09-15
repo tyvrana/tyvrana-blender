@@ -56,6 +56,7 @@ def save(
     )
     scene = bpy.data.scenes.new("Data image encoding temporary")
     probe: Any = None
+    preview: Any = None
     path: Path | None = None
     try:
         fmt = scene.render.image_settings
@@ -71,6 +72,8 @@ def save(
         path = Path(temporary)
         image.save_render(str(path), scene=scene)
         encoded = path.read_bytes()
+        if len(encoded) > MAX_DATA_IMAGE_BYTES:
+            raise ArtifactTooLarge("Encoded data PNG exceeds 128 MiB")
         if encoded[:8] != b"\x89PNG\r\n\x1a\n" or encoded[24] != arguments.bit_depth:
             raise OperationError(
                 "image_export_failed",
@@ -88,10 +91,18 @@ def save(
                 "Data-image roundtrip exceeds quantization tolerance",
             )
         with spool.reserve() as (artifact_id, artifact_path):
-            artifact_path.write_bytes(encoded)
-            descriptor = spool.describe(
-                artifact_id, max_bytes=MAX_DATA_IMAGE_BYTES
-            ).model_copy(update={"name": destination.name})
+            # File persistence retains full precision. The agent receives an explicit
+            # bounded data preview, avoiding an oversized MCP inline-image response.
+            preview = image.copy()
+            scale = min(1.0, 512 / max(image.size))
+            width = max(1, round(image.size[0] * scale))
+            height = max(1, round(image.size[1] * scale))
+            preview.scale(width, height)
+            fmt.color_depth = "8"
+            preview.save_render(str(artifact_path), scene=scene)
+            descriptor = spool.describe(artifact_id).model_copy(
+                update={"name": destination.stem + ".preview.png"}
+            )
             # Stage both encoding and binary transport before replacing the destination.
             if not arguments.overwrite:
                 os.link(path, destination)
@@ -117,12 +128,16 @@ def save(
                 packed=bool(image.packed_file),
                 sha256=hashlib.sha256(encoded).hexdigest(),
                 maximum_roundtrip_error=error,
+                preview_width=width,
+                preview_height=height,
             ), descriptor
     except ArtifactTooLarge as exc:
         raise OperationError("artifact_too_large", str(exc)) from exc
     except SpoolFull as exc:
         raise OperationError("artifact_capacity", str(exc)) from exc
     finally:
+        if preview is not None:
+            bpy.data.images.remove(preview)
         if probe is not None:
             bpy.data.images.remove(probe)
         bpy.data.scenes.remove(scene)

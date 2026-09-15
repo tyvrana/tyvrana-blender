@@ -42,19 +42,17 @@ class ArtifactSpool:
             path.unlink(missing_ok=True)
             raise
 
-    def describe(
-        self, artifact_id: str, *, max_bytes: int = MAX_RENDER_BYTES
-    ) -> ArtifactDescriptor:
+    def describe(self, artifact_id: str) -> ArtifactDescriptor:
         path = self.root / (artifact_id + ".png")
         size = path.stat().st_size
-        if size > max_bytes:
-            raise ArtifactTooLarge(f"PNG is {size} bytes; limit is {max_bytes}")
+        if size > MAX_RENDER_BYTES:
+            raise ArtifactTooLarge(f"PNG is {size} bytes; limit is {MAX_RENDER_BYTES}")
         digest = hashlib.sha256()
         received = 0
         with path.open("rb") as stream:
             while chunk := stream.read(MAX_ARTIFACT_CHUNK_SIZE):
                 received += len(chunk)
-                if received > max_bytes:
+                if received > MAX_RENDER_BYTES:
                     raise ArtifactTooLarge("PNG grew beyond the byte limit")
                 digest.update(chunk)
         if received != size or size == 0:

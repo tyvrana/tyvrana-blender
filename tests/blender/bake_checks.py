@@ -201,6 +201,8 @@ class BakeTests(unittest.TestCase):
         result = self.call("image.save", name=image.name, filepath=str(path))
         self.assertGreater(result.result["byte_size"], artifacts.MAX_RENDER_BYTES)
         self.assertLess(result.result["byte_size"], artifacts.MAX_DATA_IMAGE_BYTES)
+        self.assertLess(result.artifacts[0].byte_size, 1024 * 1024)
+        self.assertEqual(result.result["preview_width"], 512)
         self.spool.release(result.artifacts)
         path.unlink()
 

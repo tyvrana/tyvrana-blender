@@ -178,13 +178,15 @@ async def test_baked_png_reaches_mcp_and_survives_reopen(
             images = [c for c in response.content if c.type == "image"]
             assert len(images) == 1
             data = base64.b64decode(images[0].data)
-            assert data == destination.read_bytes() and data[24] == 16
+            assert data[24] == 8 and destination.read_bytes()[24] == 16
             assert response.structured_content is not None
             result = response.structured_content["result"]
             assert (
                 isinstance(result, dict)
-                and result["sha256"] == hashlib.sha256(data).hexdigest()
+                and result["sha256"]
+                == hashlib.sha256(destination.read_bytes()).hexdigest()
             )
+            assert result["preview_width"] == 64 and result["preview_bit_depth"] == 8
             blend = tmp_path / "packed.blend"
             await call("file.save", filepath=str(blend))
             destination.unlink()

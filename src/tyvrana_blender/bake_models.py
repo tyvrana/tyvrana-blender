@@ -150,6 +150,9 @@ class ImageSaveResult(Model):
     packed: bool
     sha256: str
     maximum_roundtrip_error: float
+    preview_width: int
+    preview_height: int
+    preview_bit_depth: Literal[8] = 8
 
 
 class BakeStatusArguments(Model):

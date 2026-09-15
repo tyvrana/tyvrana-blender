@@ -1142,11 +1142,15 @@ absolute or Blender-relative `.png` `filepath`. `bit_depth` is 8 or 16 (default
 16), `overwrite` defaults false, and `pack` defaults true. Native encoding is
 staged and decoded for numeric quantization verification before atomic file
 publication. The map is referenced relative to the saved project where possible
-and may be packed for portability. The response includes file metadata and the
-actual PNG through the normal bounded artifact transfer, never bytes in JSON or
-a shared temporary path. Parent directories must exist; symlink destinations are
-rejected. Data PNG exports have a separate 128 MiB artifact limit, matching the
-core's default per-artifact limit; diagnostic renders retain their 16 MiB limit.
+and may be packed for portability. The response identifies the full-resolution
+file's size, hash, bit depth and quantization error. It also returns a distinct
+8-bit Non-Color PNG preview with a maximum dimension of 512, through bounded
+artifact transport, with explicit preview dimensions. The preview never replaces
+the production file and is not sufficient for texel-level QA; use `bake.inspect`
+and close rendered surfaces for that. Filesystem destinations are native resource
+persistence, not shared-path artifact transport. Bytes are never embedded in JSON.
+Parent directories must exist; symlink destinations are rejected. Production PNG
+files have a 128 MiB limit; diagnostic render artifacts retain their 16 MiB limit.
 Oversize exports fail before publishing a file, with `artifact_too_large`.
 Current output is intentionally PNG data, not a general image encoder.
 
