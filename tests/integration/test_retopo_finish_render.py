@@ -26,7 +26,7 @@ async def test_finishing_real_render(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=True):
             registered = await discover(client)
-            assert registered is not None and len(registered.operations) == 92
+            assert registered is not None and len(registered.operations) == 96
             identifier = registered.instance_id
 
             async def call(op: str, **args: JsonValue) -> Any:

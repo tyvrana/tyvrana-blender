@@ -18,6 +18,7 @@ from tyvrana_protocol import (
 )
 
 from . import (
+    instances,
     mesh,
     modifiers,
     multires,
@@ -67,6 +68,13 @@ from .image_models import (
     ImageSummary,
 )
 from .incoming import input_path
+from .instance_models import (
+    MeshCreateArguments,
+    SurfaceInstancesConfigureArguments,
+    SurfaceInstancesCreateArguments,
+    SurfaceInstancesInspectArguments,
+    SurfaceInstancesSummary,
+)
 from .light_models import (
     COMMON_FIELDS,
     LIGHT_TYPES,
@@ -770,6 +778,32 @@ class BlenderBackend:
         main_thread()
         return modifiers.inspect_evaluated(
             modifiers.object_mesh(arguments.object_name), arguments.uv_map
+        )
+
+    def mesh_create(self, arguments: MeshCreateArguments) -> MeshSummary:
+        main_thread()
+        return instances.create_mesh(arguments)
+
+    def surface_instances_create(
+        self, arguments: SurfaceInstancesCreateArguments
+    ) -> SurfaceInstancesSummary:
+        main_thread()
+        return instances.configure(arguments.name, arguments.distribution, create=True)
+
+    def surface_instances_configure(
+        self, arguments: SurfaceInstancesConfigureArguments
+    ) -> SurfaceInstancesSummary:
+        main_thread()
+        return instances.configure(
+            arguments.object_name, arguments.distribution, create=False
+        )
+
+    def surface_instances_inspect(
+        self, arguments: SurfaceInstancesInspectArguments
+    ) -> SurfaceInstancesSummary:
+        main_thread()
+        return instances.inspect(
+            instances.object_mesh(arguments.object_name), arguments.sample_limit
         )
 
     def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary:

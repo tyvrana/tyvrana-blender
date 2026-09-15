@@ -41,6 +41,13 @@ from tyvrana_blender.image_models import (
     ImageInspectResult,
     ImageSummary,
 )
+from tyvrana_blender.instance_models import (
+    MeshCreateArguments,
+    SurfaceInstancesConfigureArguments,
+    SurfaceInstancesCreateArguments,
+    SurfaceInstancesInspectArguments,
+    SurfaceInstancesSummary,
+)
 from tyvrana_blender.light_models import (
     LightConfigureArguments,
     LightCreateArguments,
@@ -140,6 +147,24 @@ from tyvrana_blender.uv_models import (
 
 
 class Backend:
+    def mesh_create(self, arguments: MeshCreateArguments) -> MeshSummary:
+        raise NotImplementedError
+
+    def surface_instances_create(
+        self, arguments: SurfaceInstancesCreateArguments
+    ) -> SurfaceInstancesSummary:
+        raise NotImplementedError
+
+    def surface_instances_configure(
+        self, arguments: SurfaceInstancesConfigureArguments
+    ) -> SurfaceInstancesSummary:
+        raise NotImplementedError
+
+    def surface_instances_inspect(
+        self, arguments: SurfaceInstancesInspectArguments
+    ) -> SurfaceInstancesSummary:
+        raise NotImplementedError
+
     def extension_inspect(self) -> ExtensionState:
         return ExtensionState(
             build="a" * 64,

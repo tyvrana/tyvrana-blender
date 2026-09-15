@@ -2976,6 +2976,108 @@ Blender invokes the timer automatically. Background scripts that block Blender's
 normal event processing must explicitly call the extension's `blender.pump()`
 function on the main thread; the integration host demonstrates this pattern.
 
+## Guided surface instances
+
+`blender.mesh.create` constructs an original bounded polygonal mesh in one call.
+It accepts `name`, object-local `vertices`, triangle/quad `faces`, optional
+`corner_uvs` (one pair per face corner, in face order), `uv_map` (default UVMap),
+existing named `materials`, per-face `material_indices`, `smooth` and `hidden`.
+Hidden prototypes remain available to Geometry Nodes. A duplicate object name,
+invalid indices, duplicate/degenerate faces or missing material fails without
+publishing the object. Limits are 8,192 vertices/faces and 32,768 UV corners.
+It preserves existing objects and selection; it is not an arbitrary script API.
+
+`blender.surface_instances.create`, `.configure` and `.inspect` manage a small,
+owned Geometry Nodes distribution. These are useful for surface-attached asset
+repetition with directed overlap, including foliage, scales and layered vanes.
+The prototype uses local +Y along its direction and +Z away from the surface;
+its evaluated mesh is shared by every instance. Object transforms on the
+prototype do not position instances. Instance scale applies to prototype coordinates.
+
+Create takes `name` and a `distribution`:
+
+```json
+{
+  "name": "Surface detail",
+  "distribution": {
+    "surface_object": "Surface",
+    "prototype_object": "Detail asset",
+    "uv_map": "UVMap",
+    "guides": [
+      [[-0.5, -0.5, 0], [-0.5, 0.5, 0]],
+      [[0.5, -0.5, 0], [0.5, 0.5, 0]]
+    ],
+    "rows": 8,
+    "columns": 12,
+    "scale": [1, 1, 1],
+    "scale_variation": [0.08, 0.1, 0.05],
+    "surface_offset": 0.001,
+    "max_projection_distance": 0.01,
+    "seed": 7,
+    "layer": 0
+  }
+}
+```
+
+Guides are 2–16 polylines of 2–32 surface-object-local points, ordered across a
+region and directed along it. Points are interpolated by guide arc length, then
+projected onto the evaluated surface. `rows` runs along guides; `columns` runs
+across them. Counts are explicit, bounded to 4,096 instances per system, with
+at most four million equivalent prototype vertices. Source world scale must be
+unit and orientation-preserving. Surface/prototype viewport and render settings
+must agree. Nested distributions and prototype node modifiers are unsupported.
+
+`scale_end` optionally grades scale from the start to end of the guides.
+`scale_variation` supplies independent bounded relative variation per axis
+(0–0.5). `spacing_variation` (default 0.1, 0–0.3) jitters grid cells;
+`stagger` (default 0.5) offsets alternate rows. `direction_variation` is a bounded
+angle in radians about the surface normal (default 0.05, maximum 0.5).
+`direction_distance` (default 0.001) controls the nearby surface sample used to
+bind the direction; choose it small relative to the local surface region.
+`surface_offset` is measured along the surface normal, not in camera space.
+The random seed is deterministic. Named systems and integer `layer` attributes
+organize regions without application-specific anatomy in the API.
+
+Roots and tangent companions are stored as UV coordinates on the point mesh;
+evaluated face indices are never persistent bindings. The graph samples the
+current evaluated surface positions/normals at those UVs and constructs a local
+frame, then uses Instance on Points. Parenting carries the object's transform.
+There are no Python frame callbacks. Unique surface UVs must remain stable;
+subdivision UV smoothing should remain None for stable authored UV attachments.
+Invalid initial/ambiguous bindings fail. Later invalid UVs suppress the affected
+native instances and inspection reports invalid/missing output. Reinspect and
+correct the underlying UV change instead of accepting missing geometry.
+
+Configure takes `object_name` and a complete replacement `distribution`. It stages
+bindings and graph, validates the actual instance output, then replaces owned
+resources. It deliberately reprojects the supplied guides against the current
+surface; it is not a persistent-ID edit of individual roots. Regular surface
+motion requires no configure call. Shared system data, additional modifiers or
+edited owned graphs are protected from replacement. Source/UV/prototype state
+is read-only during distribution creation/update.
+
+Inspect takes `object_name` and optional `sample_limit` (default 4, 0–16). Results
+include actual evaluated instance count, shared/equivalent geometry counts,
+binding fingerprint, creation-region area/spacing, current invalid bindings,
+root-position error and bounded nearest-surface clearance samples. These samples
+can identify buried geometry; they are not pairwise collision tests or proof of
+visible coverage. Samples provide UV roots, directions, scales, layers and current
+world frames. Creation/update also report elapsed handler time. Area/spacing
+refer to the original binding region, not its current deformation.
+
+Instances follow changing root positions and surface frames, but their vanes
+remain rigid. Articulation, bending, inter-instance sliding, export realization
+and target-engine skinning require their own validated workflows. Save/reopen
+retains native graph evaluation and attachment data. This layer intentionally
+exposes a reusable distribution, not arbitrary node-tree execution.
+
+The implementation uses Blender's official
+[Instance on Points](https://docs.blender.org/manual/en/5.2/modeling/geometry_nodes/instances/instance_on_points.html)
+and [Sample UV Surface](https://docs.blender.org/manual/en/5.2/modeling/geometry_nodes/mesh/sample/sample_uv_surface.html)
+semantics. Native tests cover surface motion, orientation, source preservation,
+invalid/overlapping UVs, staged failure, ownership protection and save/reopen;
+MCP tests exercise construction, update, inspection and real image transport.
+
 ## Development and packaging
 
 Requires uv, Python 3.12+, Git, and Blender 5.2.1. Create this repository's own

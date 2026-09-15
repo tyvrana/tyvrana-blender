@@ -49,6 +49,13 @@ from .image_models import (
     ImageInspectResult,
     ImageSummary,
 )
+from .instance_models import (
+    MeshCreateArguments,
+    SurfaceInstancesConfigureArguments,
+    SurfaceInstancesCreateArguments,
+    SurfaceInstancesInspectArguments,
+    SurfaceInstancesSummary,
+)
 from .light_models import (
     LightConfigureArguments,
     LightCreateArguments,
@@ -219,6 +226,7 @@ OPERATIONS = (
     "blender.material.create_principled",
     "blender.material.inspect",
     "blender.mesh.bevel_edges",
+    "blender.mesh.create",
     "blender.mesh.delete_elements",
     "blender.mesh.extrude_faces",
     "blender.mesh.inset_faces",
@@ -279,6 +287,9 @@ OPERATIONS = (
     "blender.shader.node.configure",
     "blender.shader.node.create",
     "blender.shader.node.delete",
+    "blender.surface_instances.configure",
+    "blender.surface_instances.create",
+    "blender.surface_instances.inspect",
     "blender.uv.create_map",
     "blender.uv.inspect",
     "blender.uv.inspect_layout",
@@ -307,6 +318,17 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def mesh_create(self, arguments: MeshCreateArguments) -> MeshSummary: ...
+    def surface_instances_create(
+        self, arguments: SurfaceInstancesCreateArguments
+    ) -> SurfaceInstancesSummary: ...
+    def surface_instances_configure(
+        self, arguments: SurfaceInstancesConfigureArguments
+    ) -> SurfaceInstancesSummary: ...
+    def surface_instances_inspect(
+        self, arguments: SurfaceInstancesInspectArguments
+    ) -> SurfaceInstancesSummary: ...
+
     def extension_inspect(self) -> ExtensionState: ...
     def extension_reload(
         self, arguments: ExtensionReloadArguments, request_id: str
@@ -471,7 +493,11 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
         )
     try:
         arguments: (
-            ExtensionInspectArguments
+            MeshCreateArguments
+            | SurfaceInstancesCreateArguments
+            | SurfaceInstancesConfigureArguments
+            | SurfaceInstancesInspectArguments
+            | ExtensionInspectArguments
             | ExtensionReloadArguments
             | FileInspectArguments
             | FileOpenArguments
@@ -538,6 +564,20 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.mesh.create":
+                arguments = MeshCreateArguments.model_validate(request.arguments)
+            case "blender.surface_instances.create":
+                arguments = SurfaceInstancesCreateArguments.model_validate(
+                    request.arguments
+                )
+            case "blender.surface_instances.configure":
+                arguments = SurfaceInstancesConfigureArguments.model_validate(
+                    request.arguments
+                )
+            case "blender.surface_instances.inspect":
+                arguments = SurfaceInstancesInspectArguments.model_validate(
+                    request.arguments
+                )
             case "blender.bake.status":
                 arguments = BakeStatusArguments.model_validate(request.arguments)
             case "blender.bake.inspect":
@@ -753,7 +793,15 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
-        if isinstance(arguments, ExtensionInspectArguments):
+        if isinstance(arguments, MeshCreateArguments):
+            result = backend.mesh_create(arguments)
+        elif isinstance(arguments, SurfaceInstancesCreateArguments):
+            result = backend.surface_instances_create(arguments)
+        elif isinstance(arguments, SurfaceInstancesConfigureArguments):
+            result = backend.surface_instances_configure(arguments)
+        elif isinstance(arguments, SurfaceInstancesInspectArguments):
+            result = backend.surface_instances_inspect(arguments)
+        elif isinstance(arguments, ExtensionInspectArguments):
             result = backend.extension_inspect()
         elif isinstance(arguments, ExtensionReloadArguments):
             result = backend.extension_reload(arguments, request.request_id)
