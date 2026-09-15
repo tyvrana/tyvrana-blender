@@ -1145,7 +1145,10 @@ publication. The map is referenced relative to the saved project where possible
 and may be packed for portability. The response includes file metadata and the
 actual PNG through the normal bounded artifact transfer, never bytes in JSON or
 a shared temporary path. Parent directories must exist; symlink destinations are
-rejected. Current output is intentionally PNG data, not a general image encoder.
+rejected. Data PNG exports have a separate 128 MiB artifact limit, matching the
+core's default per-artifact limit; diagnostic renders retain their 16 MiB limit.
+Oversize exports fail before publishing a file, with `artifact_too_large`.
+Current output is intentionally PNG data, not a general image encoder.
 
 `blender.render.image` accepts `surface` with `objects`, optional
 `exclude_objects`, and optional `normal_image` plus its matching `uv_map`. This

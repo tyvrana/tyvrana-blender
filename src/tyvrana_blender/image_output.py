@@ -10,7 +10,7 @@ import bpy  # type: ignore[import-not-found]
 import numpy as np  # type: ignore[import-not-found]
 from tyvrana_protocol import ArtifactDescriptor
 
-from .artifacts import ArtifactSpool
+from .artifacts import MAX_DATA_IMAGE_BYTES, ArtifactSpool, ArtifactTooLarge, SpoolFull
 from .bake import image_pixels
 from .bake_models import ImageSaveArguments, ImageSaveResult
 from .operations import OperationError
@@ -89,9 +89,9 @@ def save(
             )
         with spool.reserve() as (artifact_id, artifact_path):
             artifact_path.write_bytes(encoded)
-            descriptor = spool.describe(artifact_id).model_copy(
-                update={"name": destination.name}
-            )
+            descriptor = spool.describe(
+                artifact_id, max_bytes=MAX_DATA_IMAGE_BYTES
+            ).model_copy(update={"name": destination.name})
             # Stage both encoding and binary transport before replacing the destination.
             if not arguments.overwrite:
                 os.link(path, destination)
@@ -118,6 +118,10 @@ def save(
                 sha256=hashlib.sha256(encoded).hexdigest(),
                 maximum_roundtrip_error=error,
             ), descriptor
+    except ArtifactTooLarge as exc:
+        raise OperationError("artifact_too_large", str(exc)) from exc
+    except SpoolFull as exc:
+        raise OperationError("artifact_capacity", str(exc)) from exc
     finally:
         if probe is not None:
             bpy.data.images.remove(probe)

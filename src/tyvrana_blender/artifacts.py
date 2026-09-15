@@ -10,6 +10,7 @@ from uuid import uuid4
 from tyvrana_protocol import MAX_ARTIFACT_CHUNK_SIZE, ArtifactDescriptor
 
 MAX_RENDER_BYTES = 16 * 1024 * 1024
+MAX_DATA_IMAGE_BYTES = 128 * 1024 * 1024
 MAX_SPOOLED_RENDERS = 4
 
 
@@ -41,18 +42,20 @@ class ArtifactSpool:
             path.unlink(missing_ok=True)
             raise
 
-    def describe(self, artifact_id: str) -> ArtifactDescriptor:
+    def describe(
+        self, artifact_id: str, *, max_bytes: int = MAX_RENDER_BYTES
+    ) -> ArtifactDescriptor:
         path = self.root / (artifact_id + ".png")
         size = path.stat().st_size
-        if size > MAX_RENDER_BYTES:
-            raise ArtifactTooLarge("Rendered PNG exceeds the byte limit")
+        if size > max_bytes:
+            raise ArtifactTooLarge(f"PNG is {size} bytes; limit is {max_bytes}")
         digest = hashlib.sha256()
         received = 0
         with path.open("rb") as stream:
             while chunk := stream.read(MAX_ARTIFACT_CHUNK_SIZE):
                 received += len(chunk)
-                if received > MAX_RENDER_BYTES:
-                    raise ArtifactTooLarge("Rendered PNG exceeds the byte limit")
+                if received > max_bytes:
+                    raise ArtifactTooLarge("PNG grew beyond the byte limit")
                 digest.update(chunk)
         if received != size or size == 0:
             raise ValueError("Render file is empty or changed during hashing")

@@ -187,6 +187,23 @@ class BakeTests(unittest.TestCase):
             )
         self.assertEqual(dest.read_bytes(), b"original")
 
+    def test_large_data_export_budget(self) -> None:
+        import numpy as np  # type: ignore[import-not-found]
+
+        image = bpy.data.images.new(
+            "Large data", width=2048, height=2048, float_buffer=True
+        )
+        image.colorspace_settings.name = "Non-Color"
+        pixels = np.random.default_rng(1).random((2048, 2048, 4), dtype=np.float32)
+        pixels[:, :, 3] = 1
+        image.pixels.foreach_set(pixels.reshape(-1))
+        path = Path(os.environ["TYVRANA_TEST_CONTROL"]) / "large-data.png"
+        result = self.call("image.save", name=image.name, filepath=str(path))
+        self.assertGreater(result.result["byte_size"], artifacts.MAX_RENDER_BYTES)
+        self.assertLess(result.result["byte_size"], artifacts.MAX_DATA_IMAGE_BYTES)
+        self.spool.release(result.artifacts)
+        path.unlink()
+
     def test_remove_unused_image_protects_references(self) -> None:
         image = bpy.data.images.new("Discarded", width=64, height=64)
         image.use_fake_user = True
