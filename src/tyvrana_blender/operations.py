@@ -120,6 +120,22 @@ from .modifier_models import (
     ModifierRemoveResult,
     ModifierSummary,
 )
+from .organization_models import (
+    CollectionConfigureArguments,
+    CollectionCreateArguments,
+    CollectionInspectArguments,
+    CollectionInspectResult,
+    CollectionRemoveArguments,
+    CollectionResult,
+    ObjectSetConfigureArguments,
+    ObjectSetCreateArguments,
+    ObjectSetCreateResult,
+    ObjectSetInspectArguments,
+    ObjectSetInspectResult,
+    ObjectSetRemoveArguments,
+    ObjectSetResult,
+    OrganizationRemoveResult,
+)
 from .reference_models import (
     LandmarkInspectArguments,
     LandmarkInspectResult,
@@ -244,6 +260,38 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def collection_create(
+        self, arguments: CollectionCreateArguments
+    ) -> CollectionResult: ...
+
+    def collection_configure(
+        self, arguments: CollectionConfigureArguments
+    ) -> CollectionResult: ...
+
+    def collection_inspect(
+        self, arguments: CollectionInspectArguments
+    ) -> CollectionInspectResult: ...
+
+    def collection_remove(
+        self, arguments: CollectionRemoveArguments
+    ) -> OrganizationRemoveResult: ...
+
+    def object_set_create(
+        self, arguments: ObjectSetCreateArguments
+    ) -> ObjectSetCreateResult: ...
+
+    def object_set_configure(
+        self, arguments: ObjectSetConfigureArguments
+    ) -> ObjectSetResult: ...
+
+    def object_set_inspect(
+        self, arguments: ObjectSetInspectArguments
+    ) -> ObjectSetInspectResult: ...
+
+    def object_set_remove(
+        self, arguments: ObjectSetRemoveArguments
+    ) -> OrganizationRemoveResult: ...
+
     def reference_create(
         self, arguments: ReferenceCreateArguments
     ) -> ReferenceResult: ...
@@ -516,6 +564,129 @@ def _operation[A: Model, R: Model](
 
 
 _DECLARATIONS = (
+    _operation(
+        "blender.collection.create_hierarchy",
+        CollectionCreateArguments,
+        CollectionResult,
+        lambda b, a, q: b.collection_create(a),
+        "Create 1..32 native local collections with explicit "
+        "multi-parent hierarchy and global visibility. Null parent "
+        "means scene root. Forward batch names allowed; names must be "
+        "unused. Prevalidated, staged and rolled back on failure. No "
+        "view-layer exclusion changes.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.collection.configure",
+        CollectionConfigureArguments,
+        CollectionResult,
+        lambda b, a, q: b.collection_configure(a),
+        "Atomically rename, replace parent memberships or set global "
+        "viewport/render/select visibility for 1..32 collections. "
+        "Omitted fields are preserved. Reject cycles, library/override, "
+        "external-scene and instance users; names resolve before "
+        "renaming.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.collection.inspect",
+        CollectionInspectArguments,
+        CollectionInspectResult,
+        lambda b, a, q: b.collection_inspect(a),
+        "Inspect current-scene collection hierarchy/subtree with "
+        "optional names/prefix and pagination (default 32, max 128). "
+        "Parent/child lists cap 16 with counts/truncation; includes "
+        "direct and recursive object counts and global visibility, not "
+        "view-layer exclusion.",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.collection.remove",
+        CollectionRemoveArguments,
+        OrganizationRemoveResult,
+        lambda b, a, q: b.collection_remove(a),
+        "Remove one empty collection, or explicitly rehome its direct "
+        "objects and children to a local collection/root. Reject "
+        "external/instance users and cycles. Retain objects and their "
+        "data. Report native deletion failure in error/remaining; no "
+        "orphan purge.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.object_set.create",
+        ObjectSetCreateArguments,
+        ObjectSetCreateResult,
+        lambda b, a, q: b.object_set_create(a),
+        "Author 1..64 coherent objects: cubes, planes, UV spheres, "
+        "cylinders, plain empties or copies of plain local "
+        "mesh/light/camera/empty objects. Request-local keys allow "
+        "forward parent/copy references. Transforms are parent-local "
+        "XYZ radians. Collections default to scene root, max 16/object. "
+        "Explicit linked/independent data and shared/independent "
+        "materials; independent materials require independent data, "
+        "nested shader groups/images remain shared. Role/tags are "
+        "bounded persistent adapter-owned metadata; keys are not "
+        "persistent. Reject cycles, collisions and "
+        "animated/constrained/modifier/shape-key/domain-owned copy "
+        "sources and nonidentity deltas. Max 250000 allocated mesh "
+        "vertices. Stage all "
+        "objects/data, publish together, rollback on failure; selection "
+        "independent.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.object_set.configure",
+        ObjectSetConfigureArguments,
+        ObjectSetResult,
+        lambda b, a, q: b.object_set_configure(a),
+        "Atomically update 1..64 named objects: rename, exact "
+        "collection memberships (link/unlink/move), plain parent "
+        "changes with world transform preserved, role/tags. Omitted "
+        "fields preserve values; null parent/role clears. Reject "
+        "cycles, external-scene/domain-owned objects and unsupported or "
+        "unrepresentable parenting (animation/constraints/bone "
+        "parents/nonidentity deltas/shear on clear). Native "
+        "relationships persist through "
+        "rename/save/reopen; returned names are canonical, no stable "
+        "UUID. Generic transforms remain object.set_transform.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.object_set.inspect",
+        ObjectSetInspectArguments,
+        ObjectSetInspectResult,
+        lambda b, a, q: b.object_set_inspect(a),
+        "Inspect objects in a collection/subtree or named set, filtered "
+        "by names/prefix/role/all tags. Select hierarchy, memberships, "
+        "world/local transforms, fixed metadata and data/material "
+        "ownership. Pages default 32, max 128; nested lists cap 16 with "
+        "counts/truncation. Native object names identify objects; keys "
+        "from authoring are request-local. No mesh payload, history or "
+        "arbitrary properties.",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.object_set.remove",
+        ObjectSetRemoveArguments,
+        OrganizationRemoveResult,
+        lambda b, a, q: b.object_set_remove(a),
+        "Delete 1..64 named local objects after dependency preflight; "
+        "default rejects surviving children, explicit unparent "
+        "preserves representable world transforms. Reject other "
+        "external dependencies and domain-owned objects. Retain "
+        "mesh/material data, never purge orphans. Native deletion is "
+        "irreversible: error and exact deleted/remaining names report "
+        "partial progress. Selection independent.",
+        effect="mutating",
+        execution="synchronous",
+    ),
     _operation(
         "blender.reference.create",
         ReferenceCreateArguments,

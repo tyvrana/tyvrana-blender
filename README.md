@@ -172,6 +172,9 @@ registry wait; it does not require repeated timer-based polling or blind retries
 
 ## Operations
 
+For collections, repeated assemblies, parenting, roles and shared-data copies,
+see [Scene organization and coherent object sets](docs/scene-organization.md).
+
 Names are exact. A single typed registry supplies request validation, result
 validation, dispatch, descriptions and registration contracts. Discover a compact
 adapter snapshot through core, then use `tyvrana_list_operations` with selected

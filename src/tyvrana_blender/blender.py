@@ -137,6 +137,22 @@ from .modifier_models import (
     ModifierSummary,
 )
 from .operations import OperationError, execute, registration
+from .organization_models import (
+    CollectionConfigureArguments,
+    CollectionCreateArguments,
+    CollectionInspectArguments,
+    CollectionInspectResult,
+    CollectionRemoveArguments,
+    CollectionResult,
+    ObjectSetConfigureArguments,
+    ObjectSetCreateArguments,
+    ObjectSetCreateResult,
+    ObjectSetInspectArguments,
+    ObjectSetInspectResult,
+    ObjectSetRemoveArguments,
+    ObjectSetResult,
+    OrganizationRemoveResult,
+)
 from .raster import RasterError, raster_size
 from .reference_models import (
     LandmarkInspectArguments,
@@ -627,6 +643,62 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def collection_create(
+        self, arguments: CollectionCreateArguments
+    ) -> CollectionResult:
+        from .organization import collection_create
+
+        return collection_create(arguments)
+
+    def collection_configure(
+        self, arguments: CollectionConfigureArguments
+    ) -> CollectionResult:
+        from .organization import collection_configure
+
+        return collection_configure(arguments)
+
+    def collection_inspect(
+        self, arguments: CollectionInspectArguments
+    ) -> CollectionInspectResult:
+        from .organization import collection_inspect
+
+        return collection_inspect(arguments)
+
+    def collection_remove(
+        self, arguments: CollectionRemoveArguments
+    ) -> OrganizationRemoveResult:
+        from .organization import collection_remove
+
+        return collection_remove(arguments)
+
+    def object_set_create(
+        self, arguments: ObjectSetCreateArguments
+    ) -> ObjectSetCreateResult:
+        from .organization import object_set_create
+
+        return object_set_create(arguments)
+
+    def object_set_configure(
+        self, arguments: ObjectSetConfigureArguments
+    ) -> ObjectSetResult:
+        from .organization import object_set_configure
+
+        return object_set_configure(arguments)
+
+    def object_set_inspect(
+        self, arguments: ObjectSetInspectArguments
+    ) -> ObjectSetInspectResult:
+        from .organization import object_set_inspect
+
+        return object_set_inspect(arguments)
+
+    def object_set_remove(
+        self, arguments: ObjectSetRemoveArguments
+    ) -> OrganizationRemoveResult:
+        from .organization import object_set_remove
+
+        return object_set_remove(arguments)
+
     def reference_create(self, arguments: ReferenceCreateArguments) -> ReferenceResult:
         main_thread()
         from . import references

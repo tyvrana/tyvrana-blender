@@ -108,6 +108,22 @@ from tyvrana_blender.modifier_models import (
     ModifierSummary,
 )
 from tyvrana_blender.operations import OperationError, execute
+from tyvrana_blender.organization_models import (
+    CollectionConfigureArguments,
+    CollectionCreateArguments,
+    CollectionInspectArguments,
+    CollectionInspectResult,
+    CollectionRemoveArguments,
+    CollectionResult,
+    ObjectSetConfigureArguments,
+    ObjectSetCreateArguments,
+    ObjectSetCreateResult,
+    ObjectSetInspectArguments,
+    ObjectSetInspectResult,
+    ObjectSetRemoveArguments,
+    ObjectSetResult,
+    OrganizationRemoveResult,
+)
 from tyvrana_blender.reference_models import (
     LandmarkInspectArguments,
     LandmarkInspectResult,
@@ -189,6 +205,46 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def collection_create(
+        self, arguments: CollectionCreateArguments
+    ) -> CollectionResult:
+        raise NotImplementedError
+
+    def collection_configure(
+        self, arguments: CollectionConfigureArguments
+    ) -> CollectionResult:
+        raise NotImplementedError
+
+    def collection_inspect(
+        self, arguments: CollectionInspectArguments
+    ) -> CollectionInspectResult:
+        raise NotImplementedError
+
+    def collection_remove(
+        self, arguments: CollectionRemoveArguments
+    ) -> OrganizationRemoveResult:
+        raise NotImplementedError
+
+    def object_set_create(
+        self, arguments: ObjectSetCreateArguments
+    ) -> ObjectSetCreateResult:
+        raise NotImplementedError
+
+    def object_set_configure(
+        self, arguments: ObjectSetConfigureArguments
+    ) -> ObjectSetResult:
+        raise NotImplementedError
+
+    def object_set_inspect(
+        self, arguments: ObjectSetInspectArguments
+    ) -> ObjectSetInspectResult:
+        raise NotImplementedError
+
+    def object_set_remove(
+        self, arguments: ObjectSetRemoveArguments
+    ) -> OrganizationRemoveResult:
+        raise NotImplementedError
+
     def reference_create(self, arguments: ReferenceCreateArguments) -> ReferenceResult:
         raise NotImplementedError
 
