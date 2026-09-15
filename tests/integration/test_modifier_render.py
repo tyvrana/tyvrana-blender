@@ -153,6 +153,40 @@ async def test_reversible_modifier_form_renders_through_mcp(
             (tmp_path / "after.png").write_bytes(second)
             # Explicit destructive acceptance is separate from reversible rendering.
             if kind in {"subdivision_surface", "mirror"}:
+                if kind == "subdivision_surface":
+                    await call(
+                        "modifier.create",
+                        object_name="Surface",
+                        type="triangulate",
+                        name="Triangles",
+                        settings={"quad_method": "fixed", "keep_custom_normals": True},
+                    )
+                    triangulated = await call(
+                        "mesh.inspect_evaluated", object_name="Surface", uv_map="UVMap"
+                    )
+                    assert (
+                        triangulated["authored_basis"]
+                        == evaluated_before["authored_basis"]
+                    )
+                    assert (
+                        triangulated["face_count"] == evaluated_after["face_count"] * 2
+                    )
+                    assert (
+                        triangulated["vertex_count"] == evaluated_after["vertex_count"]
+                    )
+                    assert triangulated["evaluated_basis"]["zero_tangent_count"] == 0
+                    triangles_image = await render(client, identifier)
+                    assert all(
+                        abs(a - b) <= 1
+                        for a, b in zip(
+                            red_bounds(triangles_image), second_box, strict=True
+                        )
+                    )
+                    await call(
+                        "modifier.remove",
+                        object_name="Surface",
+                        modifier_name="Triangles",
+                    )
                 applied = await call(
                     "modifier.apply", object_name="Surface", modifier_name="Form"
                 )

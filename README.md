@@ -1050,7 +1050,7 @@ unweighted face samples; distortion percentiles are unweighted native triangles.
 `layout_image: true` additionally returns a colored PNG through the ordinary
 bounded artifact transport; `image_size` is 128–1024, default 1024. The image shows
 native triangulation, island colors and a UV grid; it requires no UV editor or
-filesystem-path transport. Inspection is limited to 64,000 faces, 128,000 triangles,
+filesystem-path transport. Inspection is limited to 128,000 faces, 128,000 triangles,
 512 islands and two million overlap/margin candidate comparisons. Evaluated
 references are inspection-only and cannot address authored edits. Results describe
 the current viewport evaluation, including Mirror and Shrinkwrap; they do not
@@ -1492,6 +1492,7 @@ mapping support, so the flag alone does not promise an editable evaluated cage.
 | `shrinkwrap` | Required creation `target`; `method: "nearest_surface"`, `mode: "on_surface"`, `offset: 0`; optional `projection` when method is `project` |
 | `boolean` | Required creation `operand_object`; `operation: "difference"`, `solver: "exact"` |
 | `solidify` | `thickness: 0.01`, `offset: -1`, `even_thickness: false`, `rim: true`, `rim_only: false`, `quality_normals: false` |
+| `triangulate` | `quad_method: shortest_diagonal`, `ngon_method: beauty`, `min_vertices: 4`, `keep_custom_normals: false` |
 
 Mirror axis lists use unique lowercase `x`, `y`, `z`; at least one main axis must
 be active. Bisect and flip flags are stored per axis and affect enabled axes.
@@ -1508,6 +1509,16 @@ or `preserve_corners`. `uv_smooth` is `none`, `preserve_corners`,
 `preserve_corners_and_junctions`, `preserve_corners_junctions_and_concave`,
 `preserve_boundaries` or `smooth_all`. Native quality, limit-surface and other
 unexposed settings are preserved. Adaptive subdivision is outside this workflow.
+
+Triangulate supports quad methods `beauty`, `fixed`, `fixed_alternate`,
+`shortest_diagonal` and `longest_diagonal`; n-gon methods are `beauty` and `clip`.
+`min_vertices` accepts 4–128. After Subdivision, fixed triangulation can define
+the evaluated bake/render mesh while retaining an authored quad cage. The native
+`keep_custom_normals` option preserves input shading normals where possible;
+inspect the evaluated basis and rebake after choosing the final stack. This also
+prevents Subdivision from being the last enabled modifier eligible for deferred
+GPU tessellation. It does not change the system GPU configuration.
+See the [Blender 5.2 Triangulate documentation](https://docs.blender.org/manual/id/5.2/modeling/modifiers/generate/triangulate.html).
 
 Shrinkwrap supports `nearest_surface`, `project` and `target_normal_project`.
 `mode` is `on_surface`, `inside`, `outside`, `outside_surface` or `above_surface`.

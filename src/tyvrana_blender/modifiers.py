@@ -25,6 +25,7 @@ from .modifier_models import (
     ShrinkwrapSettings,
     SolidifySettings,
     SubdivisionSettings,
+    TriangulateSettings,
 )
 from .operations import OperationError
 
@@ -34,6 +35,7 @@ TYPES = {
     "shrinkwrap": "SHRINKWRAP",
     "boolean": "BOOLEAN",
     "solidify": "SOLIDIFY",
+    "triangulate": "TRIANGULATE",
 }
 SEMANTIC_TYPES = {native: name for name, native in TYPES.items()}
 METHODS = {
@@ -47,6 +49,12 @@ COMMON = {
     "show_in_editmode": "show_in_editmode",
 }
 FIELDS = {
+    "triangulate": {
+        "quad_method": "quad_method",
+        "ngon_method": "ngon_method",
+        "min_vertices": "min_vertices",
+        "keep_custom_normals": "keep_custom_normals",
+    },
     "mirror": {
         "uv_flip_u": "use_mirror_u",
         "uv_flip_v": "use_mirror_v",
@@ -100,6 +108,8 @@ PROJECTION = {
     "limit": "project_limit",
 }
 ENUMS = {
+    "quad_method",
+    "ngon_method",
     "subdivision_type",
     "uv_smooth",
     "boundary_smooth",
@@ -238,6 +248,8 @@ def settings(mod: Any) -> ModifierSettings | None:
             value = str(value).lower()
         values[public] = value
     match kind:
+        case "triangulate":
+            return TriangulateSettings.model_validate(values)
         case "mirror":
             return MirrorSettings.model_validate(values)
         case "subdivision_surface":
@@ -440,6 +452,10 @@ def budget(
             size *= 2 * 4**level if level else 1
         elif kind == "MIRROR":
             size *= 2 ** sum(value(mod, patch, "use_axis")) * 2
+        elif kind == "TRIANGULATE":
+            # For a polygon with k corners, triangulation creates k-2 faces
+            # and k-3 edges; three times the total input element budget is safe.
+            size *= 3
         elif kind == "SOLIDIFY":
             size *= 6
         elif kind == "BOOLEAN":

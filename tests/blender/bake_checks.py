@@ -170,7 +170,7 @@ class BakeTests(unittest.TestCase):
         subdivision.uv_smooth = "NONE"
         subdivision.levels = subdivision.render_levels = 6
         bpy.context.view_layer.update()
-        # 16 authored quads x Mirror x 4^6 exceeds the 64,000-face budget.
+        # 16 authored quads x Mirror x 4^6 exceeds the 128,000-face budget.
         before = self.state()
         with self.assertRaisesRegex(bake.OperationError, "capacity"):
             self.call(

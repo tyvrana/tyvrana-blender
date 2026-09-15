@@ -178,7 +178,7 @@ def pack(arguments: UVPackArguments) -> UVPackResult:
     ):
         raise OperationError(
             "work_limit_exceeded",
-            "Packing requires 1–512 islands and at most 12000 faces",
+            f"Packing requires 1–512 islands and at most {uv_quality.MAX_FACES} faces",
         )
     extent = [
         b - a for a, b in zip(arguments.bounds_min, arguments.bounds_max, strict=True)

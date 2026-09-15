@@ -13,7 +13,7 @@ from .uv_models import UVLayoutResult, UVMetricSummary
 
 type Point = tuple[float, float]
 type Point3 = tuple[float, float, float]
-MAX_FACES = 64000
+MAX_FACES = 128000
 MAX_TRIANGLES = 128000
 MAX_PAIR_CHECKS = 2_000_000
 EPS = 1e-12

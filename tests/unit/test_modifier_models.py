@@ -22,7 +22,14 @@ from tyvrana_blender.operations import OPERATIONS, OperationError, execute
 
 from .test_operations import Backend
 
-KINDS = ["mirror", "subdivision_surface", "shrinkwrap", "boolean", "solidify"]
+KINDS = [
+    "mirror",
+    "subdivision_surface",
+    "shrinkwrap",
+    "boolean",
+    "solidify",
+    "triangulate",
+]
 
 
 def create(kind: str, **settings: Any) -> Any:
@@ -97,6 +104,11 @@ def test_common_creation_is_strict(kind: str, field: str, value: Any) -> None:
 @pytest.mark.parametrize(
     "kind,settings",
     [
+        ("triangulate", {"quad_method": "guess"}),
+        ("triangulate", {"ngon_method": "fixed"}),
+        ("triangulate", {"min_vertices": 3}),
+        ("triangulate", {"min_vertices": 129}),
+        ("triangulate", {"keep_custom_normals": 1}),
         ("mirror", {"axes": []}),
         ("mirror", {"axes": ["x", "x"]}),
         ("mirror", {"axes": ["X"]}),

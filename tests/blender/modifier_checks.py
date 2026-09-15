@@ -123,6 +123,34 @@ class ModifierTests(unittest.TestCase):
         finally:
             bm.free()
 
+    def test_triangulate_after_subdivision_preserves_authored_basis(self) -> None:
+        before = self.call("mesh.inspect_evaluated", uv_map="UVMap")["authored_basis"]
+        self.call(
+            "modifier.create",
+            type="subdivision_surface",
+            name="Smooth",
+            settings={"levels": 2, "render_levels": 2},
+        )
+        quads = self.evaluated()
+        tri = self.add(
+            "triangulate",
+            quad_method="fixed",
+            ngon_method="clip",
+            min_vertices=4,
+            keep_custom_normals=True,
+        )
+        self.assertEqual(tri["settings"]["quad_method"], "fixed")
+        result = self.call("mesh.inspect_evaluated", uv_map="UVMap")
+        self.assertEqual(result["authored_basis"], before)
+        self.assertEqual(result["face_count"], quads["face_count"] * 2)
+        self.assertEqual(result["vertex_count"], quads["vertex_count"])
+        self.assertEqual(result["evaluated_basis"]["zero_tangent_count"], 0)
+        self.assertTrue(result["evaluated_basis"]["has_custom_normals"])
+        self.configure("triangulate", min_vertices=5)
+        self.assertEqual(self.evaluated()["face_count"], quads["face_count"])
+        self.call("modifier.remove", modifier_name="Shape")
+        self.assertEqual(self.evaluated()["evaluated_basis"], quads["evaluated_basis"])
+
     def test_empty_and_unsupported_stack_inspection(self) -> None:
         self.assertEqual(self.call("modifier.inspect")["modifiers"], [])
         first = self.obj.modifiers.new("Existing", "BEVEL")

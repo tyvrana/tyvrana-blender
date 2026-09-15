@@ -28,7 +28,7 @@ type Name = Annotated[ObjectName, AfterValidator(resource_name)]
 type Number = Annotated[Float32, Strict()]
 type Axes = Annotated[list[Literal["x", "y", "z"]], Field(max_length=3)]
 type ModifierType = Literal[
-    "mirror", "subdivision_surface", "shrinkwrap", "boolean", "solidify"
+    "mirror", "subdivision_surface", "shrinkwrap", "boolean", "solidify", "triangulate"
 ]
 type SubdivisionMode = Literal["catmull_clark", "simple"]
 type UVSmooth = Literal[
@@ -141,6 +141,22 @@ class SolidifyPatch(Arguments):
     quality_normals: bool | None = None
 
 
+class TriangulatePatch(Arguments):
+    quad_method: (
+        Literal[
+            "beauty",
+            "fixed",
+            "fixed_alternate",
+            "shortest_diagonal",
+            "longest_diagonal",
+        ]
+        | None
+    ) = None
+    ngon_method: Literal["beauty", "clip"] | None = None
+    min_vertices: Annotated[int, Field(ge=4, le=128)] | None = None
+    keep_custom_normals: bool | None = None
+
+
 class ModifierInspectArguments(Arguments):
     object_name: Name
 
@@ -219,6 +235,16 @@ class SolidifyCreate(CreateBase):
     settings: SolidifyPatch = Field(default_factory=SolidifyPatch)
 
 
+class TriangulateCreate(CreateBase):
+    type: Literal["triangulate"]
+    settings: TriangulatePatch = Field(default_factory=TriangulatePatch)
+
+
+class TriangulateConfigure(ConfigureBase):
+    type: Literal["triangulate"]
+    settings: TriangulatePatch = Field(default_factory=TriangulatePatch)
+
+
 class MirrorConfigure(ConfigureBase):
     type: Literal["mirror"]
     settings: MirrorPatch = Field(default_factory=MirrorPatch)
@@ -249,7 +275,8 @@ type ModifierCreateArguments = Annotated[
     | SubdivisionCreate
     | ShrinkwrapCreate
     | BooleanCreate
-    | SolidifyCreate,
+    | SolidifyCreate
+    | TriangulateCreate,
     Field(discriminator="type"),
 ]
 type ModifierConfigureArguments = Annotated[
@@ -257,7 +284,8 @@ type ModifierConfigureArguments = Annotated[
     | SubdivisionConfigure
     | ShrinkwrapConfigure
     | BooleanConfigure
-    | SolidifyConfigure,
+    | SolidifyConfigure
+    | TriangulateConfigure,
     Field(discriminator="type"),
 ]
 CREATE: TypeAdapter[ModifierCreateArguments] = TypeAdapter(ModifierCreateArguments)
@@ -329,12 +357,20 @@ class SolidifySettings(Model):
     quality_normals: bool
 
 
+class TriangulateSettings(Model):
+    quad_method: str
+    ngon_method: str
+    min_vertices: int
+    keep_custom_normals: bool
+
+
 type ModifierSettings = (
     MirrorSettings
     | SubdivisionSettings
     | ShrinkwrapSettings
     | BooleanSettings
     | SolidifySettings
+    | TriangulateSettings
 )
 
 
