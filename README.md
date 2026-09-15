@@ -26,19 +26,118 @@ official extension command:
 blender --command extension install-file --repo user_default --enable dist/tyvrana_blender-0.1.0.zip
 ```
 
-For updates with unchanged dependencies, replace the installed extension and run
-Blender's **Reload Scripts** action. Tyvrana stops its previous worker, reloads its
-operation modules, and reconnects without closing the project. In-flight requests
-are interrupted; finish or cancel them before reloading. The scene and unsaved
-project edits are retained.
+The first installation command runs in a separate, short-lived Blender process.
+It does not activate code in an already running process. For an enabled existing
+installation, use the live-update workflow below instead of overwriting its files.
+The extension lives in the user repository; Blender's installation and embedded
+Python environment are not modified.
 
-When replacing an enabled installation with changed dependencies, first disable
-Tyvrana in Preferences, save preferences, and exit Blender. Install from a fresh
-Blender process so previously imported dependency modules are not reused.
+### Programmatic development updates
 
-Alternatively, use **Preferences → Get Extensions → Install from Disk**, select
-the ZIP, and enable Tyvrana. The package installs in the user's extension area;
-Blender's installation and embedded Python environment are not modified.
+After editing and testing, build the validated archive and stage it separately:
+
+```sh
+uv run python tools/build_extension.py
+uv run python tools/update_extension.py dist/tyvrana_blender-0.1.0.zip \
+  --extension-dir "$HOME/.config/blender/5.2/extensions/user_default/tyvrana_blender"
+```
+
+Use the actual extension directory for your installation. The staging command
+returns a SHA-256 `build` identity. It validates archive paths, size, Python syntax,
+package identity, bootstrap files and dependency wheels. It leaves the active
+installation untouched and publishes one candidate under a sibling update
+transaction directory. A lock prevents overlapping staging/activation. This is
+separate from live activation; staging alone does not change loaded Python code.
+
+Call `blender.extension.reload` through core, supplying the returned identity:
+
+```json
+{"expected_build": "<64-character staged build SHA-256>"}
+```
+
+The response contains `status: "scheduled"`, a `reload_id`, `previous_build`,
+`new_build` and `previous_adapter_id`. It is an acknowledgement, not completion.
+The worker sends that response and waits for a WebSocket ping acknowledgement
+before authorizing activation. Reload requires an idle request channel; other
+operations are rejected while the generation transition is pending. Finish or
+cancel artifact transfers before requesting it.
+
+Discover the replacement adapter with `tyvrana_list_adapters`, then call
+`blender.extension.inspect`. Completion requires the same `reload_id`, the expected
+`build`, `status: "completed"` and `connection_state: "connected"`. The result also
+reports `implementation_build`, captured when the backend module imports; it
+must match `build` after activation. Packages retain their source revision and
+source digest in `build_info.json`. Inspection also reports the generation counter,
+advertised operation count, worker PID and owned
+class/timer/handler/artifact counts. Each activation registers a fresh adapter
+identity with the same core configuration. The previous connection is stopped
+before the new worker starts. Repeated A → B → C updates use this same sequence.
+No Blender UI, broad Reload Scripts action, file reopen or process restart is
+required for normal implementation updates.
+
+The fixed entry point, `lifecycle.py` and `deployment.py` own the transaction.
+The controller stops the previous implementation, removes only its registered
+classes, handlers and timer, closes its queue/pipes, waits for its worker and
+cleans its artifact store. It removes only Tyvrana implementation modules and
+package attributes from Python's import cache. Blender and shared wheel modules,
+unrelated extensions, timers and handlers remain loaded. Candidate model/operation
+imports are checked in Blender's bundled interpreter before unloading anything.
+The complete installed directory is then exchanged with the candidate, and the
+new implementation is imported and registered. The old directory remains available
+until the new adapter reconnects. The package, manifest and installed code all
+refer to the same active generation after completion.
+
+Reload does not load/save the project or alter objects, geometry, materials,
+modifiers, current frame, selections, cameras or render settings. Adapter host/port
+preferences are retained across RNA class registration. Preferences are not saved
+or reset. Tests cover unsaved image data, other preferences, unrelated handlers,
+repeated native reloads and MCP rendering/file operations afterward.
+
+Invalid packages, changed installed files and mismatched build identities fail
+before activation. Missing response acknowledgement leaves the original runtime
+active. Import/registration failure or failure to reconnect within 20 seconds
+stops partial new registrations, restores the old directory and starts a clean
+old implementation. `extension.inspect` reports `rolled_back` with the failure;
+it never reports the failed candidate as completed. If rollback also fails, the
+adapter remains disabled and logs the explicit error; the stable controller writes
+`status.json` in the sibling transaction directory for external diagnosis. Blender
+remains usable. Filesystem failure or a host crash is not a guarantee of automatic
+live rollback. A stopped process's interrupted transaction can be recovered with:
+
+```sh
+uv run python tools/update_extension.py --recover \
+  --extension-dir "$HOME/.config/blender/5.2/extensions/user_default/tyvrana_blender"
+```
+
+Recovery refuses to act while the transaction owner is alive. A surviving entry
+point also attempts that recovery during the next normal extension enable.
+
+The stable bootstrap and Blender-managed wheels must remain identical for a live
+update. Replacing the controller currently executing a transaction or unloading
+shared/native dependency modules is outside this operation's safety boundary;
+such changes require a stopped-process installation. This is a specific limitation,
+not the normal development update path. An older installed adapter without the
+reload operation likewise has no endpoint through which to bootstrap it.
+
+For that one-time transition, save through `blender.file.save`, verify
+`blender.file.inspect`, shut down the host without UI automation and install the
+archive with Blender's extension command (`--no-prefs` preserves an already enabled
+installation's preferences). Relaunch through the configured desktop application
+entry when it carries required GPU/environment policy. On Linux, use an application
+launcher such as `gtk-launch blender` or `gio launch /path/to/blender.desktop`;
+verify the desktop's discrete-GPU/offload selection rather than assuming a raw
+binary launch reproduces it. Where the desktop requires it, run the application
+launcher through its GPU dispatch service. Confirm the process's offload variables
+and GPU presence using read-only system inspection. After reconnection, open the
+saved project through `blender.file.open` with `discard_current: true` and verify
+its state. No menus, Preferences clicks or Python Console are needed.
+
+This separation follows Blender's extension lifecycle: its package manager stages
+files and disables/clears the affected extension before re-enabling it, while a
+command executed in another Blender process cannot invalidate this process's
+Python imports. See the [5.2 extension command documentation](https://docs.blender.org/manual/en/5.2/advanced/command_line/extension_arguments.html),
+[application timers](https://docs.blender.org/api/5.2/bpy.app.timers.html), and
+[extension lifecycle source](https://projects.blender.org/blender/blender/src/tag/v5.2.1/scripts/addons_core/bl_pkg/bl_extension_ops.py).
 
 Start core from its own environment:
 
@@ -69,6 +168,8 @@ Names are exact and are advertised in sorted order:
 
 | Operation | Arguments | Result |
 | --- | --- | --- |
+| `blender.extension.inspect` | `{}` | Active/staged build, transition state and owned resources |
+| `blender.extension.reload` | Required staged `expected_build` SHA-256 | Scheduled reload acknowledgement; verify completion after rediscovery |
 | `blender.scene.inspect` | `{}` | Scene summary |
 | `blender.scene.raycast` | World origin/direction or normalized camera image coordinates | Evaluated surface hit or miss |
 | `blender.multires.inspect` | Object name | Base topology, levels and diagnostics |

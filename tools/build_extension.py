@@ -1,6 +1,7 @@
 """Build a Linux x64 extension with locked CPython 3.13 wheels."""
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -23,6 +24,29 @@ def main() -> None:
         ROOT / "src/tyvrana_blender",
         stage,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    source_hash = hashlib.sha256()
+    for source in sorted(stage.rglob("*.py")):
+        source_hash.update(source.relative_to(stage).as_posix().encode() + b"\0")
+        source_hash.update(hashlib.sha256(source.read_bytes()).digest())
+    (stage / "build_info.json").write_text(
+        json.dumps(
+            {
+                "source_revision": revision.stdout.strip()
+                if revision.returncode == 0
+                else None,
+                "source_sha256": source_hash.hexdigest(),
+            },
+            sort_keys=True,
+        )
+        + "\n"
     )
     wheels = stage / "wheels"
     wheels.mkdir()

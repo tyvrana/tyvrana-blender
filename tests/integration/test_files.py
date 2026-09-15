@@ -23,7 +23,7 @@ async def test_project_persistence_over_mcp(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=ui):
             registered = await discover(client)
-            assert registered is not None and len(registered.operations) == 84
+            assert registered is not None and len(registered.operations) == 86
             identifier = registered.instance_id
 
             async def call(name: str, arguments: dict[str, object]) -> object:

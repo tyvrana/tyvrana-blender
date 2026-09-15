@@ -2,6 +2,7 @@
 
 import logging
 import threading
+from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
@@ -42,6 +43,11 @@ from .camera_models import (
 )
 from .compatibility import require_blender
 from .dispatch import CommandQueue
+from .extension_models import (
+    ExtensionReloadArguments,
+    ExtensionReloadResult,
+    ExtensionState,
+)
 from .file_models import FileOpenArguments, FileSaveArguments, FileState
 from .image_models import (
     ALPHA_MODES,
@@ -175,6 +181,10 @@ from .uv_models import (
 
 logger = logging.getLogger(__name__)
 INSTANCE_ID = f"blender-{uuid4()}"
+
+from .deployment import identity  # noqa: E402
+
+IMPLEMENTATION_BUILD = identity(Path(__file__).parent)
 
 
 def main_thread() -> None:
@@ -551,6 +561,25 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def extension_inspect(self) -> ExtensionState:
+        main_thread()
+        from . import lifecycle
+
+        return ExtensionState.model_validate(lifecycle.inspect())
+
+    def extension_reload(
+        self, arguments: ExtensionReloadArguments, request_id: str
+    ) -> ExtensionReloadResult:
+        main_thread()
+        from . import lifecycle
+
+        try:
+            return ExtensionReloadResult.model_validate(
+                lifecycle.request_reload(arguments.expected_build, request_id)
+            )
+        except (ValueError, OSError, SyntaxError) as exc:
+            raise OperationError("extension_update_invalid", str(exc)) from exc
+
     def file_inspect(self) -> FileState:
         main_thread()
         from . import files
@@ -1535,6 +1564,14 @@ class Runtime:
                 self.queue.cancel(message.request_id)
             elif (
                 isinstance(message, AdapterEvent)
+                and message.event == "blender.response.sent"
+            ):
+                from . import lifecycle
+
+                if isinstance(message.payload, dict):
+                    lifecycle.response_sent(str(message.payload["request_id"]))
+            elif (
+                isinstance(message, AdapterEvent)
                 and message.event == "blender.connection.state"
                 and isinstance(message.payload, dict)
             ):
@@ -1661,6 +1698,7 @@ class TyvranaReconnect(bpy.types.Operator):  # type: ignore[misc]
 
 
 _classes = (TyvranaPreferences, TyvranaReconnect)
+_registered_classes: list[Any] = []
 _handlers = (
     (bpy.app.handlers.load_pre, before_load),
     (bpy.app.handlers.load_post, after_load),
@@ -1676,11 +1714,12 @@ def register() -> None:
     require_blender(bpy.app.version)
     if _enabled:
         return
-    for cls in _classes:
-        bpy.utils.register_class(cls)
     _enabled = True
     _status = "starting"
     try:
+        for cls in _classes:
+            bpy.utils.register_class(cls)
+            _registered_classes.append(cls)
         # register() runs under Blender's restricted data/context wrapper.
         # Defer scene capture and networking until the first application tick.
         bpy.app.timers.register(pump, first_interval=0.02, persistent=True)
@@ -1703,6 +1742,7 @@ def unregister() -> None:
         if callback in handlers:
             handlers.remove(callback)
     stop()
-    for cls in reversed(_classes):
+    for cls in reversed(_registered_classes):
         bpy.utils.unregister_class(cls)
+    _registered_classes.clear()
     _status = "disabled"

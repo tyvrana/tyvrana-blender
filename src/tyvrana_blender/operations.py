@@ -21,6 +21,12 @@ from .camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from .extension_models import (
+    ExtensionInspectArguments,
+    ExtensionReloadArguments,
+    ExtensionReloadResult,
+    ExtensionState,
+)
 from .file_models import (
     FileInspectArguments,
     FileOpenArguments,
@@ -179,6 +185,8 @@ OPERATIONS = (
     "blender.camera.create",
     "blender.camera.inspect",
     "blender.camera.set_active",
+    "blender.extension.inspect",
+    "blender.extension.reload",
     "blender.file.inspect",
     "blender.file.open",
     "blender.file.save",
@@ -281,6 +289,11 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def extension_inspect(self) -> ExtensionState: ...
+    def extension_reload(
+        self, arguments: ExtensionReloadArguments, request_id: str
+    ) -> ExtensionReloadResult: ...
+
     def file_inspect(self) -> FileState: ...
     def file_open(self, arguments: FileOpenArguments) -> FileState: ...
     def file_save(self, arguments: FileSaveArguments) -> FileState: ...
@@ -418,7 +431,9 @@ def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure
 def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         arguments: (
-            FileInspectArguments
+            ExtensionInspectArguments
+            | ExtensionReloadArguments
+            | FileInspectArguments
             | FileOpenArguments
             | FileSaveArguments
             | RaycastArguments
@@ -478,6 +493,10 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.extension.inspect":
+                arguments = ExtensionInspectArguments.model_validate(request.arguments)
+            case "blender.extension.reload":
+                arguments = ExtensionReloadArguments.model_validate(request.arguments)
             case "blender.file.inspect":
                 arguments = FileInspectArguments.model_validate(request.arguments)
             case "blender.file.open":
@@ -677,7 +696,11 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
     try:
         result: Model
         artifacts: tuple[ArtifactDescriptor, ...] = ()
-        if isinstance(arguments, FileOpenArguments):
+        if isinstance(arguments, ExtensionInspectArguments):
+            result = backend.extension_inspect()
+        elif isinstance(arguments, ExtensionReloadArguments):
+            result = backend.extension_reload(arguments, request.request_id)
+        elif isinstance(arguments, FileOpenArguments):
             result = backend.file_open(arguments)
         elif isinstance(arguments, FileSaveArguments):
             result = backend.file_save(arguments)

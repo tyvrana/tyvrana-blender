@@ -107,6 +107,8 @@ class NetworkClient:
         self.output = output
         self.socket: ClientConnection | None = None
         self.pending: set[str] = set()
+        self.reload_requests: set[str] = set()
+        self.reload_barrier = False
         self.spool = spool
         self.inputs = InputStore(spool)
         self._tasks: set[asyncio.Task[None]] = set()
@@ -126,6 +128,7 @@ class NetworkClient:
 
     def cancel_request(self, request_id: str) -> None:
         self.pending.discard(request_id)
+        self.reload_requests.discard(request_id)
         self.inputs.discard_request(request_id)
         for transfer_id, (related, queue) in self._transfers.items():
             if related == request_id:
@@ -143,6 +146,8 @@ class NetworkClient:
 
     async def cleanup(self) -> None:
         self.pending.clear()
+        self.reload_requests.clear()
+        self.reload_barrier = False
         tasks = list(self._tasks)
         for task in tasks:
             task.cancel()
@@ -224,6 +229,31 @@ class NetworkClient:
                         self._transfers.pop(transfer_id, None)
             if response.request_id in self.pending:
                 await self.send(socket, encode_message(response).decode())
+                if response.request_id in self.reload_requests and isinstance(
+                    response, OperationSuccess
+                ):
+                    self.reload_barrier = True
+                    # Wait for the peer to receive the preceding response frame
+                    # before telling the main thread it may stop this worker.
+                    try:
+                        async with asyncio.timeout(5):
+                            pong = await socket.ping()
+                            await pong
+                        await self.output.send(
+                            AdapterEvent(
+                                type="adapter.event",
+                                event="blender.response.sent",
+                                payload={"request_id": response.request_id},
+                            )
+                        )
+                    except (OSError, TimeoutError, ConnectionClosed) as exc:
+                        # The controller retains the old code without this event.
+                        # Release admission so its failure can be inspected/retried;
+                        # the already-sent result must not get a second response.
+                        self.reload_barrier = False
+                        logger.warning(
+                            "Reload acknowledgement failed: %s", type(exc).__name__
+                        )
         except (OSError, TimeoutError, TransferRejected, ConnectionClosed) as exc:
             logger.info("Artifact response failed: %s", type(exc).__name__)
             error = ProtocolError(
@@ -257,6 +287,7 @@ class NetworkClient:
                     pass  # Connection loop performs disconnect cleanup.
         finally:
             self.pending.discard(response.request_id)
+            self.reload_requests.discard(response.request_id)
             self.inputs.discard_request(response.request_id)
             self.release(response)
 
@@ -404,7 +435,15 @@ class NetworkClient:
                             if isinstance(message, OperationRequest):
                                 if message.request_id in self.pending:
                                     raise ValueError("Duplicate pending request ID")
-                                if len(self.pending) >= MAX_PENDING:
+                                if (
+                                    len(self.pending) >= MAX_PENDING
+                                    or self.reload_requests
+                                    or self.reload_barrier
+                                    or (
+                                        message.operation == "blender.extension.reload"
+                                        and self.pending
+                                    )
+                                ):
                                     self.inputs.discard_request(message.request_id)
                                     await self.send(
                                         websocket,
@@ -414,7 +453,10 @@ class NetworkClient:
                                                 request_id=message.request_id,
                                                 error=ProtocolError(
                                                     code="adapter_busy",
-                                                    message="Too many requests",
+                                                    message=(
+                                                        "Adapter is busy or changing "
+                                                        "extension generation"
+                                                    ),
                                                 ),
                                             )
                                         ).decode(),
@@ -439,6 +481,8 @@ class NetworkClient:
                                     )
                                     continue
                                 self.pending.add(message.request_id)
+                                if message.operation == "blender.extension.reload":
+                                    self.reload_requests.add(message.request_id)
                                 await self.output.send(message)
                             elif isinstance(message, CancelRequest):
                                 self.cancel_request(message.request_id)

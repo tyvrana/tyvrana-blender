@@ -19,6 +19,11 @@ from tyvrana_blender.camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from tyvrana_blender.extension_models import (
+    ExtensionReloadArguments,
+    ExtensionReloadResult,
+    ExtensionState,
+)
 from tyvrana_blender.file_models import FileOpenArguments, FileSaveArguments, FileState
 from tyvrana_blender.image_models import (
     ImageConfigureArguments,
@@ -122,6 +127,37 @@ from tyvrana_blender.uv_models import (
 
 
 class Backend:
+    def extension_inspect(self) -> ExtensionState:
+        return ExtensionState(
+            build="a" * 64,
+            implementation_build="a" * 64,
+            generation=0,
+            status="idle",
+            reload_id=None,
+            staged_build=None,
+            error=None,
+            adapter_id="test",
+            connection_state="connected",
+            operation_count=86,
+            worker_pid=1,
+            runtime_timer_count=1,
+            lifecycle_timer_count=0,
+            handler_count=5,
+            registered_class_count=2,
+            artifact_count=0,
+        )
+
+    def extension_reload(
+        self, arguments: ExtensionReloadArguments, request_id: str
+    ) -> ExtensionReloadResult:
+        return ExtensionReloadResult(
+            reload_id=request_id,
+            status="scheduled",
+            previous_build="a" * 64,
+            new_build=arguments.expected_build,
+            previous_adapter_id="test",
+        )
+
     def file_inspect(self) -> FileState:
         return FileState(
             filepath=None, is_saved=False, is_dirty=False, exists=False, byte_size=None
