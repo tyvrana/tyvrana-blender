@@ -48,6 +48,11 @@ from tyvrana_blender.instance_models import (
     SurfaceInstancesInspectArguments,
     SurfaceInstancesSummary,
 )
+from tyvrana_blender.joint_models import (
+    JointConfigureArguments,
+    StructureInspectArguments,
+    StructureSummary,
+)
 from tyvrana_blender.light_models import (
     LightConfigureArguments,
     LightCreateArguments,
@@ -148,6 +153,7 @@ from tyvrana_blender.rig_models import (
     ArmatureCreateArguments,
     ArmatureInspectArguments,
     ArmaturePoseArguments,
+    ArmatureRestArguments,
     ArmatureSummary,
     BindingSummary,
     DeformationInspectArguments,
@@ -205,6 +211,21 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def armature_configure_rest(
+        self, arguments: ArmatureRestArguments
+    ) -> ArmatureSummary:
+        raise NotImplementedError
+
+    def armature_configure_joints(
+        self, arguments: JointConfigureArguments
+    ) -> ArmatureSummary:
+        raise NotImplementedError
+
+    def armature_inspect_structure(
+        self, arguments: StructureInspectArguments
+    ) -> StructureSummary:
+        raise NotImplementedError
+
     def collection_create(
         self, arguments: CollectionCreateArguments
     ) -> CollectionResult:

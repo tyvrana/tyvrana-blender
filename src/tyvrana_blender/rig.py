@@ -60,9 +60,12 @@ def armature(name: str, *, edit: bool = False) -> Any:
         or obj.animation_data
         or obj.data.animation_data
         or obj.constraints
-        or any(b.constraints for b in obj.pose.bones)
     ):
         fail("Preserve shared/linked rigs, animation, drivers and constraints")
+    if edit:
+        from .joints import editable
+
+        editable(obj)
     return obj
 
 
@@ -88,6 +91,9 @@ def rest_signature(obj: Any) -> str:
 def inspect(
     obj: Any, names: list[str] | None = None, limit: int = 16
 ) -> ArmatureSummary:
+    from .joints import KEY as JOINT_KEY
+    from .joints import evaluation
+
     bones = list(obj.data.bones)
     if names is not None:
         if len(set(names)) != len(names) or any(n not in obj.data.bones for n in names):
@@ -103,6 +109,9 @@ def inspect(
         loc, rotation, scale = pose.matrix_basis.decompose()
         samples.append(
             BoneSummary(
+                joint=evaluation(obj, evaluated, bone.name)
+                if JOINT_KEY in pose
+                else None,
                 name=bone.name,
                 parent=bone.parent.name if bone.parent else None,
                 connected=bone.use_connect,
@@ -143,7 +152,10 @@ def inspect(
 
 
 def create(args: ArmatureCreateArguments) -> ArmatureSummary:
+    from .joints import initialize, orient_bone, prepare_create
+
     idle()
+    args = prepare_create(args)
     if bpy.data.objects.get(args.name) is not None:
         fail("Choose an unused armature object name")
     active = bpy.context.view_layer.objects.active
@@ -164,13 +176,7 @@ def create(args: ArmatureCreateArguments) -> ArmatureSummary:
             bone = data.edit_bones.new(item.name)
             if bone.name != item.name:
                 fail("Bone name exceeds native capacity")
-            bone.head = item.head
-            bone.tail = item.tail
-            bone.roll = item.roll
-            bone.use_deform = item.deform
-            bone.head_radius = item.head_radius
-            bone.tail_radius = item.tail_radius
-            bone.envelope_distance = item.envelope_distance
+            orient_bone(bone, item)
         for item in args.bones:
             if item.parent is not None:
                 bone = data.edit_bones[item.name]
@@ -179,7 +185,8 @@ def create(args: ArmatureCreateArguments) -> ArmatureSummary:
         bpy.ops.object.mode_set(mode="OBJECT")
         obj.show_in_front = True
         data.display_type = "OCTAHEDRAL"
-        result = inspect(obj)
+        initialize(obj, args.bones)
+        result = inspect(obj, limit=args.sample_limit)
     except BaseException:
         if bpy.context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -414,6 +421,9 @@ def pose(args: ArmaturePoseArguments) -> ArmatureSummary:
     names = [b.name for b in args.bones]
     if any(n not in obj.pose.bones for n in names):
         fail("Pose update references a missing bone")
+    from .joints import pose_guard
+
+    pose_guard(obj, args.bones, args.reset)
     affected = (
         list(obj.pose.bones) if args.reset else [obj.pose.bones[n] for n in names]
     )
@@ -449,7 +459,7 @@ def pose(args: ArmaturePoseArguments) -> ArmatureSummary:
             p.rotation_euler = item.rotation
             p.scale = item.scale
         bpy.context.view_layer.update()
-        return inspect(obj, names if not args.reset else None)
+        return inspect(obj, names if not args.reset else None, args.sample_limit)
     except BaseException:
         for p, mode, loc, euler, quat, axis, scale in saved:
             p.rotation_mode = mode

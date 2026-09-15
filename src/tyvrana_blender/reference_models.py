@@ -176,6 +176,14 @@ class LandmarkPoint(Model):
     name: Name
 
 
+class BonePoint(Model):
+    kind: Literal["bone"]
+    object: Name
+    bone: Name
+    endpoint: Literal["head", "tail"] = "head"
+    state: Literal["rest", "evaluated"] = "evaluated"
+
+
 class ReferencePoint(Model):
     kind: Literal["reference_pixel"]
     reference: Name
@@ -186,7 +194,7 @@ class ReferencePoint(Model):
 
 
 type PointSource = Annotated[
-    WorldPoint | ObjectPoint | LandmarkPoint | ReferencePoint,
+    WorldPoint | ObjectPoint | LandmarkPoint | ReferencePoint | BonePoint,
     Field(discriminator="kind"),
 ]
 

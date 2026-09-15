@@ -59,6 +59,11 @@ from .instance_models import (
     SurfaceInstancesInspectArguments,
     SurfaceInstancesSummary,
 )
+from .joint_models import (
+    JointConfigureArguments,
+    StructureInspectArguments,
+    StructureSummary,
+)
 from .light_models import (
     LightConfigureArguments,
     LightCreateArguments,
@@ -186,6 +191,7 @@ from .rig_models import (
     ArmatureCreateArguments,
     ArmatureInspectArguments,
     ArmaturePoseArguments,
+    ArmatureRestArguments,
     ArmatureSummary,
     BindingSummary,
     DeformationInspectArguments,
@@ -260,6 +266,18 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def armature_configure_rest(
+        self, arguments: ArmatureRestArguments
+    ) -> ArmatureSummary: ...
+
+    def armature_configure_joints(
+        self, arguments: JointConfigureArguments
+    ) -> ArmatureSummary: ...
+
+    def armature_inspect_structure(
+        self, arguments: StructureInspectArguments
+    ) -> StructureSummary: ...
+
     def collection_create(
         self, arguments: CollectionCreateArguments
     ) -> CollectionResult: ...
@@ -565,6 +583,64 @@ def _operation[A: Model, R: Model](
 
 _DECLARATIONS = (
     _operation(
+        "blender.armature.configure_rest",
+        ArmatureRestArguments,
+        ArmatureSummary,
+        lambda b, a, q: b.armature_configure_rest(a),
+        "Edit an existing unbound neutral armature using up to 128 full "
+        "bone definitions/additions and unused-name renames. Rest "
+        "endpoints use armature/world vectors or shared typed point "
+        "sources; x_reference constructs an orthonormal frame "
+        "(Y=head-tail, projected X, Z=X cross Y), otherwise roll radians. "
+        "Validate complete hierarchy/connected heads and stage copied "
+        "data with rollback. Reject posed channels, shared/library data, "
+        "external users/bindings/control metadata and unowned "
+        "constraints. Owned LOCAL XYZ limits are preserved for omitted "
+        "bones and replaced by supplied definitions. No automatic weight "
+        "retargeting. sample_limit=0 returns counts/hashes without bone "
+        "rows.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.armature.configure_joints",
+        JointConfigureArguments,
+        ArmatureSummary,
+        lambda b, a, q: b.armature_configure_joints(a),
+        "Configure 1..128 fixed-center rotational joints on existing "
+        "bones. Native heads are centers; native rest axes are frames. "
+        "Typed XYZ Euler axis limits use radians relative to rest in "
+        "LOCAL space: null axis is unlimited, [0,0] locks it, null limits "
+        "removes only the owned constraint. Native constraints clamp "
+        "evaluated motion while requested channels remain; pose results "
+        "report both. Canonical principal branch avoids multi-turn/gimbal "
+        "ambiguity (|X,Z|<=pi-0.0001, |Y|<=pi/2-0.0001). Zero pose "
+        "translation/unit scale required for joints. No "
+        "coupling/IK/driver system. Atomic rollback; exclusive local "
+        "armature with no animation/unowned constraints. May configure "
+        "already bound structures without changing rest data.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.armature.inspect_structure",
+        StructureInspectArguments,
+        StructureSummary,
+        lambda b, a, q: b.armature_inspect_structure(a),
+        "Compact rest/joint/pose QA for one armature (max 128 bones), "
+        "optionally a subtree/named set. Default 16/max 128 paged rows; "
+        "select rest/frame/limits/pose fields. Explicit "
+        "world/armature/parent endpoint/frame space; all "
+        "requested/evaluated Euler rotations are rest-relative XYZ "
+        "radians. Joint center is the bone head; Y is head-tail, X/Z are "
+        "rest roll axes. World frame axes require positive uniform object "
+        "scale. Whole-armature validity includes unsampled bones; errors "
+        "are bounded per sampled bone. Use measurement.inspect bone "
+        "points for lengths/reach/angles in the existing unit system.",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
         "blender.collection.create_hierarchy",
         CollectionCreateArguments,
         CollectionResult,
@@ -792,7 +868,11 @@ _DECLARATIONS = (
         "Optional scalar targets include signed deviations and absolute "
         "tolerance checks. Bounds ignore modifiers/deformation, total 128000 "
         "unique mesh-object vertices per call. Meters require world frame; "
-        "local coordinates may be scaled. All queries must be valid. ",
+        "local coordinates may be scaled. Point sources include native bone "
+        "head/tail in rest or evaluated state, transformed through the armature; "
+        "bone names must be current. Distance/reach/unsigned-angle measurement "
+        "reuses this operation; signed joint Euler angles are radians in pose "
+        "inspection. All queries must be valid. ",
         effect="read_only",
         execution="synchronous",
     ),
@@ -825,7 +905,13 @@ _DECLARATIONS = (
         lambda b, a, q: b.armature_create(a),
         "Create a bounded rest-bone hierarchy with explicit head/tail/roll, "
         "parent and connection geometry. Rejects duplicate names, cycles and "
-        "inconsistent connected joints.",
+        "inconsistent connected joints. Up to 128 bones. Raw endpoints use "
+        "armature/world request space; shared typed point sources resolve to "
+        "world then armature space. Head is the joint center. x_reference "
+        "constructs an orthonormal native frame: Y=head-tail, projected X, "
+        "Z=X cross Y; alternatively roll is radians about Y. Optional typed "
+        "limits create owned LOCAL XYZ rotation constraints. sample_limit=0 "
+        "returns only counts/hashes; construction rolls back on failure.",
         effect="mutating",
         execution="synchronous",
     ),
@@ -847,7 +933,13 @@ _DECLARATIONS = (
         lambda b, a, q: b.armature_pose(a),
         "Set a batch of local pose channels, optionally resetting the whole "
         "pose first. Keeps rest geometry unchanged; invalid bone requests do "
-        "not partially apply.",
+        "not partially apply. XYZ Euler radians relative to native rest axes. "
+        "Owned joint limits clamp evaluated motion while requested channels "
+        "remain; returned joint summaries distinguish both. Constrained "
+        "joint requests require zero translation/unit scale and the principal "
+        "branch |X,Z|<=pi-0.0001, |Y|<=pi/2-0.0001. No multi-turn or gimbal "
+        "solver. sample_limit=0 suppresses bone rows; structural inspection "
+        "selects evaluated endpoints, frames and limits.",
         effect="mutating",
         execution="synchronous",
     ),

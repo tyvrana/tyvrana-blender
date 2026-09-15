@@ -3155,13 +3155,19 @@ MCP tests exercise construction, update, inspection and real image transport.
 
 ## Armatures and deformation
 
-Five operations provide bounded forward kinematics (FK): a parented bone chain
-whose local rotations articulate the mesh. They do not create animation, IK,
-constraints, corrective shapes or an automatic production rig.
+Armature operations provide bounded rest structures, typed local joint limits
+and forward kinematics (FK). Rest structure is separate from deformation binding
+and animation controls. See [structural joints](docs/structural-joints.md) for
+frames, safe rest editing, constrained evaluation and compact structural QA.
+Animation, IK, drivers, corrective shapes and automatic control rigs are separate
+capabilities.
 
 | Operation | Input | Result |
 | --- | --- | --- |
 | `blender.armature.create` | Unique object name and complete rest-bone hierarchy | Rest/pose summaries and world-space joints |
+| `blender.armature.configure_rest` | Full rest definitions/additions and safe renames | Staged rest edit with dependency guards |
+| `blender.armature.configure_joints` | Batched typed XYZ limits or removal | Native requested/evaluated joint summaries |
+| `blender.armature.inspect_structure` | Armature/subtree/names; selected rest/frame/limits/pose fields | Paged structure and whole-armature QA |
 | `blender.armature.inspect` | Armature name; optional bone names and sample limit | Hierarchy, joints, stable content digests and owned binding summaries |
 | `blender.armature.bind` | Mesh, armature, envelope or explicit weights, modifier index | Coverage, influence counts, weight sums/digest and binding duration |
 | `blender.armature.pose` | Armature, batched bone channels; optional reset | Updated pose and joint positions |
@@ -3170,7 +3176,8 @@ constraints, corrective shapes or an automatic production rig.
 ### Rest hierarchy, skinning and pose
 
 Creation accepts 1–128 bones in any order. Each has `name`, armature-local `head`
-and `tail`, optional `parent`, `connected`, `roll` in radians, `deform`,
+and `tail` (or shared typed point sources), optional `parent`, `connected`,
+`roll` in radians or `x_reference`, typed `limits`, `deform`,
 `head_radius`, `tail_radius` and `envelope_distance`. Defaults are disconnected,
 zero roll, deform enabled, radii 0.1 and envelope distance 0.25. Connected heads
 must match parent tails. Names must fit 63 UTF-8 bytes; bones must have positive
@@ -3213,7 +3220,9 @@ Pose channels are complete local, rest-relative channels for each listed bone:
 `location` defaults to zero, `rotation` to XYZ Euler radians zero, and `scale` to
 one. Omitted bones retain their pose; `reset: true` first resets every bone.
 Connected bones reject translation. Missing bones, locked channels and conflicting
-animation/drivers/constraints fail before applying any channels. A failed update
+animation/drivers/unowned constraints fail before applying any channels. Owned
+joint limits retain requested channels while clamping evaluated motion; joint
+results report both in radians. A failed update
 restores the prior pose. Creation restores selection, active object and Object Mode;
 binding stages weights with rollback before publishing. Operations require idle
 Object Mode. Editing shared/linked rigs, shared meshes or meshes with shape keys is

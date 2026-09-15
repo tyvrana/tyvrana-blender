@@ -5,10 +5,12 @@ from typing import Annotated, Literal, Self
 from pydantic import ConfigDict, Field, model_validator
 
 from .deformation_models import ContactProbes, ContactSummary, DeformationQA
+from .joint_models import BoneRename, JointEvaluation, JointLimits, orthonormal_axes
 from .mesh_models import Arguments, MeshVector
 from .models import Model
 from .modifier_models import Name
 from .numeric import Float32
+from .reference_models import PointSource
 
 MAX_BONES = 128
 MAX_VERTICES = 100_000
@@ -16,13 +18,33 @@ MAX_WEIGHT_WORK = 1_000_000
 type Radius = Annotated[Float32, Field(ge=0, le=10000)]
 
 
-class RestBone(Arguments):
+class RestBone(Model):
     name: Name
-    head: MeshVector
-    tail: MeshVector
+    head: MeshVector | PointSource = Field(
+        description=(
+            "Rest endpoint: raw vector in the request space, or a shared "
+            "typed point source resolved in world space then converted."
+        )
+    )
+    tail: MeshVector | PointSource
     parent: Name | None = None
     connected: bool = False
-    roll: Float32 = 0.0
+    roll: Float32 = Field(
+        default=0.0,
+        description=(
+            "Rest roll radians about longitudinal Y; mutually exclusive "
+            "with x_reference."
+        ),
+    )
+    x_reference: MeshVector | None = Field(
+        default=None,
+        description=(
+            "Reference direction in request space: projected "
+            "perpendicular to head-tail, normalized as local X; Z=X cross "
+            "Y. Collinear/zero reference is rejected."
+        ),
+    )
+    limits: JointLimits | None = None
     deform: bool = True
     head_radius: Radius = 0.1
     tail_radius: Radius = 0.1
@@ -32,10 +54,16 @@ class RestBone(Arguments):
     def valid_bone(self) -> Self:
         if len(self.name.encode()) > 63:
             raise ValueError("Bone names must fit 63 UTF-8 bytes")
-        if sum((a - b) ** 2 for a, b in zip(self.head, self.tail, strict=True)) < 1e-12:
-            raise ValueError("Bone length must be at least 0.000001")
-        if any(abs(v) > 10000 for v in self.head + self.tail):
-            raise ValueError("Rest coordinates must be within 10000 units")
+        if "roll" in self.model_fields_set and self.x_reference is not None:
+            raise ValueError("Choose roll or x_reference, not both")
+        if isinstance(self.head, list) and isinstance(self.tail, list):
+            direction = [b - a for a, b in zip(self.head, self.tail, strict=True)]
+            if sum(v * v for v in direction) < 1e-12:
+                raise ValueError("Bone length must be at least 0.000001")
+            if any(abs(v) > 10000 for v in self.head + self.tail):
+                raise ValueError("Rest coordinates must be within 10000 units")
+            if self.x_reference is not None:
+                orthonormal_axes(direction, self.x_reference)
         if self.connected and self.parent is None:
             raise ValueError("Connected bones require a parent")
         return self
@@ -43,6 +71,8 @@ class RestBone(Arguments):
 
 class ArmatureCreateArguments(Arguments):
     name: Name
+    space: Literal["armature", "world"] = "armature"
+    sample_limit: int = Field(default=16, ge=0, le=128)
     bones: Annotated[list[RestBone], Field(min_length=1, max_length=MAX_BONES)]
 
     @model_validator(mode="after")
@@ -60,15 +90,53 @@ class ArmatureCreateArguments(Arguments):
                     raise ValueError("Bone hierarchy contains a cycle")
                 visited.add(parent)
                 parent = bones[parent].parent
-            if bone.connected and bone.parent is not None:
+            parent_tail = bones[bone.parent].tail if bone.parent else None
+            if (
+                bone.connected
+                and bone.parent is not None
+                and isinstance(bone.head, list)
+                and isinstance(parent_tail, list)
+            ):
                 if (
-                    max(
-                        abs(a - b)
-                        for a, b in zip(bone.head, bones[bone.parent].tail, strict=True)
-                    )
+                    max(abs(a - b) for a, b in zip(bone.head, parent_tail, strict=True))
                     > 1e-6
                 ):
                     raise ValueError("Connected head must match the parent tail")
+        return self
+
+
+class ArmatureRestArguments(Arguments):
+    object_name: Name
+    space: Literal["armature", "world"] = "armature"
+    bones: list[RestBone] = Field(
+        default_factory=list,
+        max_length=128,
+        description=(
+            "Full definitions to add or replace after renames; omitted "
+            "bones keep their rest state and owned limits."
+        ),
+    )
+    renames: list[BoneRename] = Field(
+        default_factory=list,
+        max_length=128,
+        description=(
+            "Existing name to unused name; definitions/parents refer to "
+            "names after these renames. No swaps."
+        ),
+    )
+    sample_limit: int = Field(default=16, ge=0, le=128)
+
+    @model_validator(mode="after")
+    def unique(self) -> Self:
+        if not self.bones and not self.renames:
+            raise ValueError("Provide rest definitions or renames")
+        for values in (
+            [b.name for b in self.bones],
+            [r.name for r in self.renames],
+            [r.rename for r in self.renames],
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError("Rest definitions and rename names must be unique")
         return self
 
 
@@ -146,6 +214,7 @@ class PoseBone(Arguments):
 
 class ArmaturePoseArguments(Arguments):
     object_name: Name
+    sample_limit: int = Field(default=16, ge=0, le=128)
     bones: Annotated[list[PoseBone], Field(max_length=MAX_BONES)] = Field(
         default_factory=list
     )
@@ -181,6 +250,7 @@ class DeformationInspectArguments(Arguments):
 
 
 class BoneSummary(Model):
+    joint: JointEvaluation | None = None
     name: str
     parent: str | None
     connected: bool

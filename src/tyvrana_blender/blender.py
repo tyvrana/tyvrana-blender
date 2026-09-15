@@ -78,6 +78,11 @@ from .instance_models import (
     SurfaceInstancesInspectArguments,
     SurfaceInstancesSummary,
 )
+from .joint_models import (
+    JointConfigureArguments,
+    StructureInspectArguments,
+    StructureSummary,
+)
 from .light_models import (
     COMMON_FIELDS,
     LIGHT_TYPES,
@@ -192,6 +197,7 @@ from .rig_models import (
     ArmatureCreateArguments,
     ArmatureInspectArguments,
     ArmaturePoseArguments,
+    ArmatureRestArguments,
     ArmatureSummary,
     BindingSummary,
     DeformationInspectArguments,
@@ -643,6 +649,27 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def armature_configure_rest(
+        self, arguments: ArmatureRestArguments
+    ) -> ArmatureSummary:
+        from .joints import edit_rest
+
+        return edit_rest(arguments)
+
+    def armature_configure_joints(
+        self, arguments: JointConfigureArguments
+    ) -> ArmatureSummary:
+        from .joints import configure
+
+        return configure(arguments)
+
+    def armature_inspect_structure(
+        self, arguments: StructureInspectArguments
+    ) -> StructureSummary:
+        from .joints import inspect_structure
+
+        return inspect_structure(arguments)
+
     def collection_create(
         self, arguments: CollectionCreateArguments
     ) -> CollectionResult:
