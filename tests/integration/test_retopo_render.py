@@ -6,6 +6,8 @@ from typing import Any
 import pytest
 from tyvrana_protocol import JsonValue
 
+from tyvrana_blender.operations import OPERATIONS
+
 from ..png import mean_pixel_difference, rgb_pixels
 from .conftest import running_blender
 from .test_cameras import render
@@ -29,7 +31,9 @@ async def test_build_grow_project_relax_and_render_cage(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=True):
             registered = await discover(client)
-            assert registered is not None and registered.operation_count == 103
+            assert registered is not None and registered.operation_count == len(
+                OPERATIONS
+            )
             identifier = registered.instance_id
 
             async def call(op: str, **args: JsonValue) -> Any:

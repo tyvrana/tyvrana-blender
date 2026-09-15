@@ -3345,6 +3345,175 @@ restored even when contact inspection fails. Inspect the actual rendered result
 alongside these measurements. Weights, target binding and pose persist through
 native save/reopen and live extension updates.
 
+## References, landmarks and measurements
+
+These operations support measured modeling from reference images and geometric
+constraints. Workflow reasoning and visual reference interpretation belong to the
+external client. The adapter supplies native reference state and deterministic
+measurements; it does not infer anatomy, recognize images or perform photogrammetry.
+Discover the current typed schemas through `tyvrana_list_operations`.
+
+| Operation | Intent and bound |
+|---|---|
+| `blender.reference.create` | Create 1–16 named references sharing existing image resources, with transforms, display settings, category and source label. |
+| `blender.reference.configure` | Patch display settings/metadata for 1–16 references; omitted properties remain unchanged. |
+| `blender.reference.inspect` | Filter by names/prefix, image, collection or category; default 32, maximum 128 per page. |
+| `blender.reference.calibrate` | Set the scale of one reference using two image points and a known distance; preserve the first point in world space. |
+| `blender.reference.remove` | Remove 1–32 managed references after dependency checks; retain images. |
+| `blender.landmark.set` | Create or fully redefine 1–32 named world/object-local points in one declaration. |
+| `blender.landmark.inspect` | Filter by names/prefix, attached object, category or attachment type; default 32, maximum 128. |
+| `blender.landmark.remove` | Remove 1–32 managed landmarks, preserving their target objects. |
+| `blender.measurement.inspect` | Calculate 1–64 named distances, angles and authored mesh bounds; optionally compare scalar values to targets. |
+| `blender.scene.configure_units` | Set unit display system and meters per Blender unit without scaling geometry. |
+
+### Reference images and ownership
+
+First import PNG/JPEG bytes through `tyvrana_import_artifact`, then attach the
+returned ID to `blender.image.create_from_artifact`. Reuse the resulting packed
+image name in reference declarations. Generated images are also supported.
+Release the imported core artifact after creating the image; packed image bytes
+and references survive removal of input temporary files and native save/reopen.
+Image resources remain shared. Reference removal never deletes images; use the
+existing guarded `blender.image.remove` when an image has no remaining users.
+
+References are native **image empties**, displayed in the viewport and excluded
+from rendered geometry. This matches Blender's [reference-image workflow](https://docs.blender.org/manual/en/5.2/modeling/empties.html).
+For a rendered textured plane, use mesh/material/UV/shader operations. Camera
+optics and transforms remain their existing typed operations. This family does
+not perform perspective reconstruction or automatic camera matching.
+
+Example operation arguments (after creating image `Sheet`):
+
+```json
+{
+  "references": [
+    {"name": "Front reference", "image": "Sheet", "size": 2.0,
+     "collection": "Model references", "category": "front",
+     "source_label": "Measured front elevation", "opacity": 0.5},
+    {"name": "Side reference", "image": "Sheet", "size": 2.0,
+     "rotation": [0, 1.5707963268, 0], "perspective": false}
+  ]
+}
+```
+
+`size` is the unscaled longest display dimension, in 0.0001–1000 Blender units;
+image dimensions and pixel aspect determine the other axis. The image is centered
+in the local XY plane on creation. Rotation uses XYZ Euler radians. Further object
+transforms use `blender.object.set_transform`; display size is separate from
+object scale. Opacity is 0–1. Depth is `default`, `front` or `back`; side is `both`,
+`front` or `back`. Orthographic, perspective and axis-aligned-only flags control
+viewport display. `hidden` controls global viewport visibility; hiding a selected
+object can clear its selection through native Blender behavior.
+
+New collections are created locally beneath the scene root; existing editable
+collections must already belong to the current scene. Only empty collections
+created by this reference family are cleaned up on reference removal. General
+collection organization, linking and hierarchy editing are separate capabilities.
+
+Inspection includes local dimensions, four world corners, transform, image
+name/pixel size, packed/valid flags, category/source label and display settings.
+Collection names are capped at 16 with exact counts and a truncation flag. Names
+are bounded to 63 characters and must fit Blender's native naming representation;
+source labels are bounded to 512 characters. Labels describe supplied provenance,
+not verified source authenticity. Missing image data yields `valid: false` and no
+corners; it does not substitute another image. Only static packed/generated images
+up to 4096 pixels per axis are supported.
+
+### Persistent landmarks and coordinate frames
+
+`landmark.set` is a full declaration: it creates a missing name or redefines an
+existing managed landmark, resetting omitted labels/category/attachment. It never
+overwrites an unrelated object. A landmark is a native empty with small metadata;
+no external semantic database is needed.
+
+```json
+{
+  "landmarks": [
+    {"name": "World datum", "point": [0, 0, 0]},
+    {"name": "Mounting center", "point": [1, 0, 0],
+     "object": "Bracket", "category": "assembly", "label": "hinge axis center"}
+  ]
+}
+```
+
+Omitted/null `object` means a fixed world point. With an object, `point` is in that
+object's local coordinates and native parenting follows its transforms, including
+rotation/nonuniform scale. Attachments survive target renaming and save/reopen.
+They **do not follow individual mesh vertices or mesh deformation**. Landmark
+inspection returns local/world points and attachment validity. A deleted parent
+invalidates its attached landmark; measurement fails until explicitly redefined.
+Landmark-to-landmark, bone/vertex parenting and delta-translation edits are outside
+this contract. Existing display choices survive landmark redefinition.
+
+### Measurement and tolerance semantics
+
+Each query has a unique name and `kind`: `distance`, `angle` or `bounds`. Points
+are discriminated by `kind`:
+
+- `world`: `point` in world coordinates.
+- `object`: `object` plus a fixed object-local `point`.
+- `landmark`: the persistent point's `name`.
+- `reference_pixel`: `reference` plus `[x,y]` image-edge coordinates, bottom-left
+  origin, inclusive `[0,width] × [0,height]`; pixel centers are half-integers.
+
+A distance takes `a`/`b`. An angle takes `a`/`vertex`/`b` and returns the unsigned
+0–180 degree angle between two nonzero rays. A bounds query takes `object` and
+returns minimum, maximum and dimensions from its **authored mesh vertices**.
+Bounds exclude modifiers, instances, pose and other evaluated deformation; use
+existing evaluated mesh/deformation inspection for those workflows. A call is
+limited to 128,000 vertices across its distinct mesh objects; repeated bounds
+queries reuse the computed result. No per-vertex output is returned.
+
+```json
+{
+  "queries": [
+    {"kind": "distance", "name": "Mount spacing",
+     "a": {"kind": "landmark", "name": "Left mount"},
+     "b": {"kind": "landmark", "name": "Right mount"},
+     "comparison": {"target": 0.25, "tolerance": 0.001}},
+    {"kind": "bounds", "name": "Housing extents", "object": "Housing"}
+  ],
+  "unit": "meters"
+}
+```
+
+The default `frame: null` uses world axes. A named `frame` transforms all query
+points into that object's local coordinate frame before calculation. The default
+`unit: "blender"` uses those coordinates directly; `meters` multiplies world
+lengths/bounds by the scene's meters-per-unit setting and requires a world frame.
+Angles always return degrees. A comparison reports target, signed
+`deviation = actual - target`, tolerance and `within_tolerance` using an inclusive
+absolute threshold. Bounds return their three components, without scalar comparison.
+Numeric precision is native Blender float precision; tolerances must suit scale.
+Distance ratios, arbitrary dimension-vector targets and evaluated surface attachment
+are not currently part of this operation.
+
+All results include current scene units. For example,
+`{"system":"metric","meters_per_unit":0.01}` to `scene.configure_units` means one
+Blender unit represents one centimeter. This changes conversion/display metadata,
+not coordinates, object sizes or physics behavior; see Blender's
+[unit settings](https://docs.blender.org/api/5.2/bpy.types.UnitSettings.html).
+
+### Deterministic calibration and errors
+
+`reference.calibrate` accepts `name`, image points `a`/`b`, positive
+`target_distance`, and `unit` (`blender` or `meters`). It calculates the scale
+factor from the current world distance, changes display size uniformly and
+translates the reference to preserve point A. Results include before/after distance,
+factor, size and world anchor. The reference must be unparented and have no attached
+children; calibrate before attaching landmarks. Object rotation/nonuniform scale
+are preserved. Zero distance, out-of-image points, size overflow and insufficient
+native precision fail without retaining the attempted calibration.
+
+Mutations require editable local scene state in Object Mode outside rendering.
+Linked/shared-scene objects, overrides, animation/constraints and external
+reference/landmark users are protected. Batch creation/configuration and landmark
+sets preflight their inputs and restore staged changes on failure. Removal preflights
+all targets/dependencies. Every query must be valid; measurements do not silently
+skip failures. Errors distinguish invalid arguments, missing objects, invalid context,
+degenerate measurements and work-budget limits. Inputs/outputs are bounded; inspection
+pages report counts and `next_offset` rather than expanding the whole scene.
+
 ## Development and packaging
 
 Requires uv, Python 3.12+, Git, and Blender 5.2.1. Create this repository's own

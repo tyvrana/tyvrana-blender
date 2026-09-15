@@ -8,6 +8,7 @@ from tyvrana_protocol import JsonValue
 
 from tyvrana_blender.file_models import FileState
 from tyvrana_blender.models import SceneSummary
+from tyvrana_blender.operations import OPERATIONS
 
 from .conftest import running_blender
 from .test_e2e import core_client, discover, operation, wait_for_project
@@ -23,7 +24,9 @@ async def test_project_persistence_over_mcp(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=ui):
             registered = await discover(client)
-            assert registered is not None and registered.operation_count == 103
+            assert registered is not None and registered.operation_count == len(
+                OPERATIONS
+            )
             identifier = registered.instance_id
 
             async def call(name: str, arguments: dict[str, object]) -> object:

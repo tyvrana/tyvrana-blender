@@ -120,6 +120,25 @@ from .modifier_models import (
     ModifierRemoveResult,
     ModifierSummary,
 )
+from .reference_models import (
+    LandmarkInspectArguments,
+    LandmarkInspectResult,
+    LandmarkResult,
+    LandmarkSetArguments,
+    MeasurementArguments,
+    MeasurementResult,
+    NamedRemoveArguments,
+    NamedRemoveResult,
+    ReferenceCalibrateArguments,
+    ReferenceCalibrateResult,
+    ReferenceConfigureArguments,
+    ReferenceCreateArguments,
+    ReferenceInspectArguments,
+    ReferenceInspectResult,
+    ReferenceResult,
+    UnitsConfigureArguments,
+    UnitsSummary,
+)
 from .remesh_models import (
     VoxelRemeshArguments,
     VoxelRemeshInspectArguments,
@@ -225,6 +244,42 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def reference_create(
+        self, arguments: ReferenceCreateArguments
+    ) -> ReferenceResult: ...
+
+    def reference_configure(
+        self, arguments: ReferenceConfigureArguments
+    ) -> ReferenceResult: ...
+
+    def reference_inspect(
+        self, arguments: ReferenceInspectArguments
+    ) -> ReferenceInspectResult: ...
+
+    def reference_remove(
+        self, arguments: NamedRemoveArguments
+    ) -> NamedRemoveResult: ...
+
+    def reference_calibrate(
+        self, arguments: ReferenceCalibrateArguments
+    ) -> ReferenceCalibrateResult: ...
+
+    def landmark_set(self, arguments: LandmarkSetArguments) -> LandmarkResult: ...
+
+    def landmark_inspect(
+        self, arguments: LandmarkInspectArguments
+    ) -> LandmarkInspectResult: ...
+
+    def landmark_remove(self, arguments: NamedRemoveArguments) -> NamedRemoveResult: ...
+
+    def measurement_inspect(
+        self, arguments: MeasurementArguments
+    ) -> MeasurementResult: ...
+
+    def scene_configure_units(
+        self, arguments: UnitsConfigureArguments
+    ) -> UnitsSummary: ...
+
     def weights_assign(
         self, arguments: WeightsAssignArguments
     ) -> WeightsAssignment: ...
@@ -461,6 +516,126 @@ def _operation[A: Model, R: Model](
 
 
 _DECLARATIONS = (
+    _operation(
+        "blender.reference.create",
+        ReferenceCreateArguments,
+        ReferenceResult,
+        lambda b, a, q: b.reference_create(a),
+        "Create 1..16 named image-empty references from existing "
+        "packed/generated images. Import artifacts with "
+        "image.create_from_artifact first. References share images, persist in "
+        "the project and are viewport-only, not renderable geometry. New "
+        "reference collections are local and removed when empty. ",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.reference.configure",
+        ReferenceConfigureArguments,
+        ReferenceResult,
+        lambda b, a, q: b.reference_configure(a),
+        "Patch display/metadata for 1..16 managed references; omitted fields "
+        "remain unchanged. Object transforms use object.set_transform. Does not "
+        "change shared image data. ",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.reference.inspect",
+        ReferenceInspectArguments,
+        ReferenceInspectResult,
+        lambda b, a, q: b.reference_inspect(a),
+        "Inspect a filtered page of managed references, pixel dimensions, local "
+        "size, world corners, display settings and source labels. Default "
+        "32/max 128; collections max 16 with explicit count. Pixel points use "
+        "bottom-left image-edge coordinates. ",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.reference.remove",
+        NamedRemoveArguments,
+        NamedRemoveResult,
+        lambda b, a, q: b.reference_remove(a),
+        "Remove 1..32 managed references after dependency preflight; retain "
+        "shared images. Remove unused images separately with image.remove. "
+        "Empty owned reference collections are cleaned up. ",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.reference.calibrate",
+        ReferenceCalibrateArguments,
+        ReferenceCalibrateResult,
+        lambda b, a, q: b.reference_calibrate(a),
+        "Calibrate an unparented reference from two image-edge pixel points and "
+        "a positive world distance; uniformly change display size while "
+        "preserving point A in world space. Requires no attached children. "
+        "Units are Blender units or meters via scene scale. No vision "
+        "inference. ",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.landmark.set",
+        LandmarkSetArguments,
+        LandmarkResult,
+        lambda b, a, q: b.landmark_set(a),
+        "Declare 1..32 persistent named landmarks. Create or fully redefine "
+        "only managed landmarks; omitted metadata resets. Object-local points "
+        "follow object transforms, not mesh deformation. Omit/null object for "
+        "world points. Reject name collisions and landmark-to-landmark "
+        "attachments. ",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.landmark.inspect",
+        LandmarkInspectArguments,
+        LandmarkInspectResult,
+        lambda b, a, q: b.landmark_inspect(a),
+        "Inspect named/category/object/attachment-filtered landmark pages "
+        "(default 32/max 128). Return local and world coordinates and explicit "
+        "validity; missing attached objects require redefinition, never silent "
+        "world-point fallback. ",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.landmark.remove",
+        NamedRemoveArguments,
+        NamedRemoveResult,
+        lambda b, a, q: b.landmark_remove(a),
+        "Remove 1..32 managed landmarks after dependency preflight. Preserve "
+        "target objects and unrelated state. ",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.measurement.inspect",
+        MeasurementArguments,
+        MeasurementResult,
+        lambda b, a, q: b.measurement_inspect(a),
+        "Calculate 1..64 named distances, unsigned angles (degrees), or exact "
+        "authored-mesh axis-aligned bounds in world or an object-local frame. "
+        "Optional scalar targets include signed deviations and absolute "
+        "tolerance checks. Bounds ignore modifiers/deformation, total 128000 "
+        "unique mesh-object vertices per call. Meters require world frame; "
+        "local coordinates may be scaled. All queries must be valid. ",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.scene.configure_units",
+        UnitsConfigureArguments,
+        UnitsSummary,
+        lambda b, a, q: b.scene_configure_units(a),
+        "Set scene display units and explicit meters per Blender unit. This "
+        "does not scale geometry or change physics. Read current units with "
+        "measurement.inspect. ",
+        effect="mutating",
+        execution="synchronous",
+    ),
     _operation(
         "blender.armature.bind",
         ArmatureBindArguments,

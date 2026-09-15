@@ -7,6 +7,8 @@ from typing import Any
 
 from tyvrana_protocol import JsonValue
 
+from tyvrana_blender.operations import OPERATIONS
+
 from ..png import mean_pixel_difference
 from .conftest import ROOT, running_blender
 from .test_cameras import render
@@ -41,7 +43,9 @@ async def test_articulated_mesh_render_and_persistence_over_mcp(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=False):
             registered = await discover(client)
-            assert registered is not None and registered.operation_count == 103
+            assert registered is not None and registered.operation_count == len(
+                OPERATIONS
+            )
             identifier = registered.instance_id
 
             async def call(op: str, **args: JsonValue) -> Any:

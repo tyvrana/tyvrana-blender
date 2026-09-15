@@ -138,6 +138,25 @@ from .modifier_models import (
 )
 from .operations import OperationError, execute, registration
 from .raster import RasterError, raster_size
+from .reference_models import (
+    LandmarkInspectArguments,
+    LandmarkInspectResult,
+    LandmarkResult,
+    LandmarkSetArguments,
+    MeasurementArguments,
+    MeasurementResult,
+    NamedRemoveArguments,
+    NamedRemoveResult,
+    ReferenceCalibrateArguments,
+    ReferenceCalibrateResult,
+    ReferenceConfigureArguments,
+    ReferenceCreateArguments,
+    ReferenceInspectArguments,
+    ReferenceInspectResult,
+    ReferenceResult,
+    UnitsConfigureArguments,
+    UnitsSummary,
+)
 from .remesh_models import (
     VoxelRemeshArguments,
     VoxelRemeshInspectArguments,
@@ -608,6 +627,74 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def reference_create(self, arguments: ReferenceCreateArguments) -> ReferenceResult:
+        main_thread()
+        from . import references
+
+        return references.create(arguments)
+
+    def reference_configure(
+        self, arguments: ReferenceConfigureArguments
+    ) -> ReferenceResult:
+        main_thread()
+        from . import references
+
+        return references.configure(arguments)
+
+    def reference_inspect(
+        self, arguments: ReferenceInspectArguments
+    ) -> ReferenceInspectResult:
+        main_thread()
+        from . import references
+
+        return references.inspect(arguments)
+
+    def reference_remove(self, arguments: NamedRemoveArguments) -> NamedRemoveResult:
+        main_thread()
+        from . import references
+
+        return references.remove(arguments, references.REFERENCE)
+
+    def reference_calibrate(
+        self, arguments: ReferenceCalibrateArguments
+    ) -> ReferenceCalibrateResult:
+        main_thread()
+        from . import references
+
+        return references.calibrate(arguments)
+
+    def landmark_set(self, arguments: LandmarkSetArguments) -> LandmarkResult:
+        main_thread()
+        from . import references
+
+        return references.set_landmarks(arguments)
+
+    def landmark_inspect(
+        self, arguments: LandmarkInspectArguments
+    ) -> LandmarkInspectResult:
+        main_thread()
+        from . import references
+
+        return references.inspect_landmarks(arguments)
+
+    def landmark_remove(self, arguments: NamedRemoveArguments) -> NamedRemoveResult:
+        main_thread()
+        from . import references
+
+        return references.remove(arguments, references.LANDMARK)
+
+    def measurement_inspect(self, arguments: MeasurementArguments) -> MeasurementResult:
+        main_thread()
+        from . import references
+
+        return references.measure(arguments)
+
+    def scene_configure_units(self, arguments: UnitsConfigureArguments) -> UnitsSummary:
+        main_thread()
+        from . import references
+
+        return references.configure_units(arguments)
+
     def extension_inspect(self) -> ExtensionState:
         main_thread()
         from . import lifecycle

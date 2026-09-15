@@ -108,6 +108,25 @@ from tyvrana_blender.modifier_models import (
     ModifierSummary,
 )
 from tyvrana_blender.operations import OperationError, execute
+from tyvrana_blender.reference_models import (
+    LandmarkInspectArguments,
+    LandmarkInspectResult,
+    LandmarkResult,
+    LandmarkSetArguments,
+    MeasurementArguments,
+    MeasurementResult,
+    NamedRemoveArguments,
+    NamedRemoveResult,
+    ReferenceCalibrateArguments,
+    ReferenceCalibrateResult,
+    ReferenceConfigureArguments,
+    ReferenceCreateArguments,
+    ReferenceInspectArguments,
+    ReferenceInspectResult,
+    ReferenceResult,
+    UnitsConfigureArguments,
+    UnitsSummary,
+)
 from tyvrana_blender.rig_models import (
     ArmatureBindArguments,
     ArmatureCreateArguments,
@@ -170,6 +189,44 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def reference_create(self, arguments: ReferenceCreateArguments) -> ReferenceResult:
+        raise NotImplementedError
+
+    def reference_configure(
+        self, arguments: ReferenceConfigureArguments
+    ) -> ReferenceResult:
+        raise NotImplementedError
+
+    def reference_inspect(
+        self, arguments: ReferenceInspectArguments
+    ) -> ReferenceInspectResult:
+        raise NotImplementedError
+
+    def reference_remove(self, arguments: NamedRemoveArguments) -> NamedRemoveResult:
+        raise NotImplementedError
+
+    def reference_calibrate(
+        self, arguments: ReferenceCalibrateArguments
+    ) -> ReferenceCalibrateResult:
+        raise NotImplementedError
+
+    def landmark_set(self, arguments: LandmarkSetArguments) -> LandmarkResult:
+        raise NotImplementedError
+
+    def landmark_inspect(
+        self, arguments: LandmarkInspectArguments
+    ) -> LandmarkInspectResult:
+        raise NotImplementedError
+
+    def landmark_remove(self, arguments: NamedRemoveArguments) -> NamedRemoveResult:
+        raise NotImplementedError
+
+    def measurement_inspect(self, arguments: MeasurementArguments) -> MeasurementResult:
+        raise NotImplementedError
+
+    def scene_configure_units(self, arguments: UnitsConfigureArguments) -> UnitsSummary:
+        raise NotImplementedError
+
     def weights_assign(self, arguments: WeightsAssignArguments) -> WeightsAssignment:
         raise NotImplementedError
 
