@@ -1,5 +1,6 @@
 """Native preservation and actual baked PNG bytes through the MCP boundary."""
 
+import asyncio
 import base64
 import hashlib
 import subprocess
@@ -28,7 +29,7 @@ def test_native_bake_preservation(profile: dict[str, str], tmp_path: Path) -> No
     )
     (tmp_path / "bake-native.log").write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_BAKE_TESTS_PASSED 6" in result.stdout
+    assert "BLENDER_BAKE_TESTS_PASSED 7" in result.stdout
     assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))
 
 
@@ -37,7 +38,7 @@ async def test_baked_png_reaches_mcp_and_survives_reopen(
 ) -> None:
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
-        async with running_blender(profile, tmp_path, ui=False):
+        async with running_blender(profile, tmp_path, ui=True):
             registration = await discover(client)
             assert registration is not None
             identifier = registration.instance_id
@@ -68,7 +69,7 @@ async def test_baked_png_reaches_mcp_and_survives_reopen(
                 scale=[2, 2, 1],
                 rotation=[0.1, 0, 0],
             )
-            targets: JsonValue = [
+            targets: list[JsonValue] = [
                 {
                     "target": "Low",
                     "sources": ["High"],
@@ -78,6 +79,74 @@ async def test_baked_png_reaches_mcp_and_survives_reopen(
                 }
             ]
             await call(
+                "object.create_primitive",
+                primitive="plane",
+                name="Low2",
+                location=[5, 0, 0],
+            )
+            await call("uv.create_map", object_name="Low2", name="ProductionUV")
+            await call(
+                "uv.unwrap",
+                object_name="Low2",
+                uv_map="ProductionUV",
+                method="angle_based",
+                correct_aspect=False,
+            )
+            await call(
+                "object.create_primitive",
+                primitive="plane",
+                name="High2",
+                location=[5, 0, 0.1],
+                scale=[2, 2, 1],
+                rotation=[0.1, 0, 0],
+            )
+            await call(
+                "uv.pack_islands",
+                objects=[
+                    {"object_name": "Low", "uv_map": "ProductionUV"},
+                    {"object_name": "Low2", "uv_map": "ProductionUV"},
+                ],
+                resolution=64,
+                padding_pixels=2,
+            )
+            targets.append(
+                {
+                    "target": "Low2",
+                    "sources": ["High2"],
+                    "uv_map": "ProductionUV",
+                    "cage_extrusion": 0.5,
+                    "max_ray_distance": 1,
+                }
+            )
+            bad = await call(
+                "bake.image",
+                targets=[
+                    {
+                        "target": "Missing",
+                        "sources": ["High"],
+                        "uv_map": "UV",
+                        "cage_extrusion": 0.5,
+                        "max_ray_distance": 1,
+                    }
+                ],
+                name="Failed",
+                resolution=64,
+                margin=1,
+                device="cpu",
+            )
+            assert isinstance(bad, dict)
+            async with asyncio.timeout(10):
+                while True:
+                    failed = await call("bake.status", job_id=bad["job_id"])
+                    assert isinstance(failed, dict)
+                    if failed["state"] == "failed":
+                        assert failed["error"]
+                        break
+                    await asyncio.sleep(0.1)
+            images_before = await call("image.inspect")
+            assert isinstance(images_before, dict)
+            assert "Failed" not in str(images_before)
+            queued = await call(
                 "bake.image",
                 targets=targets,
                 name="Normal",
@@ -85,6 +154,17 @@ async def test_baked_png_reaches_mcp_and_survives_reopen(
                 margin=1,
                 device="cpu",
             )
+            assert isinstance(queued, dict)
+            assert queued["state"] == "queued"
+            async with asyncio.timeout(30):
+                while True:
+                    job = await call("bake.status", job_id=queued["job_id"])
+                    assert isinstance(job, dict)
+                    assert job["state"] != "failed", job
+                    if job["state"] == "completed":
+                        assert job["completed_targets"] == 2
+                        break
+                    await asyncio.sleep(0.1)
             destination = tmp_path / "normal.png"
             response = await client.call_tool(
                 "tyvrana_execute_operation",

@@ -14,9 +14,10 @@ from tyvrana_blender import retopo_models as retopology
 from tyvrana_blender import sculpt_models as regional
 from tyvrana_blender.bake_models import (
     BakeImageArguments,
-    BakeImageResult,
     BakeInspectArguments,
     BakeInspectResult,
+    BakeJobStatus,
+    BakeStatusArguments,
     ImageSaveArguments,
     ImageSaveResult,
 )
@@ -727,10 +728,16 @@ class Backend:
             padding_pixels=arguments.padding_pixels,
         )
 
+    def operation_allowed(self, operation: str) -> bool:
+        return True
+
+    def bake_status(self, arguments: BakeStatusArguments) -> BakeJobStatus:
+        raise NotImplementedError
+
     def bake_inspect(self, arguments: BakeInspectArguments) -> BakeInspectResult:
         raise NotImplementedError
 
-    def bake_image(self, arguments: BakeImageArguments) -> BakeImageResult:
+    def bake_image(self, arguments: BakeImageArguments) -> BakeJobStatus:
         raise NotImplementedError
 
     def image_save(
@@ -742,6 +749,10 @@ class Backend:
         self, arguments: UVLayoutArguments
     ) -> tuple[UVLayoutResult, ArtifactDescriptor | None]:
         raise NotImplementedError
+
+    def image_remove(self, arguments: DeleteArguments) -> DeleteResult:
+        self.calls.append("image_remove")
+        return DeleteResult(deleted=arguments.name)
 
     def image_inspect(self) -> ImageInspectResult:
         self.calls.append("image_inspect")
@@ -1103,6 +1114,15 @@ def test_unsupported_operation() -> None:
     result = call(Backend(), "blender.not_implemented", {})
     assert isinstance(result, OperationFailure)
     assert result.error.code == "operation_unsupported"
+
+
+def test_owned_native_job_blocks_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = Backend()
+    monkeypatch.setattr(backend, "operation_allowed", lambda operation: False)
+    result = call(backend, "blender.object.create_primitive", {"primitive": "cube"})
+    assert isinstance(result, OperationFailure)
+    assert result.error.code == "adapter_busy"
+    assert backend.calls == []
 
 
 @pytest.mark.parametrize("bad_model", [True, False])

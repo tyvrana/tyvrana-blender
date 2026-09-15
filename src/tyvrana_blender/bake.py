@@ -3,7 +3,7 @@
 import hashlib
 import math
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import ExitStack, contextmanager
 from typing import Any
 
@@ -335,11 +335,15 @@ def inspect(arguments: BakeInspectArguments) -> BakeInspectResult:
     )
 
 
-def execute_native(**arguments: Any) -> Any:
-    return bpy.ops.object.bake("EXEC_DEFAULT", **arguments)
+def execute_native(*, asynchronous: bool = False, **arguments: Any) -> Any:
+    return bpy.ops.object.bake(
+        "INVOKE_DEFAULT" if asynchronous else "EXEC_DEFAULT", **arguments
+    )
 
 
-def bake_image(arguments: BakeImageArguments) -> BakeImageResult:
+def bake_steps(
+    arguments: BakeImageArguments, *, asynchronous: bool
+) -> Generator[None, None, BakeImageResult]:
     started = time.monotonic()
     if bpy.data.images.get(arguments.name) is not None:
         raise OperationError(
@@ -423,57 +427,65 @@ def bake_image(arguments: BakeImageArguments) -> BakeImageResult:
                 scene.collection.objects.link(obj)
             by_name = dict(zip(meshes, proxies, strict=True))
             layer = scene.view_layers[0]
-            with bpy.context.temp_override(scene=scene, view_layer=layer):
-                for t in arguments.targets:
-                    for obj in proxies:
-                        obj.select_set(False, view_layer=layer)
-                        obj.hide_render = True
-                    target = by_name[t.target]
-                    target.data.materials.clear()
-                    target.data.materials.append(material)
-                    for f in target.data.polygons:
-                        f.material_index = 0
-                    target.data.uv_layers.active = target.data.uv_layers[t.uv_map]
-                    target.data.uv_layers[t.uv_map].active_render = True
-                    for obj in [target, *[by_name[n] for n in t.sources]]:
-                        obj.hide_render = False
-                        obj.select_set(True, view_layer=layer)
-                    layer.objects.active = target
-                    layer.update()
-                    begin = time.monotonic()
-                    selected = [target, *[by_name[n] for n in t.sources]]
-                    with bpy.context.temp_override(
-                        active_object=target,
-                        object=target,
-                        selected_objects=selected,
-                        selected_editable_objects=selected,
-                    ):
-                        outcome = execute_native(
-                            type="NORMAL",
-                            normal_space="TANGENT",
-                            normal_r="POS_X",
-                            normal_g="POS_Y",
-                            normal_b="POS_Z",
-                            use_selected_to_active=True,
-                            use_clear=False,
-                            use_cage=t.use_cage,
-                            cage_extrusion=t.cage_extrusion,
-                            max_ray_distance=t.max_ray_distance,
-                            cage_object="",
-                            uv_layer=t.uv_map,
-                            margin=arguments.margin,
-                            margin_type=arguments.margin_type.upper(),
-                            target="IMAGE_TEXTURES",
-                            save_mode="INTERNAL",
-                        )
-                    timings.append(
-                        BakeTiming(target=t.target, seconds=time.monotonic() - begin)
+            for t in arguments.targets:
+                for obj in proxies:
+                    obj.select_set(False, view_layer=layer)
+                    obj.hide_render = True
+                target = by_name[t.target]
+                target.data.materials.clear()
+                target.data.materials.append(material)
+                for f in target.data.polygons:
+                    f.material_index = 0
+                target.data.uv_layers.active = target.data.uv_layers[t.uv_map]
+                target.data.uv_layers[t.uv_map].active_render = True
+                for obj in [target, *[by_name[n] for n in t.sources]]:
+                    obj.hide_render = False
+                    obj.select_set(True, view_layer=layer)
+                layer.objects.active = target
+                layer.update()
+                begin = time.monotonic()
+                selected = [target, *[by_name[n] for n in t.sources]]
+                with bpy.context.temp_override(
+                    scene=scene,
+                    view_layer=layer,
+                    active_object=target,
+                    object=target,
+                    selected_objects=selected,
+                    selected_editable_objects=selected,
+                ):
+                    outcome = execute_native(
+                        asynchronous=asynchronous,
+                        type="NORMAL",
+                        normal_space="TANGENT",
+                        normal_r="POS_X",
+                        normal_g="POS_Y",
+                        normal_b="POS_Z",
+                        use_selected_to_active=True,
+                        use_clear=False,
+                        use_cage=t.use_cage,
+                        cage_extrusion=t.cage_extrusion,
+                        max_ray_distance=t.max_ray_distance,
+                        cage_object="",
+                        uv_layer=t.uv_map,
+                        margin=arguments.margin,
+                        margin_type=arguments.margin_type.upper(),
+                        target="IMAGE_TEXTURES",
+                        save_mode="INTERNAL",
                     )
-                    if "FINISHED" not in outcome:
+                if asynchronous:
+                    if "RUNNING_MODAL" not in outcome:
                         raise OperationError(
-                            "bake_failed",
-                            "Native selected-to-active bake did not finish",
+                            "bake_failed", "Native bake job did not start"
                         )
+                    yield
+                timings.append(
+                    BakeTiming(target=t.target, seconds=time.monotonic() - begin)
+                )
+                if not asynchronous and "FINISHED" not in outcome:
+                    raise OperationError(
+                        "bake_failed",
+                        "Native selected-to-active bake did not finish",
+                    )
             # Retain the image; all scene snapshots are temporary.
             qa = image_qa(image.name, arguments.targets, meshes)
             image.use_fake_user = True
@@ -495,3 +507,13 @@ def bake_image(arguments: BakeImageArguments) -> BakeImageResult:
     finally:
         if image is not None and not success:
             bpy.data.images.remove(image)
+
+
+def bake_image(arguments: BakeImageArguments) -> BakeImageResult:
+    """Drive native execution directly only in isolated adapter fixture tests."""
+    steps = bake_steps(arguments, asynchronous=False)
+    try:
+        next(steps)
+    except StopIteration as completed:
+        return BakeImageResult.model_validate(completed.value)
+    raise RuntimeError("Synchronous bake unexpectedly yielded")

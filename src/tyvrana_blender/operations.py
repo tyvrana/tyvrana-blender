@@ -16,9 +16,10 @@ from tyvrana_protocol import (
 
 from .bake_models import (
     BakeImageArguments,
-    BakeImageResult,
     BakeInspectArguments,
     BakeInspectResult,
+    BakeJobStatus,
+    BakeStatusArguments,
     ImageSaveArguments,
     ImageSaveResult,
 )
@@ -194,6 +195,7 @@ logger = logging.getLogger(__name__)
 OPERATIONS = (
     "blender.bake.image",
     "blender.bake.inspect",
+    "blender.bake.status",
     "blender.camera.configure",
     "blender.camera.create",
     "blender.camera.inspect",
@@ -207,6 +209,7 @@ OPERATIONS = (
     "blender.image.create_from_artifact",
     "blender.image.create_generated",
     "blender.image.inspect",
+    "blender.image.remove",
     "blender.image.save",
     "blender.light.configure",
     "blender.light.create",
@@ -387,8 +390,10 @@ class SceneBackend(Protocol):
     def mesh_edit(
         self, arguments: MeshSelectionArguments | MeshNormalsArguments
     ) -> MeshEditResult: ...
+    def operation_allowed(self, operation: str) -> bool: ...
+    def bake_status(self, arguments: BakeStatusArguments) -> BakeJobStatus: ...
     def bake_inspect(self, arguments: BakeInspectArguments) -> BakeInspectResult: ...
-    def bake_image(self, arguments: BakeImageArguments) -> BakeImageResult: ...
+    def bake_image(self, arguments: BakeImageArguments) -> BakeJobStatus: ...
     def image_save(
         self, arguments: ImageSaveArguments
     ) -> tuple[ImageSaveResult, ArtifactDescriptor]: ...
@@ -401,6 +406,7 @@ class SceneBackend(Protocol):
         self, arguments: UVLayoutArguments
     ) -> tuple[UVLayoutResult, ArtifactDescriptor | None]: ...
     def image_inspect(self) -> ImageInspectResult: ...
+    def image_remove(self, arguments: DeleteArguments) -> DeleteResult: ...
     def image_create(self, arguments: ImageCreateArguments) -> ImageSummary: ...
     def image_from_artifact(
         self, arguments: ImageFromArtifactArguments, request: OperationRequest
@@ -452,6 +458,17 @@ def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure
 
 
 def execute(backend: SceneBackend, request: OperationRequest) -> Response:
+    if not backend.operation_allowed(request.operation):
+        return failure(
+            request,
+            ProtocolError(
+                code="adapter_busy",
+                message=(
+                    "A native bake owns temporary scene resources; "
+                    "inspect its status first"
+                ),
+            ),
+        )
     try:
         arguments: (
             ExtensionInspectArguments
@@ -501,6 +518,7 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | NodeDeleteArguments
             | ConnectArguments
             | DisconnectArguments
+            | BakeStatusArguments
             | BakeInspectArguments
             | BakeImageArguments
             | ImageSaveArguments
@@ -520,6 +538,8 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             | MeshInspectArguments
         )
         match request.operation:
+            case "blender.bake.status":
+                arguments = BakeStatusArguments.model_validate(request.arguments)
             case "blender.bake.inspect":
                 arguments = BakeInspectArguments.model_validate(request.arguments)
             case "blender.bake.image":
@@ -660,6 +680,8 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
                 arguments = ImageFromArtifactArguments.model_validate(request.arguments)
             case "blender.image.configure":
                 arguments = ImageConfigureArguments.model_validate(request.arguments)
+            case "blender.image.remove":
+                arguments = DeleteArguments.model_validate(request.arguments)
             case "blender.shader.inspect":
                 arguments = ShaderInspectArguments.model_validate(request.arguments)
             case "blender.shader.node.create":
@@ -825,6 +847,8 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             result = backend.mesh_edit(arguments)
         elif isinstance(arguments, MeshInspectArguments):
             result = backend.mesh_inspect(arguments)
+        elif isinstance(arguments, BakeStatusArguments):
+            result = backend.bake_status(arguments)
         elif isinstance(arguments, BakeInspectArguments):
             result = backend.bake_inspect(arguments)
         elif isinstance(arguments, BakeImageArguments):
@@ -884,7 +908,11 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
         elif isinstance(arguments, TransformArguments):
             result = backend.transform(arguments)
         elif isinstance(arguments, DeleteArguments):
-            result = backend.delete(arguments)
+            result = (
+                backend.image_remove(arguments)
+                if request.operation == "blender.image.remove"
+                else backend.delete(arguments)
+            )
         else:
             result, descriptor = backend.render(arguments)
             artifacts = (descriptor,)

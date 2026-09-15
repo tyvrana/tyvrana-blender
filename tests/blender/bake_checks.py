@@ -69,6 +69,14 @@ class BakeTests(unittest.TestCase):
 
     def call(self, op: str, **args: Any) -> Any:
         self.count += 1
+        if op == "bake.image":
+            # Isolated background fixtures drive the same generator synchronously.
+            value = bake.bake_image(models.BakeImageArguments.model_validate(args))
+            return OperationSuccess(
+                type="operation.success",
+                request_id=str(self.count),
+                result=value.model_dump(mode="json"),
+            )
         result = operations.execute(
             self.backend,
             OperationRequest(
@@ -178,6 +186,20 @@ class BakeTests(unittest.TestCase):
                 models.ImageSaveArguments(name="Data", filepath=str(dest)), self.spool
             )
         self.assertEqual(dest.read_bytes(), b"original")
+
+    def test_remove_unused_image_protects_references(self) -> None:
+        image = bpy.data.images.new("Discarded", width=64, height=64)
+        image.use_fake_user = True
+        material = bpy.data.materials.new("Image user")
+        node = material.node_tree.nodes.new("ShaderNodeTexImage")
+        node.image = image
+        with self.assertRaises(operations.OperationError):
+            self.backend.image_remove(render_models.DeleteArguments(name=image.name))
+        self.assertIs(node.image, image)
+        node.image = None
+        self.call("image.remove", name=image.name)
+        self.assertIsNone(bpy.data.images.get("Discarded"))
+        bpy.data.materials.remove(material)
 
     def test_surface_diagnostic_restores_on_failure(self) -> None:
         before = self.state()

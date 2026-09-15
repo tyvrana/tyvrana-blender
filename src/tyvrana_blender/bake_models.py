@@ -150,3 +150,17 @@ class ImageSaveResult(Model):
     packed: bool
     sha256: str
     maximum_roundtrip_error: float
+
+
+class BakeStatusArguments(Model):
+    job_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]+$")
+
+
+class BakeJobStatus(Model):
+    job_id: str
+    image: str
+    state: Literal["queued", "running", "completed", "failed"]
+    completed_targets: int
+    target_count: int
+    result: BakeImageResult | None = None
+    error: str | None = None

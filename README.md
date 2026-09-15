@@ -1083,6 +1083,11 @@ Behavior is checked against Blender's [UV operator source](https://github.com/bl
 [Mirror source](https://github.com/blender/blender/blob/v5.2.1/source/blender/blenkernel/intern/mesh_mirror.cc)
 and [BMesh selection API](https://docs.blender.org/api/5.2/bmesh.types.html).
 
+`blender.image.remove` deletes a named unused local input image, including an
+image retained only by a fake user. Images referenced by materials or other
+resources are rejected with `image_in_use`; render buffers and linked images
+cannot be removed. External files are not deleted.
+
 ## Geometric normal baking
 
 `blender.bake.inspect` analyzes explicit `targets`, each with `target`, `sources`
@@ -1096,8 +1101,16 @@ normal-angle and directional-hit statistics, miss/backface counts, bounded face
 references, and authored/evaluated UV and seam fingerprints. Recommendations
 require inspection: thin parts, cavities and overhangs may need narrower settings.
 
-`blender.bake.image` produces one new named normal image from the same targets,
-with explicit ray settings on every target. It supports a single nonoverlapping
+`blender.bake.image` queues one new named normal image from the same targets,
+with explicit ray settings on every target. It returns a `job_id` immediately;
+poll `blender.bake.status` with that ID until `completed` or `failed`. Status
+includes completed/total target counts, the final result or a visible error.
+The latest four jobs remain available until extension reload. Native jobs need
+the visible application's event loop. While a job owns temporary resources,
+only bake status and extension inspection are allowed; other operations return
+`adapter_busy`. This includes project changes, renders and extension reload.
+
+It supports a single nonoverlapping
 unit-tile atlas, `resolution` 64–4096 (default 4096), `margin` 0–64 (default 12),
 `margin_type` extend/adjacent_faces, `device` cpu/gpu and `samples` 1–64. The current
 supported type is `normal`, in `tangent` space with native OpenGL +X/+Y/+Z axes.
@@ -1113,7 +1126,8 @@ UVs, geometry and render settings remain untouched. Temporary scenes, objects,
 meshes and materials are removed even on failure. The successful image is a
 retained resource; save it before closing the project.
 
-Results report per-target native bake duration, total operation duration,
+Completed results report per-target native bake duration (including native job
+completion dispatch), total execution duration,
 configured device/backend, and image QA. `bake.inspect` accepts optional `image`
 to repeat QA: target UV pixel coverage, alpha gaps, invalid normal-vector length,
 negative tangent Z, tilt statistics and per-target counts. Pixel-center raster

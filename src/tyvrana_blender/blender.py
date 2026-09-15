@@ -32,9 +32,10 @@ from . import (
 from .artifacts import ArtifactSpool
 from .bake_models import (
     BakeImageArguments,
-    BakeImageResult,
     BakeInspectArguments,
     BakeInspectResult,
+    BakeJobStatus,
+    BakeStatusArguments,
     ImageSaveArguments,
     ImageSaveResult,
 )
@@ -783,17 +784,31 @@ class BlenderBackend:
         main_thread()
         return mesh.edit(uv.mesh_object(arguments.object_name), arguments)
 
+    def operation_allowed(self, operation: str) -> bool:
+        from . import bake_jobs
+
+        return not bake_jobs.busy() or operation in {
+            "blender.bake.status",
+            "blender.extension.inspect",
+        }
+
+    def bake_status(self, arguments: BakeStatusArguments) -> BakeJobStatus:
+        main_thread()
+        from . import bake_jobs
+
+        return bake_jobs.status(arguments.job_id)
+
     def bake_inspect(self, arguments: BakeInspectArguments) -> BakeInspectResult:
         main_thread()
         from . import bake
 
         return bake.inspect(arguments)
 
-    def bake_image(self, arguments: BakeImageArguments) -> BakeImageResult:
+    def bake_image(self, arguments: BakeImageArguments) -> BakeJobStatus:
         main_thread()
-        from . import bake
+        from . import bake_jobs
 
-        return bake.bake_image(arguments)
+        return bake_jobs.start(arguments)
 
     def image_save(
         self, arguments: ImageSaveArguments
@@ -977,6 +992,25 @@ class BlenderBackend:
         except Exception:
             bpy.data.images.remove(image, do_unlink=True)
             raise
+
+    def image_remove(self, arguments: DeleteArguments) -> DeleteResult:
+        data_mutation_context()
+        image = find_image(arguments.name)
+        if (
+            not image.is_editable
+            or image.library is not None
+            or image.override_library is not None
+            or image.source in {"VIEWER", "RENDER_RESULT"}
+        ):
+            raise OperationError(
+                "invalid_context", "Image is not a local input resource"
+            )
+        if image.users > int(image.use_fake_user):
+            raise OperationError(
+                "image_in_use", "Remove image references before deletion"
+            )
+        bpy.data.images.remove(image)
+        return DeleteResult(deleted=arguments.name)
 
     def image_configure(self, arguments: ImageConfigureArguments) -> ImageSummary:
         data_mutation_context()
