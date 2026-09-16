@@ -33,6 +33,18 @@ from .camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from .corrective_models import (
+    CaptureTargetArguments,
+    CaptureTargetResult,
+    DeformationCompareArguments,
+    DeformationCompareResult,
+    ShapeKeysEditArguments,
+    ShapeKeysEditResult,
+    ShapeKeysInspectArguments,
+    ShapeKeysRemoveArguments,
+    ShapeKeysRemoveResult,
+    ShapeKeysSummary,
+)
 from .curve_models import (
     CurveConfigureArguments,
     CurveCreateArguments,
@@ -247,6 +259,11 @@ from .shader_models import (
     ShaderGraphSummary,
     ShaderInspectArguments,
 )
+from .surface_deform_models import (
+    SurfaceBindArguments,
+    SurfaceBindings,
+    SurfaceInspectArguments,
+)
 from .topology_models import (
     MeshInsertLoopsArguments,
     TopologyInspectArguments,
@@ -268,6 +285,12 @@ from .weight_models import (
     WeightsAssignment,
     WeightsInspectArguments,
     WeightsSummary,
+)
+from .weight_transfer_models import (
+    GroupsConfigureArguments,
+    GroupsResult,
+    WeightsTransferArguments,
+    WeightsTransferResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -382,6 +405,37 @@ class SceneBackend(Protocol):
     ) -> ArmatureSummary: ...
     def armature_bind(self, arguments: ArmatureBindArguments) -> BindingSummary: ...
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary: ...
+    def shape_keys_edit(
+        self, arguments: ShapeKeysEditArguments
+    ) -> ShapeKeysEditResult: ...
+    def shape_keys_inspect(
+        self, arguments: ShapeKeysInspectArguments
+    ) -> ShapeKeysSummary: ...
+    def shape_keys_remove(
+        self, arguments: ShapeKeysRemoveArguments
+    ) -> ShapeKeysRemoveResult: ...
+    def deformation_capture_target(
+        self, arguments: CaptureTargetArguments
+    ) -> CaptureTargetResult: ...
+    def deformation_compare(
+        self, arguments: DeformationCompareArguments
+    ) -> DeformationCompareResult: ...
+    def surface_deform_bind(
+        self, arguments: SurfaceBindArguments
+    ) -> SurfaceBindings: ...
+    def surface_deform_inspect(
+        self, arguments: SurfaceInspectArguments
+    ) -> SurfaceBindings: ...
+    def surface_deform_unbind(
+        self, arguments: SurfaceInspectArguments
+    ) -> SurfaceBindings: ...
+    def vertex_groups_configure(
+        self, arguments: GroupsConfigureArguments
+    ) -> GroupsResult: ...
+    def weights_transfer(
+        self, arguments: WeightsTransferArguments
+    ) -> WeightsTransferResult: ...
+
     def deformation_sweep(
         self, arguments: DeformationSweepArguments
     ) -> DeformationSweepResult: ...
@@ -616,6 +670,199 @@ def _operation[A: Model, R: Model](
 
 
 _DECLARATIONS = (
+    _operation(
+        "blender.shape_keys.edit",
+        ShapeKeysEditArguments,
+        ShapeKeysEditResult,
+        lambda b, a, q: b.shape_keys_edit(a),
+        (
+            "Atomically create/edit/configure 1..16 native relative keys on "
+            "an exclusive local mesh; Basis is ensured and protected. 100000 "
+            "vertices, 64 keys and 2000000 stored key coordinates. Sparse "
+            "deltas (65536/key) or shared region offsets use original "
+            "local/world vectors, replace relative deltas or add offsets; "
+            "smooth local ellipsoid falloff and native group masks reuse mesh "
+            "weights. Zero replacement clears a region. Optional expected "
+            "ordered topology hash guards stale indices. Keys have explicit "
+            "create, range/value/mute/reference/rename; omitted fields "
+            "persist. Refuse locked, absolute, animated/driven or linked data "
+            "and reference cycles. Capture uses one provenance-bearing target "
+            "and one unmuted unmasked Basis-relative key at zero: native "
+            "inverse maps desired posed displacement, then verifies evaluated "
+            "target tolerance at value1 before commit. No modifier "
+            "application, posed-pose baking or automatic drivers; failure "
+            "restores original keys/data and pose."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.shape_keys.inspect",
+        ShapeKeysInspectArguments,
+        ShapeKeysSummary,
+        lambda b, a, q: b.shape_keys_inspect(a),
+        (
+            "Inspect relative native shape keys with ordered topology, "
+            "Basis/reference, values/ranges/masks/mute/locks/drivers and "
+            "locally computed affected count/max/mean displacement. Key pages "
+            "default16/max32, max64 keys and 2M coordinates; optional "
+            "explicit key delta page max256, none by default. Stored values "
+            "are original object-local deltas relative to each key reference, "
+            "independent of current influence. Reject incompatible stored "
+            "topology; no coordinate dump."
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.shape_keys.remove",
+        ShapeKeysRemoveArguments,
+        ShapeKeysRemoveResult,
+        lambda b, a, q: b.shape_keys_remove(a),
+        (
+            "Atomically remove 1..32 unique existing local relative keys; "
+            "protect locked/animated data and references from surviving keys. "
+            "Basis removal requires every key plus remove_basis=true. Other "
+            "data, pose, UVs, weights and modifiers remain native; shared "
+            "mesh edits require an independent copy."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.deformation.capture_target",
+        CaptureTargetArguments,
+        CaptureTargetResult,
+        lambda b, a, q: b.deformation_capture_target(a),
+        (
+            "Create a named editable mesh from current evaluated geometry, "
+            "preserving ordered topology and current world transform; source "
+            "remains untouched. Capture provenance stores source ID, topology "
+            "and current evaluated baseline, so shape_keys.edit "
+            "captured_target subtracts only correction and refuses stale "
+            "source pose/shape/topology. Supports bare mesh or one enabled "
+            "owned linear Armature, no constructive or nonlinear modifiers, "
+            "no absolute/animated keys; max100000 vertices. Target is an "
+            "ordinary editable mesh with native UV/material data, no "
+            "keys/modifiers. Edit through typed mesh operations; no automatic "
+            "desired shape or arbitrary inversion."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.deformation.compare",
+        DeformationCompareArguments,
+        DeformationCompareResult,
+        lambda b, a, q: b.deformation_compare(a),
+        (
+            "Compare 1..8 current evaluated object/target pairs with matching "
+            "authored/evaluated ordered topology. Shared selectors define "
+            "authored regions. Adapter computes world-space "
+            "RMS/min/p05/p50/p95/p99/max distance plus default4/max16 worst "
+            "indices; 100000 vertices/mesh and 1000000 evaluated "
+            "samples/request. Does not change pose/keys, infer registration, "
+            "certify intersections or compare unrelated vertex order."
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.surface_deform.bind",
+        SurfaceBindArguments,
+        SurfaceBindings,
+        lambda b, a, q: b.surface_deform_bind(a),
+        (
+            "Bind 1..8 unmodified exclusive local driven meshes to one driver "
+            "using native Surface Deform at explicit bind_state=current. One "
+            "owned relation per driven mesh; up to 10000 driver vertices/20000 "
+            "faces, 100000 driven vertices/mesh, 5M driven-vertex/driver-face "
+            "work. Native bind requires convex nondegenerate driver faces, no "
+            "duplicate vertices or edges shared by over 2 faces. Bounded "
+            "falloff/strength and existing native mask group; append later "
+            "subdivision after binding. Prevalidate dependencies, rollback "
+            "all new modifiers on failure. Persist native binding plus "
+            "authored/evaluated topology signatures; no hidden rebind. Same "
+            "names are not proof of compatibility. Native surface transfer follows "
+            "driver mesh deformation; subsequent object-level driver transforms "
+            "are ignored. Move related objects together for assembly placement."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.surface_deform.inspect",
+        SurfaceInspectArguments,
+        SurfaceBindings,
+        lambda b, a, q: b.surface_deform_inspect(a),
+        (
+            "Inspect 1..16 owned Surface Deform relations: driver/driven, "
+            "native bound state, validity/reason, ordering/settings and "
+            "authored/evaluated topology signatures. Unbound objects are "
+            "explicit. Edited/removed driver/modifier/topology is invalid, "
+            "even if native is_bound remains true. No mesh arrays; "
+            "save/reopen uses native binding data."
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.surface_deform.unbind",
+        SurfaceInspectArguments,
+        SurfaceBindings,
+        lambda b, a, q: b.surface_deform_unbind(a),
+        (
+            "Prevalidate and remove 1..16 owned Surface Deform "
+            "modifiers/binding records, including stale topology bindings; "
+            "preserve all other modifiers, authored meshes and current driver "
+            "shape. Rebind explicitly to capture another baseline; does not "
+            "bake evaluated geometry or reset pose."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.vertex_groups.configure",
+        GroupsConfigureArguments,
+        GroupsResult,
+        lambda b, a, q: b.vertex_groups_configure(a),
+        (
+            "Atomically create/edit/rename/lock/remove up to 32 native vertex "
+            "groups on an exclusive local mesh. Up to16 shared-selector "
+            "constant-weight layers/group, 100000 vertices and256 total "
+            "groups. Zero weight removes membership. Preserve unselected "
+            "weights, keys and attributes; reject locked changes and "
+            "renaming/removing groups referenced by armatures, masks or "
+            "constraints. Explicitly unlock in a prior call. Compact first32 "
+            "group summaries plus total; general masks use native groups, no "
+            "second weight system."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.weights.transfer",
+        WeightsTransferArguments,
+        WeightsTransferResult,
+        lambda b, a, q: b.weights_transfer(a),
+        (
+            "Transfer 1..128 explicitly mapped groups between authored "
+            "world-rest surfaces via bounded nearest-triangle barycentric "
+            "interpolation; topology may differ. Optional world-plane "
+            "reflection and group mapping mirror influences, including "
+            "same-object snapshot mirroring. Shared target selector preserves "
+            "unselected weights; max_distance failure is atomic. Optional "
+            "normalization/top4 influences, complete deform-group mapping "
+            "required for a bound target; locks preserved. Up to100000 "
+            "vertices/mesh,200000 source triangles,256 groups. No "
+            "posed/evaluated-surface transfer or shape-key remapping: "
+            "transfer before correctives. Existing armature.bind initializes "
+            "target ownership; masks may transfer without a rig. Return "
+            "distance/coverage summary, not per-vertex matrices."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
     _operation(
         "blender.curve.create",
         CurveCreateArguments,
@@ -1141,6 +1388,10 @@ _DECLARATIONS = (
         DeformationSweepArguments,
         DeformationSweepResult,
         lambda b, a, q: b.deformation_sweep(a),
+        "Optional per-pose shape_values reset named key channels to zero for "
+        "the baseline and each pose, then apply explicit values; all values "
+        "restore even on failure. Optional same-topology targets return bounded "
+        "world deviation summaries and count toward the 1M sample budget. "
         "Evaluate 1..16 deterministic reset-to-rest poses on owned bound meshes and "
         "up to 8 frozen rest-frame boxes. Return compact "
         "stretch/compression/area/corner-angle distributions, bounded worst edges, "
@@ -1564,6 +1815,9 @@ _DECLARATIONS = (
         CREATE,
         ModifierSummary,
         lambda b, a, q: b.modifier_create(a),
+        "Corrective Smooth uses original coordinates before constructive modifiers, "
+        "bounded iterations/factor/scale and optional native group mask; "
+        "smoothing may lose volume and is not an authored corrective. "
         "Create a supported typed object-owned modifier. Type-specific "
         "properties belong in settings; stack order is significant.",
         effect="mutating",

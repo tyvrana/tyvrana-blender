@@ -233,6 +233,19 @@ def editable(obj: Any, *, coordinate_only: bool = False) -> None:
             "invalid_context",
             "Mesh editing requires Object Mode and editable local data",
         )
+    if not coordinate_only and any(
+        m.type in {"MESH_DEFORM", "SURFACE_DEFORM"}
+        and getattr(m, "object", getattr(m, "target", None)) == obj
+        for other in bpy.data.objects
+        for m in other.modifiers
+    ):
+        raise OperationError(
+            "invalid_context",
+            (
+                "Topology drives a deformation binding; explicitly unbind before "
+                "connectivity edits"
+            ),
+        )
     if mesh.shape_keys is not None:
         raise OperationError(
             "mesh_has_shape_keys",

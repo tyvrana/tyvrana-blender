@@ -3679,3 +3679,11 @@ See [Topology selection, loop refinement and pose-set QA](docs/topology.md) for
 shared graph/rest-frame selectors, `mesh.inspect_topology`, `mesh.insert_loops`,
 source-projected multiple cuts and `deformation.sweep`, including preservation,
 rollback, attachment invalidation and bounded result semantics.
+
+## Deformation transfer and corrective shapes
+
+See [Relative corrections and deformation transfer](docs/correctives.md) for
+batched native shape keys, provenance-checked correction targets, restored pose/key
+sweeps, compact target deviations, native group lifecycle, rest-surface weight
+transfer/mirroring, Surface Deform bind/inspect/unbind and scoped Corrective Smooth.
+The tools expose explicit topology, pose, ownership and rollback boundaries.

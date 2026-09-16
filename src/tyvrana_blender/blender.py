@@ -54,6 +54,18 @@ from .camera_models import (
     validate_optics,
 )
 from .compatibility import require_blender
+from .corrective_models import (
+    CaptureTargetArguments,
+    CaptureTargetResult,
+    DeformationCompareArguments,
+    DeformationCompareResult,
+    ShapeKeysEditArguments,
+    ShapeKeysEditResult,
+    ShapeKeysInspectArguments,
+    ShapeKeysRemoveArguments,
+    ShapeKeysRemoveResult,
+    ShapeKeysSummary,
+)
 from .curve_models import (
     CurveConfigureArguments,
     CurveCreateArguments,
@@ -252,6 +264,11 @@ from .shader_models import (
     ShaderGraphSummary,
     ShaderInspectArguments,
 )
+from .surface_deform_models import (
+    SurfaceBindArguments,
+    SurfaceBindings,
+    SurfaceInspectArguments,
+)
 from .topology_models import (
     MeshInsertLoopsArguments,
     TopologyInspectArguments,
@@ -274,6 +291,12 @@ from .weight_models import (
     WeightsAssignment,
     WeightsInspectArguments,
     WeightsSummary,
+)
+from .weight_transfer_models import (
+    GroupsConfigureArguments,
+    GroupsResult,
+    WeightsTransferArguments,
+    WeightsTransferResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -1055,6 +1078,82 @@ class BlenderBackend:
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary:
         main_thread()
         return rig.pose(arguments)
+
+    def shape_keys_edit(self, arguments: ShapeKeysEditArguments) -> ShapeKeysEditResult:
+        main_thread()
+        from . import correctives
+
+        return correctives.edit(arguments)
+
+    def shape_keys_inspect(
+        self, arguments: ShapeKeysInspectArguments
+    ) -> ShapeKeysSummary:
+        main_thread()
+        from . import correctives
+
+        return correctives.inspect(arguments)
+
+    def shape_keys_remove(
+        self, arguments: ShapeKeysRemoveArguments
+    ) -> ShapeKeysRemoveResult:
+        main_thread()
+        from . import correctives
+
+        return correctives.remove(arguments)
+
+    def deformation_capture_target(
+        self, arguments: CaptureTargetArguments
+    ) -> CaptureTargetResult:
+        main_thread()
+        from . import correctives
+
+        return correctives.capture_target(arguments)
+
+    def deformation_compare(
+        self, arguments: DeformationCompareArguments
+    ) -> DeformationCompareResult:
+        main_thread()
+        from . import correctives
+
+        return correctives.compare(arguments)
+
+    def surface_deform_bind(self, arguments: SurfaceBindArguments) -> SurfaceBindings:
+        main_thread()
+        from . import surface_deform
+
+        return surface_deform.bind(arguments)
+
+    def surface_deform_inspect(
+        self, arguments: SurfaceInspectArguments
+    ) -> SurfaceBindings:
+        main_thread()
+        from . import surface_deform
+
+        return surface_deform.inspect(arguments)
+
+    def surface_deform_unbind(
+        self, arguments: SurfaceInspectArguments
+    ) -> SurfaceBindings:
+        main_thread()
+        from . import surface_deform
+
+        return surface_deform.unbind(arguments)
+
+    def vertex_groups_configure(
+        self, arguments: GroupsConfigureArguments
+    ) -> GroupsResult:
+        main_thread()
+        from . import weight_transfer
+
+        return weight_transfer.configure(arguments)
+
+    def weights_transfer(
+        self, arguments: WeightsTransferArguments
+    ) -> WeightsTransferResult:
+        main_thread()
+        from . import weight_transfer
+
+        return weight_transfer.transfer(arguments)
 
     def deformation_sweep(
         self, arguments: DeformationSweepArguments

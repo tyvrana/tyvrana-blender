@@ -28,7 +28,13 @@ type Name = Annotated[ObjectName, AfterValidator(resource_name)]
 type Number = Annotated[Float32, Strict()]
 type Axes = Annotated[list[Literal["x", "y", "z"]], Field(max_length=3)]
 type ModifierType = Literal[
-    "mirror", "subdivision_surface", "shrinkwrap", "boolean", "solidify", "triangulate"
+    "corrective_smooth",
+    "mirror",
+    "subdivision_surface",
+    "shrinkwrap",
+    "boolean",
+    "solidify",
+    "triangulate",
 ]
 type SubdivisionMode = Literal["catmull_clark", "simple"]
 type UVSmooth = Literal[
@@ -190,12 +196,33 @@ class ModifierCommonArguments(Arguments):
     show_in_editmode: bool | None = None
 
 
+class CorrectiveSmoothPatch(Arguments):
+    """Original-coordinate corrective smoothing before constructive modifiers."""
+
+    factor: Annotated[Number, Field(ge=0, le=1)] | None = None
+    iterations: Annotated[int, Field(ge=1, le=100)] | None = None
+    scale: Annotated[Number, Field(gt=0, le=3)] | None = None
+    smooth_type: Literal["simple", "length_weighted"] | None = None
+    pin_boundaries: bool | None = None
+    vertex_group: str | None = Field(default=None, max_length=63)
+
+
 class CreateBase(ModifierCommonArguments):
     name: Name | None = None
 
 
 class ConfigureBase(ModifierCommonArguments):
     modifier_name: Name
+
+
+class CorrectiveSmoothCreate(CreateBase):
+    type: Literal["corrective_smooth"]
+    settings: CorrectiveSmoothPatch = Field(default_factory=CorrectiveSmoothPatch)
+
+
+class CorrectiveSmoothConfigure(ConfigureBase):
+    type: Literal["corrective_smooth"]
+    settings: CorrectiveSmoothPatch = Field(default_factory=CorrectiveSmoothPatch)
 
 
 class MirrorCreate(CreateBase):
@@ -276,7 +303,8 @@ type ModifierCreateArguments = Annotated[
     | ShrinkwrapCreate
     | BooleanCreate
     | SolidifyCreate
-    | TriangulateCreate,
+    | TriangulateCreate
+    | CorrectiveSmoothCreate,
     Field(discriminator="type"),
 ]
 type ModifierConfigureArguments = Annotated[
@@ -285,7 +313,8 @@ type ModifierConfigureArguments = Annotated[
     | ShrinkwrapConfigure
     | BooleanConfigure
     | SolidifyConfigure
-    | TriangulateConfigure,
+    | TriangulateConfigure
+    | CorrectiveSmoothConfigure,
     Field(discriminator="type"),
 ]
 CREATE: TypeAdapter[ModifierCreateArguments] = TypeAdapter(ModifierCreateArguments)
@@ -364,6 +393,16 @@ class TriangulateSettings(Model):
     keep_custom_normals: bool
 
 
+class CorrectiveSmoothSettings(Model):
+    factor: float
+    iterations: int
+    scale: float
+    smooth_type: str
+    pin_boundaries: bool
+    vertex_group: str
+    rest_source: Literal["original"] = "original"
+
+
 type ModifierSettings = (
     MirrorSettings
     | SubdivisionSettings
@@ -371,6 +410,7 @@ type ModifierSettings = (
     | BooleanSettings
     | SolidifySettings
     | TriangulateSettings
+    | CorrectiveSmoothSettings
 )
 
 

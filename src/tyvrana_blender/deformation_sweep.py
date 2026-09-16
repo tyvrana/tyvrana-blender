@@ -5,7 +5,9 @@ from typing import Any
 
 import bpy  # type: ignore[import-not-found]
 
-from . import deformation_qa, modifiers, retopo_geometry, rig
+from . import correctives, deformation_qa, modifiers, retopo_geometry, rig
+from . import deformation_geometry as geo
+from .corrective_models import DeformationCompareArguments
 from .deformation_sweep_models import (
     MAX_SWEEP_VERTEX_SAMPLES,
     DeformationSweepArguments,
@@ -44,6 +46,37 @@ def execute(args: DeformationSweepArguments) -> DeformationSweepResult:
     requested = {b.name for pose in args.poses for b in pose.bones}
     if len(requested) > 128 or any(n not in armature.pose.bones for n in requested):
         rig.fail("Sweep pose references a missing bone")
+    channels = {}
+    target_work = 0
+    for definition in args.poses:
+        for value in definition.shape_values:
+            if value.object_name not in args.objects:
+                rig.fail("Sweep key channels must belong to inspected meshes")
+            obj = geo.context(value.object_name, edit=True)
+            correctives.keys_guard(obj)
+            key = (
+                obj.data.shape_keys.key_blocks.get(value.key)
+                if obj.data.shape_keys
+                else None
+            )
+            if (
+                key is None
+                or key == obj.data.shape_keys.reference_key
+                or key.lock_shape
+                or key.mute
+            ):
+                geo.fail("Sweep requires existing unlocked unmuted non-Basis keys")
+            if not key.slider_min <= value.value <= key.slider_max:
+                rig.fail("Sweep key value exceeds configured range")
+            channels[(value.object_name, value.key)] = (key, key.value)
+        for pair in definition.targets:
+            if pair.object_name not in args.objects:
+                rig.fail("Sweep comparison objects must belong to inspected meshes")
+            target_work += len(geo.context(pair.object_name).data.vertices) + len(
+                geo.context(pair.target).data.vertices
+            )
+    if target_work > MAX_SWEEP_VERTEX_SAMPLES:
+        rig.fail("Sweep target comparisons exceed vertex sample budget")
     graph = retopo_geometry.graph(armature)
     position = armature.data.pose_position
     saved = [
@@ -59,8 +92,10 @@ def execute(args: DeformationSweepArguments) -> DeformationSweepResult:
         for p in armature.pose.bones
     ]
     results = []
-    samples = 0
+    samples = target_work
     try:
+        for key, _ in channels.values():
+            key.value = 0
         armature.data.pose_position = "REST"
         bpy.context.view_layer.update()
         rest = []
@@ -90,6 +125,10 @@ def execute(args: DeformationSweepArguments) -> DeformationSweepResult:
         ]
         armature.data.pose_position = "POSE"
         for definition in args.poses:
+            for key, _ in channels.values():
+                key.value = 0
+            for value in definition.shape_values:
+                channels[(value.object_name, value.key)][0].value = value.value
             rig.pose(
                 ArmaturePoseArguments(
                     object_name=armature.name,
@@ -138,10 +177,23 @@ def execute(args: DeformationSweepArguments) -> DeformationSweepResult:
                 rotations[name] = list(basis.to_euler("XYZ"))
             results.append(
                 PoseEvaluation(
-                    name=definition.name, meshes=meshes, evaluated_rotations=rotations
+                    name=definition.name,
+                    meshes=meshes,
+                    evaluated_rotations=rotations,
+                    shape_values=definition.shape_values,
+                    target_deviations=correctives.compare(
+                        DeformationCompareArguments(
+                            pairs=definition.targets,
+                            sample_limit=min(args.sample_limit, 16),
+                        )
+                    ).comparisons
+                    if definition.targets
+                    else [],
                 )
             )
     finally:
+        for key, value in channels.values():
+            key.value = value
         for p, mode, location, euler, quaternion, axis, scale in saved:
             p.rotation_mode = mode
             p.location = location
@@ -164,8 +216,8 @@ def execute(args: DeformationSweepArguments) -> DeformationSweepResult:
             "not an artistic acceptance classifier. Collapse means area ratio "
             "below 0.01; normal rotation is not evidence of inversion.",
             "Closed consistently wound region volume is a proxy; open regions "
-            "return null. Self-intersection, tissue physics and correctives are "
-            "not evaluated.",
+            "return null. Self-intersection and tissue physics are not evaluated. "
+            "Correctives use explicit per-pose key values, not automatic activation.",
             "Weights, topology, joint frames/limits and pose jointly affect "
             "strain; compare controlled variants. Authored selectors and evaluated "
             "regions use different vertex domains.",

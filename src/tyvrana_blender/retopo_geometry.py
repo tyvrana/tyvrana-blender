@@ -142,7 +142,9 @@ def graph(source: Any, target: Any | None = None) -> Any:
             )
         active.add(key)
         if obj.type == "MESH":
-            from . import instances
+            from . import instances, surface_deform
+
+            surface_deform.validate(obj)
 
             if instances.KEY in obj:
                 # This owned graph emits bounded shared instances. Its carrier

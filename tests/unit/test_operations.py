@@ -28,6 +28,18 @@ from tyvrana_blender.camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from tyvrana_blender.corrective_models import (
+    CaptureTargetArguments,
+    CaptureTargetResult,
+    DeformationCompareArguments,
+    DeformationCompareResult,
+    ShapeKeysEditArguments,
+    ShapeKeysEditResult,
+    ShapeKeysInspectArguments,
+    ShapeKeysRemoveArguments,
+    ShapeKeysRemoveResult,
+    ShapeKeysSummary,
+)
 from tyvrana_blender.curve_models import (
     CurveConfigureArguments,
     CurveCreateArguments,
@@ -200,6 +212,11 @@ from tyvrana_blender.shader_models import (
     ShaderGraphSummary,
     ShaderInspectArguments,
 )
+from tyvrana_blender.surface_deform_models import (
+    SurfaceBindArguments,
+    SurfaceBindings,
+    SurfaceInspectArguments,
+)
 from tyvrana_blender.topology_models import (
     MeshInsertLoopsArguments,
     TopologyInspectArguments,
@@ -221,6 +238,12 @@ from tyvrana_blender.weight_models import (
     WeightsAssignment,
     WeightsInspectArguments,
     WeightsSummary,
+)
+from tyvrana_blender.weight_transfer_models import (
+    GroupsConfigureArguments,
+    GroupsResult,
+    WeightsTransferArguments,
+    WeightsTransferResult,
 )
 
 EMPTY_PAGE = PageInfo(
@@ -350,6 +373,52 @@ class Backend:
         raise NotImplementedError
 
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary:
+        raise NotImplementedError
+
+    def shape_keys_edit(self, arguments: ShapeKeysEditArguments) -> ShapeKeysEditResult:
+        raise NotImplementedError
+
+    def shape_keys_inspect(
+        self, arguments: ShapeKeysInspectArguments
+    ) -> ShapeKeysSummary:
+        raise NotImplementedError
+
+    def shape_keys_remove(
+        self, arguments: ShapeKeysRemoveArguments
+    ) -> ShapeKeysRemoveResult:
+        raise NotImplementedError
+
+    def deformation_capture_target(
+        self, arguments: CaptureTargetArguments
+    ) -> CaptureTargetResult:
+        raise NotImplementedError
+
+    def deformation_compare(
+        self, arguments: DeformationCompareArguments
+    ) -> DeformationCompareResult:
+        raise NotImplementedError
+
+    def surface_deform_bind(self, arguments: SurfaceBindArguments) -> SurfaceBindings:
+        raise NotImplementedError
+
+    def surface_deform_inspect(
+        self, arguments: SurfaceInspectArguments
+    ) -> SurfaceBindings:
+        raise NotImplementedError
+
+    def surface_deform_unbind(
+        self, arguments: SurfaceInspectArguments
+    ) -> SurfaceBindings:
+        raise NotImplementedError
+
+    def vertex_groups_configure(
+        self, arguments: GroupsConfigureArguments
+    ) -> GroupsResult:
+        raise NotImplementedError
+
+    def weights_transfer(
+        self, arguments: WeightsTransferArguments
+    ) -> WeightsTransferResult:
         raise NotImplementedError
 
     def deformation_sweep(

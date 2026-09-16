@@ -1151,6 +1151,9 @@ class ModifierTests(unittest.TestCase):
             def __getattr__(self, name: str) -> Any:
                 return getattr(self.wrapped, name)
 
+            def __contains__(self, name: str) -> bool:
+                return name in self.wrapped
+
             def evaluated_get(self, graph: Any) -> Any:
                 return Proxy(self.wrapped.evaluated_get(graph))
 

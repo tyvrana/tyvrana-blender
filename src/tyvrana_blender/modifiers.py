@@ -11,6 +11,7 @@ from .modifier_models import (
     MAX_MODIFIERS,
     MAX_SUBDIVISION_LEVEL,
     BooleanSettings,
+    CorrectiveSmoothSettings,
     EvaluatedMeshSummary,
     MirrorSettings,
     ModifierApplyResult,
@@ -30,6 +31,7 @@ from .modifier_models import (
 from .operations import OperationError
 
 TYPES = {
+    "corrective_smooth": "CORRECTIVE_SMOOTH",
     "mirror": "MIRROR",
     "subdivision_surface": "SUBSURF",
     "shrinkwrap": "SHRINKWRAP",
@@ -49,6 +51,14 @@ COMMON = {
     "show_in_editmode": "show_in_editmode",
 }
 FIELDS = {
+    "corrective_smooth": {
+        "factor": "factor",
+        "iterations": "iterations",
+        "scale": "scale",
+        "smooth_type": "smooth_type",
+        "pin_boundaries": "use_pin_boundary",
+        "vertex_group": "vertex_group",
+    },
     "triangulate": {
         "quad_method": "quad_method",
         "ngon_method": "ngon_method",
@@ -108,6 +118,7 @@ PROJECTION = {
     "limit": "project_limit",
 }
 ENUMS = {
+    "smooth_type",
     "quad_method",
     "ngon_method",
     "subdivision_type",
@@ -118,6 +129,8 @@ ENUMS = {
     "solver",
 }
 DEFAULTS: dict[str, Any] = {
+    "rest_source": "ORCO",
+    "vertex_group": "",
     "show_viewport": True,
     "show_render": True,
     "show_in_editmode": True,
@@ -248,6 +261,8 @@ def settings(mod: Any) -> ModifierSettings | None:
             value = str(value).lower()
         values[public] = value
     match kind:
+        case "corrective_smooth":
+            return CorrectiveSmoothSettings.model_validate(values)
         case "triangulate":
             return TriangulateSettings.model_validate(values)
         case "mirror":
@@ -425,7 +440,11 @@ def budget(
     source_size: int | None = None,
     strict: bool = False,
 ) -> None:
+    from . import surface_deform
+
+    surface_deform.validate(obj)
     size = data_size(obj.data) if source_size is None else source_size
+    constructive_seen = False
     # A triangulated quad adds one edge, one face and two corners. Even without
     # manifold assumptions this is less than twice the original total size.
     quads_only = source_size is None and all(
@@ -436,6 +455,22 @@ def budget(
         if not value(mod, patch, "show_render" if render else "show_viewport"):
             continue
         kind = patch.get("type", mod.type if mod is not None else None)
+        if kind == "CORRECTIVE_SMOOTH":
+            if constructive_seen or value(mod, patch, "rest_source") != "ORCO":
+                raise OperationError(
+                    "invalid_context",
+                    "Corrective Smooth requires original coordinates "
+                    "before all constructive modifiers",
+                )
+            if (
+                value(mod, patch, "vertex_group")
+                and value(mod, patch, "vertex_group") not in obj.vertex_groups
+            ):
+                raise OperationError(
+                    "invalid_arguments", "Corrective Smooth mask group is missing"
+                )
+        if kind not in SAME_TOPOLOGY:
+            constructive_seen = True
         if kind == "MULTIRES":
             from .multires import budget as multires_budget
 
@@ -737,7 +772,9 @@ def remove(obj: Any, name: str) -> ModifierRemoveResult:
 
 
 def inspect_evaluated(obj: Any, uv_map: str | None = None) -> EvaluatedMeshSummary:
-    from . import surface_basis
+    from . import surface_basis, surface_deform
+
+    surface_deform.validate(obj)
 
     if (
         obj.data.is_editmode

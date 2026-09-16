@@ -4,6 +4,7 @@ from typing import Self
 
 from pydantic import Field, model_validator
 
+from .corrective_models import ComparisonPair, ShapeValue, TargetDeviation
 from .deformation_models import DeformationQA
 from .models import Model
 from .reference_models import Name
@@ -24,10 +25,25 @@ class EvaluationPose(Model):
         ),
     )
 
+    shape_values: list[ShapeValue] = Field(
+        default_factory=list,
+        max_length=64,
+        description=(
+            "Named key channels reset to zero before every pose and baseline, "
+            "then apply these values; all original values restore afterward. "
+            "Automatic pose drivers are not authored."
+        ),
+    )
+    targets: list[ComparisonPair] = Field(default_factory=list, max_length=8)
+
     @model_validator(mode="after")
     def unique(self) -> Self:
         if len({b.name for b in self.bones}) != len(self.bones):
             raise ValueError("Pose bones must be unique")
+        if len({(v.object_name, v.key) for v in self.shape_values}) != len(
+            self.shape_values
+        ):
+            raise ValueError("Set each key channel once per pose")
         return self
 
 
@@ -94,6 +110,8 @@ class PoseEvaluation(Model):
     name: str
     meshes: list[PoseMeshEvaluation]
     evaluated_rotations: dict[str, list[float]]
+    shape_values: list[ShapeValue] = Field(default_factory=list)
+    target_deviations: list[TargetDeviation] = Field(default_factory=list)
 
 
 class DeformationSweepResult(Model):
