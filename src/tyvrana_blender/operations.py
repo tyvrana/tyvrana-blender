@@ -33,6 +33,15 @@ from .camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from .curve_models import (
+    CurveConfigureArguments,
+    CurveCreateArguments,
+    CurveInspectArguments,
+    CurveInspectResult,
+    CurveRemoveArguments,
+    CurveRemoveResult,
+    CurveResult,
+)
 from .extension_models import (
     ExtensionInspectArguments,
     ExtensionReloadArguments,
@@ -266,6 +275,14 @@ class OperationError(Exception):
 
 
 class SceneBackend(Protocol):
+    def curve_create(self, arguments: CurveCreateArguments) -> CurveResult: ...
+
+    def curve_configure(self, arguments: CurveConfigureArguments) -> CurveResult: ...
+
+    def curve_inspect(self, arguments: CurveInspectArguments) -> CurveInspectResult: ...
+
+    def curve_remove(self, arguments: CurveRemoveArguments) -> CurveRemoveResult: ...
+
     def armature_configure_rest(
         self, arguments: ArmatureRestArguments
     ) -> ArmatureSummary: ...
@@ -582,6 +599,91 @@ def _operation[A: Model, R: Model](
 
 
 _DECLARATIONS = (
+    _operation(
+        "blender.curve.create",
+        CurveCreateArguments,
+        CurveResult,
+        lambda b, a, q: b.curve_create(a),
+        (
+            "Create 1..64 native Curve objects with shared "
+            "spline/profile/material defaults; up to 8 splines/1024 points "
+            "per curve, 4096 points and 128 attachments per request. POLY, "
+            "BEZIER handles and rational NURBS. Local/world authored points; "
+            "XYZ rotation/tilt radians; positive uniform object scale. "
+            "Optional circle/custom XY profile sweeps share existing "
+            "materials/profile objects. Native object/bone-frame and "
+            "triangular surface attachments follow dependency-graph "
+            "evaluation. Surface barycentrics require unchanged "
+            "authored/evaluated connectivity; incompatible topology is "
+            "reported invalid. Whole-spline binding snaps its selected point "
+            "to target-frame offset and follows that frame; point binding "
+            "drives one control point. Creates owned evaluation "
+            "graphs/helpers with rollback; no hair Curves, grooming or "
+            "simulation. sample_limit=0 suppresses curve rows."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.curve.configure",
+        CurveConfigureArguments,
+        CurveResult,
+        lambda b, a, q: b.curve_configure(a),
+        (
+            "Edit 1..64 managed native curves using full spline lists or "
+            "contiguous full local-space point ranges, typed settings and "
+            "optional full "
+            "binding replacements. Omitted settings/attachments persist. "
+            "Explicit bindings=[] detaches; supplied bindings rebind at "
+            "current target frames. Changed attached coordinates or spline "
+            "topology require explicit rebinding. Bounds match creation; "
+            "validate the complete batch and stage data/graphs with rollback."
+            " Preserve shared/library data, animation, shape keys and "
+            "external modifiers. Profiles/materials stay shared; no arbitrary"
+            " dictionaries or scripting."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.curve.inspect",
+        CurveInspectArguments,
+        CurveInspectResult,
+        lambda b, a, q: b.curve_inspect(a),
+        (
+            "Inspect managed native curves by names/prefix/collection with "
+            "default 8/max64 rows. Summary evaluates spline lengths, "
+            "endpoints, mesh bounds/counts, radius/tilt ranges and attachment"
+            " errors without returning points by default. Optional spline "
+            "filter, bounded authored-local point pages and 2..64 "
+            "arc-length samples per "
+            "spline. World/local output; radius and tilt remain authored "
+            "local units/radians. Native minimum-twist "
+            "tangent/normal/binormal includes tilt, with singular/cusp "
+            "limitations. Attachment intended/evaluated positions and error "
+            "use world units; surface topology changes invalidate bindings "
+            "instead of claiming stable attachment. No whole meshes in "
+            "results."
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.curve.remove",
+        CurveRemoveArguments,
+        CurveRemoveResult,
+        lambda b, a, q: b.curve_remove(a),
+        (
+            "Remove 1..64 managed curves after dependency/ownership checks; "
+            "remove their exclusively owned native Curve data, evaluation "
+            "graphs and bone-anchor helpers. Retain shared materials, "
+            "external profile curves and attachment targets. Reject surviving"
+            " profile/attachment users and external children. Names must be "
+            "unique; all targets are preflighted before removal."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
     _operation(
         "blender.armature.configure_rest",
         ArmatureRestArguments,

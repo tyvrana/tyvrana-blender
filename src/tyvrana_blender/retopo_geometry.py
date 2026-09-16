@@ -62,9 +62,12 @@ def dependencies(obj: Any) -> list[Any]:
     result = [obj.parent] if obj.parent else []
     for item in [*obj.modifiers, *obj.constraints]:
         if item.type == "NODES":
-            from . import instances
+            from . import curves, instances
 
-            result.extend(instances.evaluation_dependencies(obj))
+            if curves.KEY in obj:
+                result.extend(curves.evaluation_dependencies(obj))
+            else:
+                result.extend(instances.evaluation_dependencies(obj))
             continue
         for prop in item.bl_rna.properties:
             if prop.type != "POINTER":

@@ -28,6 +28,15 @@ from tyvrana_blender.camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from tyvrana_blender.curve_models import (
+    CurveConfigureArguments,
+    CurveCreateArguments,
+    CurveInspectArguments,
+    CurveInspectResult,
+    CurveRemoveArguments,
+    CurveRemoveResult,
+    CurveResult,
+)
 from tyvrana_blender.extension_models import (
     ExtensionReloadArguments,
     ExtensionReloadResult,
@@ -211,6 +220,18 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def curve_create(self, arguments: CurveCreateArguments) -> CurveResult:
+        raise NotImplementedError
+
+    def curve_configure(self, arguments: CurveConfigureArguments) -> CurveResult:
+        raise NotImplementedError
+
+    def curve_inspect(self, arguments: CurveInspectArguments) -> CurveInspectResult:
+        raise NotImplementedError
+
+    def curve_remove(self, arguments: CurveRemoveArguments) -> CurveRemoveResult:
+        raise NotImplementedError
+
     def armature_configure_rest(
         self, arguments: ArmatureRestArguments
     ) -> ArmatureSummary:

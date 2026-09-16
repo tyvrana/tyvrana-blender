@@ -54,6 +54,15 @@ from .camera_models import (
     validate_optics,
 )
 from .compatibility import require_blender
+from .curve_models import (
+    CurveConfigureArguments,
+    CurveCreateArguments,
+    CurveInspectArguments,
+    CurveInspectResult,
+    CurveRemoveArguments,
+    CurveRemoveResult,
+    CurveResult,
+)
 from .dispatch import CommandQueue
 from .extension_models import (
     ExtensionReloadArguments,
@@ -649,6 +658,26 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def curve_create(self, arguments: CurveCreateArguments) -> CurveResult:
+        from . import curves
+
+        return curves.create(arguments)
+
+    def curve_configure(self, arguments: CurveConfigureArguments) -> CurveResult:
+        from . import curves
+
+        return curves.configure(arguments)
+
+    def curve_inspect(self, arguments: CurveInspectArguments) -> CurveInspectResult:
+        from . import curves
+
+        return curves.inspect(arguments)
+
+    def curve_remove(self, arguments: CurveRemoveArguments) -> CurveRemoveResult:
+        from . import curves
+
+        return curves.remove(arguments)
+
     def armature_configure_rest(
         self, arguments: ArmatureRestArguments
     ) -> ArmatureSummary:
@@ -1914,6 +1943,11 @@ class BlenderBackend:
                 "invalid_context", "Object deletion requires Object Mode"
             )
         obj = find_object(arguments.name)
+        if "tyvrana_curve" in obj or obj.get("tyvrana_curve_helper"):
+            raise OperationError(
+                "curve_invalid",
+                "Use curve.remove for managed curves and their owned anchors",
+            )
         bpy.data.objects.remove(obj, do_unlink=True)
         bpy.context.view_layer.update()
         return DeleteResult(deleted=arguments.name)

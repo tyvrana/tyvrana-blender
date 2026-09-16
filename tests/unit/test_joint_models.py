@@ -174,7 +174,7 @@ def test_joint_batch_and_inspection_bounds() -> None:
 
 
 def test_registry_remains_bounded() -> None:
-    assert len(OPERATIONS) == 124
+    assert len(OPERATIONS) == 128
     assert (
         len(registration("fixture", "5.2.1", "").model_dump_json().encode()) < 1048576
     )

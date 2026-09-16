@@ -15,7 +15,8 @@ The extension provides objects, cameras, lights, materials, generated and import
 packed images, shader graphs, semantic mesh modeling, whole-mesh UV controls,
 modifier stacks, Multires sculpting, regional masks and Face Sets, native sculpt
 filters, explicit voxel-remesh blockout, surface-conforming retopology, evaluated
-surface picking, and PNG scene renders delivered as MCP images.
+surface picking, native curves with profiles and evaluated attachments, and PNG
+scene renders delivered as MCP images.
 
 ## Install and connect
 
@@ -3525,6 +3526,14 @@ all targets/dependencies. Every query must be valid; measurements do not silentl
 skip failures. Errors distinguish invalid arguments, missing objects, invalid context,
 degenerate measurements and work-budget limits. Inputs/outputs are bounded; inspection
 pages report counts and `next_offset` rather than expanding the whole scene.
+
+## Curves, profiles and attachments
+
+`blender.curve.create/configure/inspect/remove` provide batched native POLY,
+Bézier and NURBS guides, shared circular/custom profiles, point radius/tilt, and
+object/bone/deforming-triangle attachments. Bounded inspection reports evaluated
+lengths, samples, frames and attachment errors. See [curve contracts and examples](docs/curves.md)
+for units, topology invalidation, ownership and persistence.
 
 ## Development and packaging
 

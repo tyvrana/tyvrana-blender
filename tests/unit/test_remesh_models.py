@@ -30,7 +30,7 @@ def test_dispatch_and_description(suffix: str) -> None:
     )
     assert isinstance(result, OperationSuccess), result
     assert backend.calls[0] == "sculpt_voxel_remesh" + suffix.replace(".", "_")
-    assert len(OPERATIONS) == 124 and tuple(sorted(OPERATIONS)) == OPERATIONS
+    assert len(OPERATIONS) == 128 and tuple(sorted(OPERATIONS)) == OPERATIONS
     if suffix:
         assert "not production retopology" in str(result.result)
         assert "indices become invalid" in str(result.result)
