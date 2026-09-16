@@ -398,6 +398,14 @@ class MaterialAuthorTests(unittest.TestCase):
             graph["nodes"].append(node)
         result = self.graph(**graph)
         self.assertEqual(result.graph.node_count, len(author.NODES))
+        tree = bpy.data.materials["Test"].node_tree
+        settings = adapter.shader.settings
+        self.assertEqual(settings(tree.nodes["noise"]).noise_type, "fbm")
+        self.assertEqual(settings(tree.nodes["mix_color"]).data_type, "rgba")
+        self.assertEqual(settings(tree.nodes["math"]).operation, "add")
+        self.assertEqual(settings(tree.nodes["tangent"]).direction, "radial")
+        self.assertEqual(settings(tree.nodes["normal_map"]).convention, "opengl")
+        self.assertEqual(settings(tree.nodes["color_ramp"]).stop_count, 2)
         with self.assertRaisesRegex(adapter.OperationError, "unavailable"):
             self.graph(
                 mode="patch",

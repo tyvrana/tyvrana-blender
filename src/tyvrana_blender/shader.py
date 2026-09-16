@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .inspection import page
+from .material_author_models import RampStop
 from .models import PageInfo
 from .operations import OperationError
 from .shader_models import (
@@ -14,21 +15,29 @@ from .shader_models import (
     ConnectArguments,
     DisconnectArguments,
     DisconnectResult,
+    DisplacementSettings,
     ImageTextureSettings,
     LinkSummary,
     MappingSettings,
     MaterialOutputSettings,
+    MathSettings,
+    MixSettings,
     NodeCreateArguments,
     NodeDeleteArguments,
     NodeDeleteResult,
     NodePatch,
     NodeSettings,
     NodeSummary,
+    NoiseSettings,
     NormalMapSettings,
+    PrincipledSettings,
+    RampSettings,
     ShaderGraphSummary,
     ShaderInspectArguments,
     SocketSummary,
+    TangentSettings,
     TextureCoordinateSettings,
+    UVMapSettings,
     compatible_sockets,
     safe_socket_default,
 )
@@ -81,6 +90,55 @@ def settings(node: Any) -> NodeSettings | None:
         return list(socket(node.inputs, identifier).default_value)
 
     match node.bl_idname:
+        case "ShaderNodeBsdfPrincipled":
+            return PrincipledSettings(
+                subsurface_method=node.subsurface_method.lower(),
+                distribution=node.distribution.lower(),
+            )
+        case "ShaderNodeUVMap":
+            return UVMapSettings(uv_map=node.uv_map, from_instancer=node.from_instancer)
+        case "ShaderNodeTexNoise":
+            return NoiseSettings(
+                dimensions=node.noise_dimensions.lower(),
+                noise_type=node.noise_type.lower(),
+                normalize=node.normalize,
+            )
+        case "ShaderNodeValToRGB":
+            ramp = node.color_ramp
+            return RampSettings(
+                color_mode=ramp.color_mode.lower(),
+                interpolation=ramp.interpolation.lower(),
+                hue_interpolation=ramp.hue_interpolation.lower(),
+                stops=[
+                    RampStop(
+                        position=e.position, color=list(e.color[:3]), alpha=e.color[3]
+                    )
+                    for e in list(ramp.elements)[:8]
+                ],
+                stop_count=len(ramp.elements),
+                stops_truncated=len(ramp.elements) > 8,
+            )
+        case "ShaderNodeMix":
+            return MixSettings(
+                data_type=node.data_type.lower(),
+                factor_mode=node.factor_mode.lower(),
+                blend=node.blend_type.lower(),
+                clamp_factor=node.clamp_factor,
+                clamp_result=node.clamp_result,
+            )
+        case "ShaderNodeMath" | "ShaderNodeVectorMath":
+            return MathSettings(
+                operation=node.operation.lower(),
+                clamp=node.use_clamp if node.bl_idname == "ShaderNodeMath" else None,
+            )
+        case "ShaderNodeDisplacement":
+            return DisplacementSettings(space=node.space.lower())
+        case "ShaderNodeTangent":
+            return TangentSettings(
+                direction=node.direction_type.lower(),
+                axis=node.axis.lower(),
+                uv_map=node.uv_map,
+            )
         case "ShaderNodeOutputMaterial":
             return MaterialOutputSettings(
                 active=node.is_active_output, target=node.target.lower()
@@ -109,6 +167,8 @@ def settings(node: Any) -> NodeSettings | None:
                 strength=scalar("Strength"),
                 space=node.space.lower(),
                 uv_map=node.uv_map,
+                convention=node.convention.lower(),
+                base=node.base.lower(),
             )
         case "ShaderNodeBump":
             return BumpSettings(

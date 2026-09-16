@@ -190,7 +190,9 @@ subsurface/displacement methods, texture channels, features and bounded warnings
 Linked socket defaults are not evaluated shader values. Semantic texture
 recognition follows verified recipes; other graphs recognize direct image-to-
 Principled connections only. Detailed node/socket/link pages remain opt-in through
-`shader.inspect`; material catalog filters and pagination remain unchanged.
+`shader.inspect`, including supported node modes/operators, ramp stops and normal
+conventions. Ramp details cap at eight stops with an explicit count/truncation flag.
+Material catalog filters and pagination remain unchanged.
 
 Fingerprints include stored graph values, supported node properties, links,
 material settings and image identities/interpretation, and survive save/reopen.

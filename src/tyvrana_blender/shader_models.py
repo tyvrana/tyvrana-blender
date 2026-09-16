@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import Field, FiniteFloat, field_validator, model_validator
 from tyvrana_protocol import JsonValue
 
+from .material_author_models import RampStop
 from .models import InspectArguments, Model, ObjectName, PageInfo
 from .numeric import Float32, Vector32
 
@@ -67,6 +68,8 @@ class NormalMapSettings(Model):
     strength: Float32
     space: str
     uv_map: str
+    convention: str
+    base: str
 
 
 class BumpSettings(Model):
@@ -80,6 +83,54 @@ class MaterialOutputSettings(Model):
     target: str
 
 
+class PrincipledSettings(Model):
+    subsurface_method: str
+    distribution: str
+
+
+class UVMapSettings(Model):
+    uv_map: str
+    from_instancer: bool
+
+
+class NoiseSettings(Model):
+    dimensions: str
+    noise_type: str
+    normalize: bool
+
+
+class RampSettings(Model):
+    color_mode: str
+    interpolation: str
+    hue_interpolation: str
+    stops: list[RampStop] = Field(max_length=8)
+    stop_count: int
+    stops_truncated: bool
+
+
+class MixSettings(Model):
+    data_type: str
+    factor_mode: str
+    blend: str
+    clamp_factor: bool
+    clamp_result: bool
+
+
+class MathSettings(Model):
+    operation: str
+    clamp: bool | None
+
+
+class DisplacementSettings(Model):
+    space: str
+
+
+class TangentSettings(Model):
+    direction: str
+    axis: str
+    uv_map: str
+
+
 type NodeSettings = (
     ImageTextureSettings
     | TextureCoordinateSettings
@@ -87,6 +138,14 @@ type NodeSettings = (
     | NormalMapSettings
     | BumpSettings
     | MaterialOutputSettings
+    | PrincipledSettings
+    | UVMapSettings
+    | NoiseSettings
+    | RampSettings
+    | MixSettings
+    | MathSettings
+    | DisplacementSettings
+    | TangentSettings
 )
 
 
