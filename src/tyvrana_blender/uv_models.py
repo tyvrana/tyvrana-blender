@@ -163,6 +163,8 @@ class UVLayoutArguments(Model):
     resolution: int = Field(default=4096, ge=64, le=16384)
     layout_image: bool = False
     image_size: int = Field(default=1024, ge=128, le=1024)
+    island_offset: int = Field(default=0, ge=0)
+    island_limit: int = Field(default=16, ge=1, le=64)
 
     @field_validator("*", mode="before")
     @classmethod
@@ -259,7 +261,9 @@ class UVLayoutResult(Model):
     evaluated: bool
     resolution: int
     island_count: int
-    islands: list[UVIslandSummary]
+    islands: list[UVIslandSummary] = Field(max_length=64)
+    next_island_offset: int | None
+    islands_truncated: bool
     face_count: int
     triangle_count: int
     flipped_face_count: int

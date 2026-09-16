@@ -71,7 +71,11 @@ def inspect(
             snapshots.append(surface(obj, obj.data, arguments.uv_map))
     try:
         report, triangles = uv_quality.analyze(
-            snapshots, arguments.resolution, arguments.evaluated
+            snapshots,
+            arguments.resolution,
+            arguments.evaluated,
+            island_offset=arguments.island_offset,
+            island_limit=arguments.island_limit,
         )
     except ValueError as exc:
         raise OperationError("uv_analysis_failed", str(exc)) from exc

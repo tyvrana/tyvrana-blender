@@ -123,7 +123,11 @@ class Surface:
         return hit, uv
 
     def sample(self, uv: Any) -> tuple[Any, Any]:
-        found = self.uv_bvh.find_nearest_range(uv, 1e-7)
+        # Blender stores UVs and BVH projections in single precision. A valid
+        # interior point can round more than 1e-7 from its nearest projection.
+        # Keep disconnected-overlap validation below; this is a UV tolerance,
+        # not permission to bind to a different surface location.
+        found = self.uv_bvh.find_nearest_range(uv, 1e-6)
         if not found:
             fail("A stored UV binding no longer resolves on the surface")
         values = []

@@ -19,13 +19,15 @@ from .artifacts import ArtifactSpool
 from .models import ConnectionConfig
 
 logger = logging.getLogger(__name__)
-MAX_FRAME = 1024 * 1024
+MAX_FRAME = 4 * 1024 * 1024
 
 
 class WorkerProcess:
     def __init__(
         self, config: ConnectionConfig, registration: AdapterRegistration
     ) -> None:
+        if len(encode_message(registration)) > MAX_FRAME:
+            raise ValueError("Registration exceeds the 4 MiB control-frame limit")
         self.spool = ArtifactSpool()
         # Blender supplies extension-managed wheel paths. The isolated child uses
         # those exact paths and its bundled interpreter, never a global install.

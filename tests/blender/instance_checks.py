@@ -85,6 +85,31 @@ class InstanceTests(unittest.TestCase):
                     instance.matrix_world.translation.z, 0.02, places=5
                 )
 
+    def test_dense_distribution_preserves_valid_uv_bindings(self) -> None:
+        self.spec = models.SurfaceDistribution(
+            surface_object="Surface",
+            prototype_object="Asset",
+            uv_map="UVMap",
+            guides=[
+                [[-0.9, -0.9, 0], [-0.9, 0.9, 0]],
+                [[0.9, -0.9, 0], [0.9, 0.9, 0]],
+            ],
+            rows=64,
+            columns=64,
+        )
+        result = self.create()
+        self.assertEqual(result.evaluated_instance_count, 4096)
+        self.assertEqual(result.invalid_binding_count, 0)
+        self.assertLess(result.root_position_max_error, 1e-5)
+        self.surface.data.vertices[2].co.z = 0.2
+        self.surface.data.update()
+        bpy.context.view_layer.update()
+        after = self.inspect()
+        self.assertEqual(after.binding_sha256, result.binding_sha256)
+        self.assertEqual(after.evaluated_instance_count, 4096)
+        self.assertEqual(after.invalid_binding_count, 0)
+        self.assertLess(after.root_position_max_error, 1e-5)
+
     def test_existing_evaluated_inspection_with_owned_instances(self) -> None:
         self.create()
         package = "bl_ext.user_default.tyvrana_blender."

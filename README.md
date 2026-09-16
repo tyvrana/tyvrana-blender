@@ -1118,6 +1118,12 @@ triangle edges. This does not exempt folds or overlaps between separate islands.
 Density percentiles are
 unweighted face samples; distortion percentiles are unweighted native triangles.
 
+UV layout inspection returns at most 16 island summaries by default. Use
+`island_offset`, `island_limit` (at most 64), and `next_island_offset` to page
+snapshot-specific detail. `islands_truncated` makes omitted detail explicit.
+Global quality metrics and the optional layout image always cover all islands.
+
+
 `layout_image: true` additionally returns a colored PNG through the ordinary
 bounded artifact transport; `image_size` is 128–1024, default 1024. The image shows
 native triangulation, island colors and a UV grid; it requires no UV editor or
@@ -1181,7 +1187,8 @@ with explicit ray settings on every target. It returns a `job_id` immediately;
 poll `blender.bake.status` with that ID until `completed` or `failed`. Status
 includes completed/total target counts, the final result or a visible error.
 The latest four jobs remain available until extension reload. Native jobs need
-the visible application's event loop. While a job owns temporary resources,
+the visible application's event loop; `bake.image` advertises
+`requires_interactive=true` and rejects background execution before allocating a job. While a job owns temporary resources,
 only bake status and extension inspection are allowed; other operations return
 `adapter_busy`. This includes project changes, renders and extension reload.
 
@@ -3026,7 +3033,7 @@ batch size. Main-thread assertions guard execution. The worker handles heartbeat
 and cancellation while Blender performs an operation. No shell commands or
 arbitrary Python execution operations are exposed.
 
-There are at most 128 pending commands. Frames are limited to 1 MiB, and pipe IO
+There are at most 128 pending commands. Frames are limited to 4 MiB, and pipe IO
 per tick is bounded. Each handler still runs synchronously: a long Blender API
 call cannot be preempted by the timer budget.
 

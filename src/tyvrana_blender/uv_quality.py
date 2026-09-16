@@ -319,7 +319,12 @@ def island_gap(groups: list[list[Face]]) -> float | None:
 
 
 def analyze(
-    surfaces: list[Surface], resolution: int, evaluated: bool
+    surfaces: list[Surface],
+    resolution: int,
+    evaluated: bool,
+    *,
+    island_offset: int = 0,
+    island_limit: int = 16,
 ) -> tuple[UVLayoutResult, list[Triangle]]:
     if sum(len(s.faces) for s in surfaces) > MAX_FACES:
         raise ValueError(f"UV inspection exceeds {MAX_FACES} faces")
@@ -443,7 +448,11 @@ def analyze(
             evaluated=evaluated,
             resolution=resolution,
             island_count=len(reports),
-            islands=reports,
+            islands=reports[island_offset : island_offset + island_limit],
+            next_island_offset=island_offset + island_limit
+            if island_offset + island_limit < len(reports)
+            else None,
+            islands_truncated=island_offset > 0 or island_limit < len(reports),
             face_count=len(issues),
             triangle_count=len(triangles),
             flipped_face_count=flipped,

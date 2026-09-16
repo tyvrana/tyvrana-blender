@@ -1682,9 +1682,11 @@ _DECLARATIONS = (
         lambda b, a, q: b.bake_image(a),
         "Start a bounded asynchronous tangent-normal bake from explicit "
         "evaluated sources to UV targets. Returns a job ID; inspect that job "
-        "with bake.status.",
+        "with bake.status. Requires the visible application event loop; "
+        "background hosts support bake.inspect but cannot start this job.",
         effect="mutating",
         execution="job_start",
+        requires_interactive=True,
     ),
     _operation(
         "blender.bake.inspect",
@@ -1786,7 +1788,8 @@ _DECLARATIONS = (
         "Compare evaluated meshes in the current pose against temporary rest "
         "state. Reports bounded displacement/distortion samples, percentiles,"
         " bone regions and optional contact/volume proxies; restores pose "
-        "mode.",
+        "mode. Requires an unanimated rig; use motion.sample for active "
+        "actions/drivers and an explicit evaluated reference frame.",
         effect="read_only",
         execution="synchronous",
     ),
@@ -2717,8 +2720,9 @@ _DECLARATIONS = (
         UVLayoutResult,
         lambda b, a, q: b.uv_layout(a),
         "Inspect bounded authored/evaluated UV density, overlap and "
-        "distortion across named targets, optionally returning a layout image"
-        " artifact.",
+        "distortion across named targets. Global metrics and optional layout "
+        "image cover every island; island detail defaults to 16, max 64 per "
+        "page using island_offset/island_limit and next_island_offset.",
         effect="transient",
         execution="synchronous",
         output_artifacts="optional",

@@ -39,7 +39,7 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from .incoming import InputError, InputStore
 
 logger = logging.getLogger(__name__)
-MAX_FRAME = 1024 * 1024
+MAX_FRAME = 4 * 1024 * 1024
 MAX_PENDING = 128
 ACK_TIMEOUT = 10.0
 

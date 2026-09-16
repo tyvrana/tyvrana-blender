@@ -100,6 +100,23 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(evaluated["face_count"], 3)
         self.assertGreaterEqual(evaluated["minimum_island_gap_pixels"], 31.99)
 
+    def test_island_pagination_preserves_global_metrics(self) -> None:
+        first = self.call(
+            "uv.inspect_layout", objects=["A", "B"], island_limit=1
+        ).result
+        second = self.call(
+            "uv.inspect_layout", objects=["A", "B"], island_offset=1, island_limit=1
+        ).result
+        self.assertEqual(first["island_count"], 2)
+        self.assertEqual(len(first["islands"]), 1)
+        self.assertEqual(first["next_island_offset"], 1)
+        self.assertIsNone(second["next_island_offset"])
+        self.assertTrue(first["islands_truncated"])
+        self.assertEqual(first["islands"][0]["object_name"], "A")
+        self.assertEqual(second["islands"][0]["object_name"], "B")
+        for key in ("face_count", "overlap_pair_count", "density", "uv_area", "tiles"):
+            self.assertEqual(first[key], second[key])
+
     def test_shared_mesh_and_map_roles_preserved(self) -> None:
         original = self.a.data
         self.b.data = original

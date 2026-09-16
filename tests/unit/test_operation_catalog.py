@@ -9,6 +9,7 @@ from tyvrana_protocol import OperationFailure, encode_message
 from tyvrana_blender.inspection import page
 from tyvrana_blender.models import InspectArguments
 from tyvrana_blender.operations import OPERATIONS, REGISTRY, registration
+from tyvrana_blender.transport import MAX_FRAME
 
 from .test_operations import Backend, call
 
@@ -16,7 +17,7 @@ from .test_operations import Backend, call
 def test_complete_catalog_fits_transport_and_preserves_patch_omissions() -> None:
     message = registration("catalog", "5.2.1", "")
     assert message.operation_names == OPERATIONS
-    assert len(encode_message(message)) < 1024 * 1024
+    assert len(encode_message(message)) < MAX_FRAME
     assert all(spec.contract.description for spec in REGISTRY.values())
     assert all(
         spec.contract.arguments_schema and spec.contract.result_schema
@@ -32,6 +33,7 @@ def test_complete_catalog_fits_transport_and_preserves_patch_omissions() -> None
     assert "lens_mm" not in orthographic.model_fields_set
     assert REGISTRY["blender.sculpt.stroke"].contract.requires_interactive
     assert REGISTRY["blender.bake.image"].contract.execution == "job_start"
+    assert REGISTRY["blender.bake.image"].contract.requires_interactive
     assert (
         REGISTRY["blender.image.create_from_artifact"].contract.input_artifacts
         == "required"

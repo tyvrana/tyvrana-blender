@@ -17,12 +17,14 @@ from websockets.asyncio.server import ServerConnection, serve
 
 from tyvrana_blender.models import ConnectionConfig
 from tyvrana_blender.operations import registration
-from tyvrana_blender.transport import WorkerProcess
+from tyvrana_blender.transport import MAX_FRAME, WorkerProcess
 from tyvrana_blender.worker import Backoff
 
 
 @asynccontextmanager
-async def worker() -> AsyncIterator[
+async def worker(
+    catalog: AdapterRegistration | None = None,
+) -> AsyncIterator[
     tuple[WorkerProcess, asyncio.Queue[ServerConnection], list[Message]]
 ]:
     connected: asyncio.Queue[ServerConnection] = asyncio.Queue()
@@ -36,10 +38,12 @@ async def worker() -> AsyncIterator[
         connected.put_nowait(socket)
         await socket.wait_closed()
 
-    async with serve(accept, "127.0.0.1", 0, close_timeout=0.1) as server:
+    async with serve(
+        accept, "127.0.0.1", 0, close_timeout=0.1, max_size=MAX_FRAME
+    ) as server:
         process = WorkerProcess(
             ConnectionConfig(port=server.sockets[0].getsockname()[1]),
-            registration("test-process", "5.2.1 LTS", ""),
+            catalog or registration("test-process", "5.2.1 LTS", ""),
         )
         messages: list[Message] = []
 
@@ -198,3 +202,77 @@ def test_stop_discards_an_incomplete_parent_frame() -> None:
         process.stop()
     assert process.process.returncode == 0
     assert not process.spool.root.exists()
+
+
+async def test_large_catalog_crosses_parent_worker_and_socket_boundaries() -> None:
+    message = registration("large-catalog", "5.2.1 LTS", "")
+    template = message.operations[0]
+    message = message.model_copy(
+        update={
+            "operations": tuple(
+                template.model_copy(
+                    update={
+                        "name": f"blender.inspect_{i}",
+                        "arguments_schema": {
+                            "type": "object",
+                            "description": "x" * 100000,
+                        },
+                    }
+                )
+                for i in range(20)
+            )
+        }
+    )
+    assert 1024 * 1024 < len(encode_message(message)) < MAX_FRAME
+    async with worker(message) as (process, connected, messages):
+        socket = await asyncio.wait_for(connected.get(), 5)
+        request = OperationRequest(
+            type="operation.request",
+            request_id="after-catalog",
+            operation="blender.inspect_0",
+            arguments={},
+        )
+        await socket.send(encode_message(request).decode())
+        await until(lambda: request in messages)
+        process.send(
+            OperationSuccess(
+                type="operation.success",
+                request_id=request.request_id,
+                result={"ok": True},
+            )
+        )
+        response = await asyncio.wait_for(socket.recv(), 5)
+        assert isinstance(response, str)
+        decoded = decode_message(response.encode())
+        assert isinstance(decoded, OperationSuccess)
+        assert decoded.request_id == request.request_id
+
+
+def test_oversized_catalog_is_rejected_before_spawning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = registration("oversized", "5.2.1 LTS", "")
+    template = message.operations[0]
+    message = message.model_copy(
+        update={
+            "operations": tuple(
+                template.model_copy(
+                    update={
+                        "name": f"blender.inspect_{i}",
+                        "arguments_schema": {
+                            "type": "object",
+                            "description": "x" * 100000,
+                        },
+                    }
+                )
+                for i in range(43)
+            )
+        }
+    )
+
+    def unexpected_spawn(*args: object, **kwargs: object) -> None:
+        pytest.fail("Oversized registration must not start a worker")
+
+    monkeypatch.setattr("tyvrana_blender.transport.subprocess.Popen", unexpected_spawn)
+    with pytest.raises(ValueError, match="Registration exceeds"):
+        WorkerProcess(ConnectionConfig(), message)

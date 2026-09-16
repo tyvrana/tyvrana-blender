@@ -179,3 +179,29 @@ def test_triangle_and_pair_budgets_remain_independent(
             1024,
             True,
         )
+
+
+def test_island_pages_preserve_global_quality_and_triangles() -> None:
+    surfaces = [quality.Surface("Atlas", [face(i, i * 2) for i in range(35)])]
+    first, triangles = quality.analyze(surfaces, 1024, False)
+    assert first.island_count == 35 and len(first.islands) == 16
+    assert first.next_island_offset == 16 and first.islands_truncated
+    second, other_triangles = quality.analyze(
+        surfaces, 1024, False, island_offset=16, island_limit=64
+    )
+    assert len(second.islands) == 19 and second.next_island_offset is None
+    assert [i.island_id for i in [*first.islands, *second.islands]] == list(range(35))
+    omitted = {"islands", "next_island_offset", "islands_truncated"}
+    assert first.model_dump(exclude=omitted) == second.model_dump(exclude=omitted)
+    assert triangles == other_triangles and len(triangles) == 70
+    empty, _ = quality.analyze(surfaces, 1024, False, island_offset=35)
+    assert empty.islands == [] and empty.next_island_offset is None
+    assert empty.island_count == 35
+
+
+@pytest.mark.parametrize(
+    "settings", [{"island_offset": -1}, {"island_limit": 0}, {"island_limit": 65}]
+)
+def test_invalid_island_page(settings: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        UVLayoutArguments(objects=["Atlas"], **settings)

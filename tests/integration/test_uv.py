@@ -67,6 +67,6 @@ def test_native_joint_uv_layout(profile: dict[str, str], tmp_path: Path) -> None
     )
     (tmp_path / "uv-layout-native.log").write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_UV_LAYOUT_TESTS_PASSED 5" in result.stdout
+    assert "BLENDER_UV_LAYOUT_TESTS_PASSED 6" in result.stdout
     assert "Traceback" not in result.stdout + result.stderr
     assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))
