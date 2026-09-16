@@ -62,7 +62,7 @@ async def test_paths_persist_and_reevaluate_across_hosts(
             async with running_blender(env, directory, ui=False) as process:
                 pids.append(process.pid)
                 adapter = await discover(client)
-                assert adapter is not None and adapter.operation_count == 128
+                assert adapter is not None and adapter.operation_count == 131
                 print("CURVE_MCP_BUILD", adapter.model_dump_json())
 
                 async def call(

@@ -43,6 +43,7 @@ from .mesh_models import (
 )
 from .mesh_selectors import SelectionError, select
 from .operations import OperationError
+from .topology_models import MeshInsertLoopsArguments
 from .uv import mesh_users
 
 # Includes vertices, edges, faces and corners, across one staged authored mesh.
@@ -157,7 +158,7 @@ def query(obj: Any, arguments: MeshQueryArguments) -> MeshQueryResult:
         edges: list[EdgeDetail] = []
         faces: list[FaceDetail] = []
         try:
-            for element in select(bm, arguments.selector):
+            for element in select(bm, arguments.selector, obj):
                 total += 1
                 if total > arguments.limit:
                     continue
@@ -378,30 +379,54 @@ def apply_transform(
 
 
 def edit(
-    obj: Any, arguments: MeshSelectionArguments | MeshNormalsArguments
+    obj: Any,
+    arguments: MeshSelectionArguments | MeshNormalsArguments | MeshInsertLoopsArguments,
 ) -> MeshEditResult:
     if isinstance(arguments, MeshSeamArguments | MeshShadingArguments):
         return edit_flags(obj, arguments)
-    editable(obj, coordinate_only=isinstance(arguments, MeshTransformArguments))
+    refinement = isinstance(arguments, MeshInsertLoopsArguments)
+    editable(
+        obj, coordinate_only=isinstance(arguments, MeshTransformArguments) or refinement
+    )
+    if refinement:
+        from .topology import refinement_guard
+
+        refinement_guard(obj)
     original = obj.data
     with snapshot(obj) as bm:
         try:
+            if isinstance(arguments, MeshInsertLoopsArguments) and any(
+                c.edge >= len(bm.edges) or c.from_vertex >= len(bm.verts)
+                for c in arguments.cuts
+            ):
+                raise SelectionError(
+                    "Cut seed is outside the current topology; query a new snapshot"
+                )
             selected = (
-                list(bm.faces)
+                [
+                    bm.edges[cut.edge]
+                    for cut in arguments.cuts
+                    if cut.edge < len(bm.edges)
+                ]
+                if isinstance(arguments, MeshInsertLoopsArguments)
+                else list(bm.faces)
                 if isinstance(arguments, MeshNormalsArguments)
-                else list(select(bm, arguments.selector))
+                else list(select(bm, arguments.selector, obj))
             )
         except SelectionError as exc:
             raise OperationError("invalid_arguments", str(exc)) from exc
         if not selected:
             raise OperationError("mesh_selection_empty", "Selector matched no geometry")
         domain = (
-            "face"
+            "edge"
+            if isinstance(arguments, MeshInsertLoopsArguments)
+            else "face"
             if isinstance(arguments, MeshNormalsArguments)
             else arguments.selector.domain
         )
         before = {name: list(getattr(bm, name)) for name in _DOMAINS}
         selection = _Selection(bm)
+        original_coordinates = {v: v.co.copy() for v in bm.verts} if refinement else {}
         region: list[Any] | None = None
         transformed: int | None = None
         changed_edges: int | None = None
@@ -409,7 +434,21 @@ def edit(
         size = work_size(bm)
         candidate = None
         try:
-            if isinstance(arguments, MeshTransformArguments):
+            if isinstance(arguments, MeshInsertLoopsArguments):
+                from .topology import refine
+
+                refine(bm, arguments)
+                from .retopo import rebind_vertices
+
+                before["verts"] = list(
+                    rebind_vertices(bm, original_coordinates, selection)
+                )
+                from . import modifiers
+
+                modifiers.budget(
+                    obj, modifiers.stack(obj), source_size=work_size(bm), strict=True
+                )
+            elif isinstance(arguments, MeshTransformArguments):
                 vertices = selected_vertices(selected, domain)
                 transformed = apply_transform(bm, vertices, arguments)
             elif isinstance(arguments, MeshExtrudeArguments):
@@ -595,6 +634,7 @@ def edit(
             )
             response = MeshEditResult(
                 object_name=obj.name,
+                indices_invalidated=True if refinement else None,
                 selected=ElementSelection(domain=domain, count=len(selected)),
                 created=created,
                 removed=removed,
@@ -645,7 +685,7 @@ def edit_flags(
         )
     with snapshot(obj) as bm:
         try:
-            indices = [element.index for element in select(bm, arguments.selector)]
+            indices = [element.index for element in select(bm, arguments.selector, obj)]
         except SelectionError as exc:
             raise OperationError("invalid_arguments", str(exc)) from exc
         if not indices:

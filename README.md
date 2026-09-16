@@ -2535,7 +2535,7 @@ when curvature requires them.
 ### Target modifier policy and budgets
 
 Supported target stacks are empty, one Mirror, one Shrinkwrap, or **Mirror followed
-by Shrinkwrap**. They remain object-owned, unapplied, and retain their settings.
+by Shrinkwrap**; each may end with one bounded Subdivision modifier. They remain object-owned, unapplied, and retain their settings.
 
 - Mirror: exactly one local axis, target-origin plane, no external mirror object,
   no bisect, no Edit Mode clipping, merge threshold `0..0.1`. Authored geometry must
@@ -2678,8 +2678,8 @@ including rotations that leave counts unchanged.
 isolation policies apply unchanged. Selection/material/seam data use native
 preservation/interpolation; final UVs, weights, shape keys, animation, custom
 normals and unsafe deformation relationships remain protected. All operations
-support the vetted Mirror, Shrinkwrap and Mirror → Shrinkwrap stacks without
-applying helpers. Authored projection remains explicit; evaluated Shrinkwrap
+support the vetted Mirror, Shrinkwrap and Mirror → Shrinkwrap stacks, optionally
+ending with one bounded Subdivision modifier, without applying helpers. Authored projection remains explicit; evaluated Shrinkwrap
 cannot substitute for authored correspondence inspection. Existing Mirror seam
 vertices may not move off their plane.
 
@@ -3672,3 +3672,10 @@ For the complete native suite, omit `--headless-only`; tests marked `interactive
 or parameterized with `ui=True` require a Blender UI event loop (the Linux test
 harness uses an isolated virtual display). Background-only runs explicitly skip
 those cases and do not establish interactive sculpting or user-session acceptance.
+
+## Articulated topology workflows
+
+See [Topology selection, loop refinement and pose-set QA](docs/topology.md) for
+shared graph/rest-frame selectors, `mesh.inspect_topology`, `mesh.insert_loops`,
+source-projected multiple cuts and `deformation.sweep`, including preservation,
+rollback, attachment invalidation and bounded result semantics.

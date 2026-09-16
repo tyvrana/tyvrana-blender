@@ -37,6 +37,8 @@ def distribution(values: list[float]) -> RatioDistribution:
 
 
 def volume(points: Any, triangles: Any) -> float | None:
+    if not points or not triangles:
+        return None
     counts: Counter[tuple[int, int]] = Counter()
     winding: Counter[tuple[int, int]] = Counter()
     for tri in triangles:
@@ -46,7 +48,7 @@ def volume(points: Any, triangles: Any) -> float | None:
             winding[edge] += 1 if i < j else -1
     if any(count != 2 or winding[e] for e, count in counts.items()):
         return None
-    origin = points[0]
+    origin = points[triangles[0][0]]
     result = (
         abs(
             sum(
@@ -72,6 +74,18 @@ def compare(rest: Any, posed: Any, limit: int) -> DeformationQA:
         area = (a[j] - a[i]).cross(a[k] - a[i]).length
         if area > 1e-16:
             areas.append((i, j, k, (b[j] - b[i]).cross(b[k] - b[i]).length / area))
+    angles = []
+    for i, j, k, _ in areas:
+        for origin, x, y in ((i, j, k), (j, k, i), (k, i, j)):
+            ra, rb = a[x] - a[origin], a[y] - a[origin]
+            pa, pb = b[x] - b[origin], b[y] - b[origin]
+            if min(pa.length, pb.length) > 1e-10:
+                angles.append(
+                    abs(
+                        math.atan2(pa.cross(pb).length, pa.dot(pb))
+                        - math.atan2(ra.cross(rb).length, ra.dot(rb))
+                    )
+                )
     extremes = sorted(
         ratios, key=lambda e: (-abs(math.log(max(1e-12, e[2]))), e[0], e[1])
     )[:limit]
@@ -117,6 +131,9 @@ def compare(rest: Any, posed: Any, limit: int) -> DeformationQA:
         )
     vr, vp = volume(a, triangles), volume(b, triangles)
     return DeformationQA(
+        triangle_angle_change_radians=distribution(angles),
+        collapsed_triangle_count=sum(row[3] < 0.01 for row in areas),
+        degenerate_rest_triangle_count=len(triangles) - len(areas),
         edge_ratios=distribution([r for _, _, r in ratios]),
         triangle_area_ratios=distribution([r for _, _, _, r in areas]),
         worst_edges=samples,

@@ -154,7 +154,7 @@ def face_sets_assign(
     _, values = face_values(obj)
     with mesh.snapshot(obj) as bm:
         try:
-            indices = [f.index for f in select(bm, arguments.selector)]
+            indices = [f.index for f in select(bm, arguments.selector, obj)]
         except SelectionError as exc:
             raise OperationError("invalid_arguments", str(exc)) from exc
     if not indices:

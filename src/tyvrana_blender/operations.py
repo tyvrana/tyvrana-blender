@@ -42,6 +42,7 @@ from .curve_models import (
     CurveRemoveResult,
     CurveResult,
 )
+from .deformation_sweep_models import DeformationSweepArguments, DeformationSweepResult
 from .extension_models import (
     ExtensionInspectArguments,
     ExtensionReloadArguments,
@@ -246,6 +247,11 @@ from .shader_models import (
     ShaderGraphSummary,
     ShaderInspectArguments,
 )
+from .topology_models import (
+    MeshInsertLoopsArguments,
+    TopologyInspectArguments,
+    TopologySummary,
+)
 from .uv_models import (
     UVCreateArguments,
     UVInspectArguments,
@@ -376,6 +382,10 @@ class SceneBackend(Protocol):
     ) -> ArmatureSummary: ...
     def armature_bind(self, arguments: ArmatureBindArguments) -> BindingSummary: ...
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary: ...
+    def deformation_sweep(
+        self, arguments: DeformationSweepArguments
+    ) -> DeformationSweepResult: ...
+
     def deformation_inspect(
         self, arguments: DeformationInspectArguments
     ) -> DeformationSummary: ...
@@ -470,9 +480,16 @@ class SceneBackend(Protocol):
     ) -> EvaluatedMeshSummary: ...
 
     def mesh_inspect(self, arguments: MeshInspectArguments) -> MeshSummary: ...
+    def mesh_inspect_topology(
+        self, arguments: TopologyInspectArguments
+    ) -> TopologySummary: ...
+
     def mesh_query(self, arguments: MeshQueryArguments) -> MeshQueryResult: ...
     def mesh_edit(
-        self, arguments: MeshSelectionArguments | MeshNormalsArguments
+        self,
+        arguments: MeshSelectionArguments
+        | MeshNormalsArguments
+        | MeshInsertLoopsArguments,
     ) -> MeshEditResult: ...
     def operation_allowed(self, operation: str) -> bool: ...
     def bake_status(self, arguments: BakeStatusArguments) -> BakeJobStatus: ...
@@ -1120,6 +1137,25 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.deformation.sweep",
+        DeformationSweepArguments,
+        DeformationSweepResult,
+        lambda b, a, q: b.deformation_sweep(a),
+        "Evaluate 1..16 deterministic reset-to-rest poses on owned bound meshes and "
+        "up to 8 frozen rest-frame boxes. Return compact "
+        "stretch/compression/area/corner-angle distributions, bounded worst edges, "
+        "bone influence regions and closed-volume proxy. Joint limits apply; "
+        "Report evaluated rotations. Up to 128 mesh/pose/region summaries, "
+        "384 detail units (summary count times 1+2*sample_limit+bone_names count) "
+        "and 1M evaluated vertex/pose samples. Temporarily evaluates native poses "
+        "synchronously and "
+        "restores every channel/mode and pose position on success or failure. "
+        "Unknown controls/animation remain guarded. No self-intersection/inversion "
+        "certification or automatic topology-vs-weight diagnosis.",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
         "blender.deformation.inspect",
         DeformationInspectArguments,
         DeformationSummary,
@@ -1416,13 +1452,47 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.mesh.inspect_topology",
+        TopologyInspectArguments,
+        TopologySummary,
+        lambda b, a, q: b.mesh_inspect_topology(a),
+        "Inspect a selected authored region: induced edges/faces, world-space "
+        "length/area/aspect distributions, valence and bounded poles. Shared "
+        "selectors discover rings/loops/components/neighborhoods and native "
+        "rest-frame boxes; no model-side graph reconstruction. At most64 pole "
+        "samples,100000 traversed elements. Counts are cage diagnostics, not "
+        "deformation acceptance.",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.mesh.insert_loops",
+        MeshInsertLoopsArguments,
+        MeshEditResult,
+        lambda b, a, q: b.mesh_edit(a),
+        "Refine up to 16 disjoint quad strips with 1..16 ordered fractions each. "
+        "Input seed edge/from_vertex indices share one snapshot; 4096 rails per "
+        "strip, 2M staged elements. Native BMesh interpolates UVs, weights and "
+        "supported custom attributes; material/seam flags retained. Owned "
+        "Armature, Mirror/Subdivision/Shrinkwrap stacks remain ordered; shape "
+        "keys/custom normals/unknown dependencies refused. Stage then swap; "
+        "failure preserves data. Connectivity invalidates indices and curve "
+        "surface attachments; explicitly reinspect/rebind and recheck deformation. "
+        "No automatic weight correction.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
         "blender.mesh.query",
         MeshQueryArguments,
         TypeAdapter(MeshQueryResult),
         lambda b, a, q: b.mesh_query(a),
         "Query authored vertices/edges/faces using a typed selector and "
         "bounded result limit. Reports matched count and truncation; topology"
-        " changes invalidate indices.",
+        " changes invalidate indices. Shared selectors discover edge loops/rings/"
+        "closed boundaries, components, neighborhoods, valence and rest-frame "
+        "boxes. Traversal caps 100000 elements; loops stop at poles/non-quads, "
+        "rings reject them. Details are bounded independently of matched count.",
         effect="read_only",
         execution="synchronous",
     ),
@@ -1666,8 +1736,10 @@ _DECLARATIONS = (
         RetopoInsertArguments,
         RetopoEditResult,
         lambda b, a, q: b.retopo_edit(a),
-        "Insert a bounded edge loop at a chosen factor and source-project the"
-        " new topology.",
+        "Insert 1..16 loops in one quad strip at factor or ordered factors, "
+        "oriented by from_vertex, and source-project new topology. Existing retopo "
+        "UV/weight/shape-key guards remain. Staged transaction; connectivity "
+        "invalidates indices and surface attachments.",
         effect="mutating",
         execution="synchronous",
     ),

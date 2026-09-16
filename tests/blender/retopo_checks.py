@@ -630,7 +630,13 @@ class NativeRetopoTests(RetopoCase):
         )
 
     def test_modifier_policy_rejects_unvetted_helpers(self) -> None:
-        for kind in ("clip", "axes", "wrong_source", "wrong_order", "subdivision"):
+        for kind in (
+            "clip",
+            "axes",
+            "wrong_source",
+            "wrong_order",
+            "subdivision_order",
+        ):
             with self.subTest(kind=kind):
                 self.setUp()
                 self.grid(1)
@@ -647,6 +653,7 @@ class NativeRetopoTests(RetopoCase):
                     self.target.modifiers.new("Mirror", "MIRROR")
                 else:
                     self.target.modifiers.new("Smooth", "SUBSURF")
+                    self.target.modifiers.new("Surface", "SHRINKWRAP").target = self.obj
                 self.assertTrue(self.call("inspect")["blockers"])
                 self.failed_unchanged("project", selector=VERTICES)
 

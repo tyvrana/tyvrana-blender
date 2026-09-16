@@ -7,6 +7,7 @@ from pydantic import Field, Strict, field_validator, model_validator
 
 from .models import Model, ObjectName, Vector
 from .numeric import Float32
+from .region_models import FrameRegion
 
 type MeshVector = Annotated[
     list[Annotated[Float32, Strict()]], Field(min_length=3, max_length=3)
@@ -89,13 +90,81 @@ class SeamSelector(Arguments):
     value: bool
 
 
+class TopologySelector(Arguments):
+    """Current authored edge seed. Ring crosses opposite quad edges; loop stops at
+    poles/boundaries/non-quads. Boundary loop must not branch. Traversal limit
+    100000 elements.
+    """
+
+    domain: Literal["edge"]
+    mode: Literal["topology"]
+    path: Literal["loop", "ring", "boundary_loop"]
+    seed: Index
+
+
+class ConnectedSelector(Arguments):
+    """Same-domain connectivity; faces connect across shared edges. Current
+    snapshot seed; traversal limit 100000 elements.
+    """
+
+    domain: Domain
+    mode: Literal["connected"]
+    seed: Index
+
+
+class NeighborhoodSelector(Arguments):
+    """Breadth-first vertex edge distance, with induced edges/faces. Current
+    authored vertex seed; traversal limit 100000 elements.
+    """
+
+    domain: Domain
+    mode: Literal["neighborhood"]
+    vertex: Index
+    steps: int = Field(default=1, ge=0, le=32)
+
+
+class ValenceSelector(Arguments):
+    """Whole-mesh incident-edge count. Extraordinary means not four; boundary
+    vertices excluded by default.
+    """
+
+    domain: Literal["vertex"]
+    mode: Literal["valence"]
+    minimum: int = Field(default=0, ge=0, le=1024)
+    maximum: int = Field(default=1024, ge=0, le=1024)
+    extraordinary: bool = True
+    include_boundary: bool = False
+
+    @model_validator(mode="after")
+    def ordered(self) -> Self:
+        if self.minimum > self.maximum:
+            raise ValueError("Valence minimum must not exceed maximum")
+        return self
+
+
+class RegionSelector(Arguments):
+    """Select in an explicit native rest frame; center/vertex tests, not
+    polygon-box intersection. At most 100000 matches.
+    """
+
+    domain: Domain
+    mode: Literal["region"]
+    region: FrameRegion
+    inclusion: Literal["center", "any_vertex", "all_vertices"] = "center"
+
+
 type MeshElementSelector = Annotated[
     AllSelector
     | IndexSelector
     | BoxSelector
     | NormalSelector
     | BoundarySelector
-    | SeamSelector,
+    | SeamSelector
+    | TopologySelector
+    | ConnectedSelector
+    | NeighborhoodSelector
+    | ValenceSelector
+    | RegionSelector,
     Field(discriminator="mode"),
 ]
 
@@ -327,6 +396,9 @@ class BoundedIndices(Model):
 
 
 class MeshEditResult(Model):
+    indices_invalidated: bool | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
     object_name: str
     selected: ElementSelection
     created: ElementCounts

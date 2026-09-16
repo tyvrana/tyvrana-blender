@@ -54,7 +54,9 @@ def one_edge(bm: Any, selector: Any) -> Any:
     return edges[0]
 
 
-def quad_ring(edge: Any, start: Any | None = None) -> dict[Any, Any]:
+def quad_ring(
+    edge: Any, start: Any | None = None, maximum: int = MAX_FINISH_EDGES
+) -> dict[Any, Any]:
     """Map each transverse edge to its oriented endpoint through opposite quad edges."""
     start = start if start is not None else min(edge.verts, key=lambda v: v.index)
     if start not in edge.verts:
@@ -82,8 +84,8 @@ def quad_ring(edge: Any, start: Any | None = None) -> dict[Any, Any]:
             else:
                 oriented[opposite] = endpoint
                 pending.append(opposite)
-                if len(oriented) > MAX_FINISH_EDGES:
-                    reject("Ring exceeds 128 edges")
+                if len(oriented) > maximum:
+                    reject(f"Ring exceeds {maximum} edges")
             faces.add(face)
     if len({v for e in oriented for v in e.verts}) != 2 * len(oriented):
         reject("Ring edges must have disjoint endpoints")
@@ -105,23 +107,15 @@ def insert(bm: Any, args: RetopoInsertArguments) -> Edit:
     ring = quad_ring(edge, start)
     input_edges = sorted(e.index for e in ring)
     count = len(bm.verts)
-    percents = {
-        e: args.factor if e.verts[0] == v else 1 - args.factor for e, v in ring.items()
-    }
-    bmesh.ops.subdivide_edges(
+    flow_pairs = refine_ring(
         bm,
-        edges=list(ring),
-        cuts=1,
-        edge_percents=percents,
-        use_grid_fill=True,
-        use_only_quads=True,
+        edge.index,
+        ring[edge].index,
+        args.factors or [args.factor],
+        MAX_FINISH_EDGES,
     )
-    mesh.refresh(bm)
     new = list(bm.verts)[count:]
-    chosen = set(new)
-    flow = [e for e in bm.edges if all(v in chosen for v in e.verts)]
-    if len(new) != len(ring) or len(flow) not in {len(new), len(new) - 1}:
-        reject("Native insertion did not produce one clean loop")
+    flow = [bm.edges.get((bm.verts[a], bm.verts[b])) for a, b in flow_pairs]
     return Edit(
         len(ring),
         new,
@@ -129,6 +123,55 @@ def insert(bm: Any, args: RetopoInsertArguments) -> Edit:
         rebind_vertices=True,
         input_edges_before=input_edges,
     )
+
+
+def refine_ring(
+    bm: Any,
+    edge_index: int,
+    start_index: int,
+    factors: list[float],
+    maximum: int = 4096,
+) -> list[tuple[int, int]]:
+    """Cut descending fractions; native interpolation uses each actual cut position."""
+    end_index = bm.edges[edge_index].other_vert(bm.verts[start_index]).index
+    previous = 1.0
+    flow_pairs: list[tuple[int, int]] = []
+    for factor in reversed(factors):
+        start = bm.verts[start_index]
+        edge = bm.edges.get((start, bm.verts[end_index]))
+        if edge is None:
+            reject("Refinement rail disappeared during staged subdivision")
+        oriented = quad_ring(edge, start, maximum)
+        count = len(bm.verts)
+        ratio = factor / previous
+        bmesh.ops.subdivide_edges(
+            bm,
+            edges=list(oriented),
+            cuts=1,
+            edge_percents={
+                e: ratio if e.verts[0] == v else 1 - ratio for e, v in oriented.items()
+            },
+            use_grid_fill=True,
+            use_only_quads=True,
+        )
+        mesh.refresh(bm)
+        if len(bm.verts) - count != len(oriented):
+            reject("Native refinement did not produce one vertex per rail")
+        flow_pairs.extend(
+            (e.verts[0].index, e.verts[1].index)
+            for e in bm.edges
+            if all(v.index >= count for v in e.verts)
+        )
+        neighbors = [
+            e.other_vert(bm.verts[start_index])
+            for e in bm.verts[start_index].link_edges
+            if e.other_vert(bm.verts[start_index]).index >= count
+        ]
+        if len(neighbors) != 1:
+            reject("Native refinement produced an ambiguous rail")
+        end_index = neighbors[0].index
+        previous = factor
+    return flow_pairs
 
 
 def subdivide(bm: Any, args: RetopoSubdivideArguments) -> Edit:

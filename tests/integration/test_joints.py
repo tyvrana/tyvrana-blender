@@ -266,7 +266,7 @@ async def test_structural_fixtures_persist_across_hosts(
             }
             async with running_blender(host_profile, host_path, ui=False):
                 adapter = await discover(client)
-                assert adapter is not None and adapter.operation_count == 128
+                assert adapter is not None and adapter.operation_count == 131
 
                 async def call(
                     name: str,

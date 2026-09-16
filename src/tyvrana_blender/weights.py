@@ -22,9 +22,9 @@ from .weight_models import (
 )
 
 
-def selected(bm: Any, selector: MeshElementSelector) -> set[int]:
+def selected(bm: Any, selector: MeshElementSelector, obj: Any) -> set[int]:
     try:
-        found = {v.index for v in select(bm, selector)}
+        found = {v.index for v in select(bm, selector, obj)}
     except SelectionError as exc:
         rig.fail(str(exc))
     if not found:
@@ -68,7 +68,7 @@ def inspect(args: WeightsInspectArguments) -> WeightsSummary:
     ):
         rig.fail("Weight inspection requires existing deform bones")
     with mesh.snapshot(obj) as bm:
-        indices = sorted(selected(bm, args.selector))
+        indices = sorted(selected(bm, args.selector, obj))
     unweighted = [i for i in indices if not rows[i]]
     non_normal = [i for i in indices if abs(sum(rows[i].values()) - 1) > 1e-5]
     multiple = [i for i in indices if len(rows[i]) > 1]
@@ -140,12 +140,12 @@ def assign(args: WeightsAssignArguments) -> WeightsAssignment:
     counts = []
     with mesh.snapshot(obj) as bm:
         fixed = (
-            selected(bm, args.fixed_selector)
+            selected(bm, args.fixed_selector, obj)
             if args.fixed_selector is not None
             else set()
         )
         for layer in args.layers:
-            indices = selected(bm, layer.selector)
+            indices = selected(bm, layer.selector, obj)
             counts.append(len(indices))
             affected.update(indices)
             profile = layer.weights

@@ -11,7 +11,17 @@ class SelectionError(Exception):
     pass
 
 
-def select(bm: Any, selector: MeshElementSelector) -> Iterator[Any]:
+def select(bm: Any, selector: MeshElementSelector, obj: Any = None) -> Iterator[Any]:
+    if selector.mode in {"topology", "connected", "neighborhood"}:
+        from .topology_selection import graph_select
+
+        yield from graph_select(bm, selector)
+        return
+    if selector.mode == "region":
+        from .topology_selection import region_select
+
+        yield from region_select(bm, selector, obj)
+        return
     elements = getattr(
         bm, {"vertex": "verts", "edge": "edges", "face": "faces"}[selector.domain]
     )
@@ -30,6 +40,12 @@ def select(bm: Any, selector: MeshElementSelector) -> Iterator[Any]:
     )
     for element in elements:
         match selector.mode:
+            case "valence":
+                matches = (
+                    selector.minimum <= len(element.link_edges) <= selector.maximum
+                    and (not selector.extraordinary or len(element.link_edges) != 4)
+                    and (selector.include_boundary or not element.is_boundary)
+                )
             case "all":
                 matches = True
             case "box":

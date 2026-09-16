@@ -78,6 +78,8 @@ def target_budget(data: Any) -> None:
 
 def modifier_blockers(source: Any, target: Any) -> list[str]:
     kinds = [m.type for m in target.modifiers]
+    if kinds and kinds[-1] == "SUBSURF":
+        kinds = kinds[:-1]
     if kinds not in ([], ["MIRROR"], ["SHRINKWRAP"], ["MIRROR", "SHRINKWRAP"]):
         return ["target_modifier_stack"]
     for mod in target.modifiers:
@@ -90,7 +92,7 @@ def modifier_blockers(source: Any, target: Any) -> list[str]:
                 or not 0 <= mod.merge_threshold <= 0.1
             ):
                 return ["target_mirror_configuration"]
-        elif (
+        elif mod.type == "SHRINKWRAP" and (
             mod.target != source
             or mod.wrap_method != "NEAREST_SURFACEPOINT"
             or mod.wrap_mode not in {"ON_SURFACE", "ABOVE_SURFACE"}
@@ -612,6 +614,27 @@ def execute(arguments: RetopoEditArguments) -> RetopoEditResult:
         geometry.surface(source, target) as (reference, _),
         mesh.snapshot(target) as bm,
     ):
+        from .mesh_models import IndexSelector, RegionSelector
+        from .mesh_selectors import SelectionError, select
+
+        updates = {}
+        for field in type(arguments).model_fields:
+            value = getattr(arguments, field)
+            if isinstance(value, RegionSelector):
+                try:
+                    found = [e.index for e in select(bm, value, target)]
+                except SelectionError as exc:
+                    raise OperationError("invalid_arguments", str(exc)) from exc
+                if not found or len(found) > 4096:
+                    raise OperationError(
+                        "invalid_arguments",
+                        "Retopology frame region must select 1..4096 elements",
+                    )
+                updates[field] = IndexSelector(
+                    domain=value.domain, mode="indices", indices=found
+                )
+        if updates:
+            arguments = arguments.model_copy(update=updates)
         mirror_half(target, bm)
         before = geometry.quality(target, bm)
         if (
@@ -651,7 +674,7 @@ def execute(arguments: RetopoEditArguments) -> RetopoEditResult:
             elif isinstance(arguments, RetopoBridgeArguments):
                 growth = MAX_BOUNDARY_EDGES * arguments.segments * 12
             elif isinstance(arguments, RetopoInsertArguments):
-                growth = 128 * 12
+                growth = 128 * 12 * len(arguments.factors or [arguments.factor])
             elif isinstance(arguments, RetopoSubdivideArguments):
                 growth = 128 * (arguments.cuts + 1) ** 2 * 12
             elif isinstance(arguments, RetopoFillArguments):

@@ -37,6 +37,10 @@ from tyvrana_blender.curve_models import (
     CurveRemoveResult,
     CurveResult,
 )
+from tyvrana_blender.deformation_sweep_models import (
+    DeformationSweepArguments,
+    DeformationSweepResult,
+)
 from tyvrana_blender.extension_models import (
     ExtensionReloadArguments,
     ExtensionReloadResult,
@@ -196,6 +200,11 @@ from tyvrana_blender.shader_models import (
     ShaderGraphSummary,
     ShaderInspectArguments,
 )
+from tyvrana_blender.topology_models import (
+    MeshInsertLoopsArguments,
+    TopologyInspectArguments,
+    TopologySummary,
+)
 from tyvrana_blender.uv_models import (
     UVCreateArguments,
     UVInspectArguments,
@@ -342,6 +351,24 @@ class Backend:
 
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary:
         raise NotImplementedError
+
+    def deformation_sweep(
+        self, arguments: DeformationSweepArguments
+    ) -> DeformationSweepResult:
+        self.calls.append("deformation_sweep")
+        return DeformationSweepResult(
+            armature_object=arguments.armature_object,
+            poses=[],
+            restored=True,
+            inspection_seconds=0,
+            evaluated_vertex_samples=0,
+            limitations=[],
+        )
+
+    def mesh_inspect_topology(
+        self, arguments: TopologyInspectArguments
+    ) -> TopologySummary:
+        raise AssertionError("Native topology inspection is covered by packaged tests")
 
     def deformation_inspect(
         self, arguments: DeformationInspectArguments
@@ -922,14 +949,19 @@ class Backend:
                 )
 
     def mesh_edit(
-        self, arguments: MeshSelectionArguments | MeshNormalsArguments
+        self,
+        arguments: MeshSelectionArguments
+        | MeshNormalsArguments
+        | MeshInsertLoopsArguments,
     ) -> MeshEditResult:
         state = self.mesh_inspect(arguments)
         self.calls[-1] = "mesh_edit"
         return MeshEditResult(
             object_name=arguments.object_name,
             selected=ElementSelection(
-                domain="face"
+                domain="edge"
+                if isinstance(arguments, MeshInsertLoopsArguments)
+                else "face"
                 if isinstance(arguments, MeshNormalsArguments)
                 else arguments.selector.domain,
                 count=1,

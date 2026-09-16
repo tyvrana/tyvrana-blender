@@ -63,6 +63,7 @@ from .curve_models import (
     CurveRemoveResult,
     CurveResult,
 )
+from .deformation_sweep_models import DeformationSweepArguments, DeformationSweepResult
 from .dispatch import CommandQueue
 from .extension_models import (
     ExtensionReloadArguments,
@@ -250,6 +251,11 @@ from .shader_models import (
     NodeSummary,
     ShaderGraphSummary,
     ShaderInspectArguments,
+)
+from .topology_models import (
+    MeshInsertLoopsArguments,
+    TopologyInspectArguments,
+    TopologySummary,
 )
 from .transport import WorkerProcess
 from .uv_models import (
@@ -1050,6 +1056,14 @@ class BlenderBackend:
         main_thread()
         return rig.pose(arguments)
 
+    def deformation_sweep(
+        self, arguments: DeformationSweepArguments
+    ) -> DeformationSweepResult:
+        main_thread()
+        from . import deformation_sweep
+
+        return deformation_sweep.execute(arguments)
+
     def deformation_inspect(
         self, arguments: DeformationInspectArguments
     ) -> DeformationSummary:
@@ -1086,12 +1100,23 @@ class BlenderBackend:
         main_thread()
         return mesh.inspect(uv.mesh_object(arguments.object_name))
 
+    def mesh_inspect_topology(
+        self, arguments: TopologyInspectArguments
+    ) -> TopologySummary:
+        main_thread()
+        from . import topology
+
+        return topology.inspect(uv.mesh_object(arguments.object_name), arguments)
+
     def mesh_query(self, arguments: MeshQueryArguments) -> MeshQueryResult:
         main_thread()
         return mesh.query(uv.mesh_object(arguments.object_name), arguments)
 
     def mesh_edit(
-        self, arguments: MeshSelectionArguments | MeshNormalsArguments
+        self,
+        arguments: MeshSelectionArguments
+        | MeshNormalsArguments
+        | MeshInsertLoopsArguments,
     ) -> MeshEditResult:
         main_thread()
         return mesh.edit(uv.mesh_object(arguments.object_name), arguments)

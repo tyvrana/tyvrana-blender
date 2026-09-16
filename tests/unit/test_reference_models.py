@@ -136,7 +136,7 @@ def test_all_point_kinds_and_angle_schema_are_discoverable() -> None:
         }
     )
     assert query.frame is None and query.unit == "blender"
-    assert len(OPERATIONS) == 128
+    assert len(OPERATIONS) == 131
 
 
 @pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])

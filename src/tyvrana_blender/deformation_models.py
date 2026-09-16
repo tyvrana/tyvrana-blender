@@ -67,6 +67,9 @@ class ContactSummary(Model):
 
 
 class DeformationQA(Model):
+    triangle_angle_change_radians: RatioDistribution | None = None
+    collapsed_triangle_count: int = 0
+    degenerate_rest_triangle_count: int = 0
     edge_ratios: RatioDistribution
     triangle_area_ratios: RatioDistribution
     worst_edges: list[EdgeDistortion]

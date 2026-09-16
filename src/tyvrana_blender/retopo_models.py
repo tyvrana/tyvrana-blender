@@ -17,6 +17,7 @@ from .models import Model, Vector
 from .modifier_models import ModifierSummary, Name
 from .numeric import Float32, binary32
 from .remesh_models import Distribution
+from .topology_models import CutFactors, validate_factors
 
 MAX_TARGET_ELEMENTS = 100_000
 MAX_SELECTED_VERTICES = 4096
@@ -55,6 +56,8 @@ GUIDANCE = (
     " Finishing: insert_loop takes one edge selector, factor (0..1, default "
     "0.5), and from_vertex (an endpoint, required away from midpoint); it cuts "
     "the complete quad ring, including clean boundary-to-boundary rings. "
+    "Alternatively supply 1..16 increasing factors with from_vertex for a "
+    "single staged multi-cut. Target stacks may end in one bounded Subdivision. "
     "slide takes a single vertex or complete edge-loop/chain selector, "
     "toward_vertex (an unselected connected neighbor identifying the side), "
     "and factor (0..1, excluding 1); it preserves topology. subdivide takes "
@@ -186,12 +189,25 @@ class RetopoInsertArguments(ProjectionSettings):
     edge: MeshElementSelector
     factor: Annotated[Float32, Field(gt=0, lt=1)] = 0.5
     from_vertex: Annotated[int, Field(ge=0)] | None = None
+    factors: CutFactors | None = Field(
+        default=None,
+        description=(
+            "Ordered factors for 1..16 cuts in one staged source-conforming "
+            "strip; mutually exclusive with factor. Requires from_vertex."
+        ),
+    )
 
     @model_validator(mode="after")
     def ring_reference(self) -> Self:
         if self.edge.domain != "edge":
             raise ValueError("Loop insertion requires one edge")
-        if self.factor != 0.5 and self.from_vertex is None:
+        if self.factors is not None:
+            validate_factors(self.factors)
+            if "factor" in self.model_fields_set:
+                raise ValueError("Use factor or factors, not both")
+        if (
+            self.factor != 0.5 or self.factors is not None
+        ) and self.from_vertex is None:
             raise ValueError("Non-midpoint insertion requires from_vertex")
         return self
 
