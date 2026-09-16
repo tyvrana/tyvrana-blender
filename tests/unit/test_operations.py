@@ -78,6 +78,13 @@ from tyvrana_blender.joint_models import (
     StructureInspectArguments,
     StructureSummary,
 )
+from tyvrana_blender.layer_models import (
+    LayerCaptureArguments,
+    LayerInspectArguments,
+    LayerInspectResult,
+    LayerReferencesResult,
+    LayerRemoveArguments,
+)
 from tyvrana_blender.light_models import (
     LightConfigureArguments,
     LightCreateArguments,
@@ -233,6 +240,12 @@ from tyvrana_blender.uv_models import (
     UVSetActiveArguments,
     UVUnwrapArguments,
 )
+from tyvrana_blender.volume_models import (
+    VolumeInspectArguments,
+    VolumeInspectResult,
+    VolumeSnapshotArguments,
+    VolumeSnapshotResult,
+)
 from tyvrana_blender.weight_models import (
     WeightsAssignArguments,
     WeightsAssignment,
@@ -373,6 +386,27 @@ class Backend:
         raise NotImplementedError
 
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary:
+        raise NotImplementedError
+
+    def volume_inspect(self, arguments: VolumeInspectArguments) -> VolumeInspectResult:
+        raise NotImplementedError
+
+    def volume_snapshot(
+        self, arguments: VolumeSnapshotArguments
+    ) -> VolumeSnapshotResult:
+        raise NotImplementedError
+
+    def layer_inspect(self, arguments: LayerInspectArguments) -> LayerInspectResult:
+        raise NotImplementedError
+
+    def layer_capture_reference(
+        self, arguments: LayerCaptureArguments
+    ) -> LayerReferencesResult:
+        raise NotImplementedError
+
+    def layer_remove_reference(
+        self, arguments: LayerRemoveArguments
+    ) -> LayerReferencesResult:
         raise NotImplementedError
 
     def shape_keys_edit(self, arguments: ShapeKeysEditArguments) -> ShapeKeysEditResult:

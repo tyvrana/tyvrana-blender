@@ -5,7 +5,16 @@ from typing import Any
 
 import bpy  # type: ignore[import-not-found]
 
-from . import correctives, deformation_qa, modifiers, retopo_geometry, rig
+from . import (
+    correctives,
+    deformation_qa,
+    layer_geometry,
+    layers,
+    modifiers,
+    retopo_geometry,
+    rig,
+    volumes,
+)
 from . import deformation_geometry as geo
 from .corrective_models import DeformationCompareArguments
 from .deformation_sweep_models import (
@@ -91,6 +100,7 @@ def execute(args: DeformationSweepArguments) -> DeformationSweepResult:
         )
         for p in armature.pose.bones
     ]
+    catalog = layers.records() if args.layers else {}
     results = []
     samples = target_work
     try:
@@ -175,10 +185,27 @@ def execute(args: DeformationSweepArguments) -> DeformationSweepResult:
                     pose_bone=p, matrix=p.matrix, from_space="POSE", to_space="LOCAL"
                 )
                 rotations[name] = list(basis.to_euler("XYZ"))
+            with layer_geometry.SurfaceCache(
+                max_work=MAX_SWEEP_VERTEX_SAMPLES - samples
+            ) as cache:
+                volume_rows = [volumes.summary(q, cache) for q in args.volumes]
+                layer_rows = (
+                    [
+                        layers.inspect_one(q, args.layers, cache, catalog)
+                        for q in args.layers.queries
+                    ]
+                    if args.layers
+                    else []
+                )
+                samples += cache.vertices
+                if samples > MAX_SWEEP_VERTEX_SAMPLES:
+                    rig.fail("Sweep exceeds 1000000 evaluated vertex/pose samples")
             results.append(
                 PoseEvaluation(
                     name=definition.name,
                     meshes=meshes,
+                    volumes=volume_rows,
+                    layers=layer_rows,
                     evaluated_rotations=rotations,
                     shape_values=definition.shape_values,
                     target_deviations=correctives.compare(

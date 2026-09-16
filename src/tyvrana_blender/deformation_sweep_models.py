@@ -6,10 +6,12 @@ from pydantic import Field, model_validator
 
 from .corrective_models import ComparisonPair, ShapeValue, TargetDeviation
 from .deformation_models import DeformationQA
+from .layer_models import LayerInspectArguments, LayerSummary
 from .models import Model
 from .reference_models import Name
 from .region_models import FrameRegion
 from .rig_models import DeformationInspectArguments, PoseBone
+from .volume_models import VolumeQuery, VolumeSummary
 
 MAX_SWEEP_VERTEX_SAMPLES = 1_000_000
 
@@ -58,6 +60,10 @@ class DeformationSweepArguments(DeformationInspectArguments):
     Native evaluated work is capped at 1000000 vertex/pose samples.
     """
 
+    objects: list[Name] = Field(default_factory=list, max_length=8)
+    volumes: list[VolumeQuery] = Field(default_factory=list, max_length=16)
+    layers: LayerInspectArguments | None = None
+
     poses: list[EvaluationPose] = Field(min_length=1, max_length=16)
     regions: list[DeformationRegion] = Field(
         default_factory=list,
@@ -85,6 +91,13 @@ class DeformationSweepArguments(DeformationInspectArguments):
                 "Sweep detail budget exceeds 384 units; reduce poses/regions, "
                 "sample_limit, or bone_names"
             )
+        pairs = len(self.layers.queries) if self.layers else 0
+        if not self.objects and not self.volumes and not pairs:
+            raise ValueError("Sweep requires meshes, volumes or layer queries")
+        if len(self.poses) * (len(self.volumes) + pairs) > 128:
+            raise ValueError("Sweep exceeds 128 volume/layer summaries")
+        if self.layers and len(self.poses) * pairs * self.layers.worst_limit > 256:
+            raise ValueError("Sweep exceeds 256 layer worst locations")
         if self.contacts:
             raise ValueError(
                 "Use deformation.inspect for contact probes; sweeps report "
@@ -112,6 +125,8 @@ class PoseEvaluation(Model):
     evaluated_rotations: dict[str, list[float]]
     shape_values: list[ShapeValue] = Field(default_factory=list)
     target_deviations: list[TargetDeviation] = Field(default_factory=list)
+    volumes: list[VolumeSummary] = Field(default_factory=list)
+    layers: list[LayerSummary] = Field(default_factory=list)
 
 
 class DeformationSweepResult(Model):

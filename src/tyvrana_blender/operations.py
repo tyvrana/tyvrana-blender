@@ -86,6 +86,13 @@ from .joint_models import (
     StructureInspectArguments,
     StructureSummary,
 )
+from .layer_models import (
+    LayerCaptureArguments,
+    LayerInspectArguments,
+    LayerInspectResult,
+    LayerReferencesResult,
+    LayerRemoveArguments,
+)
 from .light_models import (
     LightConfigureArguments,
     LightCreateArguments,
@@ -280,6 +287,12 @@ from .uv_models import (
     UVSetActiveArguments,
     UVUnwrapArguments,
 )
+from .volume_models import (
+    VolumeInspectArguments,
+    VolumeInspectResult,
+    VolumeSnapshotArguments,
+    VolumeSnapshotResult,
+)
 from .weight_models import (
     WeightsAssignArguments,
     WeightsAssignment,
@@ -405,6 +418,24 @@ class SceneBackend(Protocol):
     ) -> ArmatureSummary: ...
     def armature_bind(self, arguments: ArmatureBindArguments) -> BindingSummary: ...
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary: ...
+    def volume_inspect(
+        self, arguments: VolumeInspectArguments
+    ) -> VolumeInspectResult: ...
+
+    def volume_snapshot(
+        self, arguments: VolumeSnapshotArguments
+    ) -> VolumeSnapshotResult: ...
+
+    def layer_inspect(self, arguments: LayerInspectArguments) -> LayerInspectResult: ...
+
+    def layer_capture_reference(
+        self, arguments: LayerCaptureArguments
+    ) -> LayerReferencesResult: ...
+
+    def layer_remove_reference(
+        self, arguments: LayerRemoveArguments
+    ) -> LayerReferencesResult: ...
+
     def shape_keys_edit(
         self, arguments: ShapeKeysEditArguments
     ) -> ShapeKeysEditResult: ...
@@ -670,6 +701,109 @@ def _operation[A: Model, R: Model](
 
 
 _DECLARATIONS = (
+    _operation(
+        "blender.volume.inspect",
+        VolumeInspectArguments,
+        VolumeInspectResult,
+        lambda b, a, q: b.volume_inspect(a),
+        (
+            "Inspect 1..16 evaluated mesh or owned profiled-curve volumes in world "
+            "units. Reuse curve.create/configure for capped POLY/BEZIER/NURBS "
+            "sweeps with variable control radius, circle/custom profiles and "
+            "object/bone/triangle attachments. Reports closed consistently wound "
+            "signed-sum magnitude, area, surface centroid, bounds, guide length, "
+            "radius and attachment error. Open surfaces return null volume; self-"
+            "intersection and mixed component winding are not solid-union "
+            "validation. Ratios use an explicit evaluated reference object, or "
+            "authored mesh geometry; curves have no implicit rest reference. "
+            "volume.snapshot freezes a reference. Optional section samples are per "
+            "spline, capped at 256 total. Limits 250000 vertices/500000 triangles "
+            "per object and 1000000 evaluated vertices/call; details at most 32 "
+            "samples/spline. No automatic volume preservation. "
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.volume.snapshot",
+        VolumeSnapshotArguments,
+        VolumeSnapshotResult,
+        lambda b, a, q: b.volume_snapshot(a),
+        (
+            "Freeze 1..16 evaluated local mesh/owned profiled-curve sources as new "
+            "editable native meshes. Source state is preserved; output has no live "
+            "guide/driver or modifier relationship. Preserves native evaluated "
+            "material/UV/deform layers and group names; shared "
+            "collections/role/tags. Reuse Armature weights, Surface Deform and "
+            "shape keys for subsequent deformation. Snapshot path-length provenance "
+            "supports fixed volume/path references. All-or-nothing creation; unused "
+            "unique names and editable collections required. Same surface budgets "
+            "as volume.inspect. No source modifier application. "
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.layer.inspect",
+        LayerInspectArguments,
+        LayerInspectResult,
+        lambda b, a, q: b.layer_inspect(a),
+        (
+            "Measure up to 8 evaluated mesh/owned profiled-curve layer pairs in "
+            "world units using BVH, not all-pairs scans. Empty queries list saved "
+            "reference names. Select current evaluated source topology using shared "
+            "mesh selectors; evenly sample sorted vertex-index ranks (not surface-"
+            "area uniform), 1..8192 per pair. Separation is nearest Euclidean "
+            "surface distance; contact counts distance <= contact_distance. "
+            "Oriented gap is dot(source-nearest, target face normal); negative-side "
+            "count/depth is a local normal-side penetration proxy, not closed-solid "
+            "containment or collision. Optional ray along +/- source normal reports "
+            "normal-ray distance and misses, not universal thickness. Named "
+            "references track source vertex against captured target triangle "
+            "barycentric point advected in its current orthonormal frame: "
+            "X=vertex0->1, Z=triangle normal, Y=Z cross X. Delta from captured "
+            "frame offset yields signed tangent XY, normal change and tangent "
+            "magnitude; common rigid motion cancels. Not geodesic slip, friction or "
+            "simulation. Authored/evaluated ordered topology changes or missing "
+            "dependencies invalidate saved references explicitly. Maximum 32 worst "
+            "locations/pair, 250000 vertices/500000 triangles/object and 1000000 "
+            "vertices/call. "
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.layer.capture_reference",
+        LayerCaptureArguments,
+        LayerReferencesResult,
+        lambda b, a, q: b.layer_capture_reference(a),
+        (
+            "Capture 1..8 named layer QA references from current evaluated "
+            "geometry. Freeze sampled source vertex indices and target nearest "
+            "triangle vertex triples, barycentric coordinates and local-frame "
+            "offset; same selector/sampling and surface limits as layer.inspect. "
+            "Scene owns native object pointers (rename-safe) plus bounded metadata, "
+            "saved in blend files. Explicit replace required to recapture. Maximum "
+            "32 references, 131072 stored samples and 24 MB metadata. Connectivity "
+            "changes invalidate, coordinates/poses remain trackable. No deformation "
+            "binding or solver is created. "
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.layer.remove_reference",
+        LayerRemoveArguments,
+        LayerReferencesResult,
+        lambda b, a, q: b.layer_remove_reference(a),
+        (
+            "Remove 1..32 named scene-owned layer QA references and their object "
+            "pointers. Prevalidates all names; source meshes, curves, modifiers and "
+            "deformation relationships remain intact. "
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
     _operation(
         "blender.shape_keys.edit",
         ShapeKeysEditArguments,
@@ -1388,6 +1522,12 @@ _DECLARATIONS = (
         DeformationSweepArguments,
         DeformationSweepResult,
         lambda b, a, q: b.deformation_sweep(a),
+        "Optional volumes (16) and layers (8 pairs) evaluate current geometry "
+        "at each pose using volume.inspect/layer.inspect definitions. Objects "
+        "may be empty for diagnostic-only sweeps. Up to 128 volume/layer pose "
+        "summaries and 256 layer worst details; shared evaluated surfaces count "
+        "toward the 1M vertex/pose budget. Layer selectors are current-pose, "
+        "while named references retain captured vertex indices. "
         "Optional per-pose shape_values reset named key channels to zero for "
         "the baseline and each pose, then apply explicit values; all values "
         "restore even on failure. Optional same-topology targets return bounded "

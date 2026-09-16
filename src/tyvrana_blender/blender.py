@@ -105,6 +105,13 @@ from .joint_models import (
     StructureInspectArguments,
     StructureSummary,
 )
+from .layer_models import (
+    LayerCaptureArguments,
+    LayerInspectArguments,
+    LayerInspectResult,
+    LayerReferencesResult,
+    LayerRemoveArguments,
+)
 from .light_models import (
     COMMON_FIELDS,
     LIGHT_TYPES,
@@ -285,6 +292,12 @@ from .uv_models import (
     UVPackResult,
     UVSetActiveArguments,
     UVUnwrapArguments,
+)
+from .volume_models import (
+    VolumeInspectArguments,
+    VolumeInspectResult,
+    VolumeSnapshotArguments,
+    VolumeSnapshotResult,
 )
 from .weight_models import (
     WeightsAssignArguments,
@@ -1078,6 +1091,37 @@ class BlenderBackend:
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary:
         main_thread()
         return rig.pose(arguments)
+
+    def volume_inspect(self, arguments: VolumeInspectArguments) -> VolumeInspectResult:
+        from . import volumes
+
+        return volumes.inspect(arguments)
+
+    def volume_snapshot(
+        self, arguments: VolumeSnapshotArguments
+    ) -> VolumeSnapshotResult:
+        from . import volumes
+
+        return volumes.snapshot(arguments)
+
+    def layer_inspect(self, arguments: LayerInspectArguments) -> LayerInspectResult:
+        from . import layers
+
+        return layers.inspect(arguments)
+
+    def layer_capture_reference(
+        self, arguments: LayerCaptureArguments
+    ) -> LayerReferencesResult:
+        from . import layers
+
+        return layers.capture(arguments)
+
+    def layer_remove_reference(
+        self, arguments: LayerRemoveArguments
+    ) -> LayerReferencesResult:
+        from . import layers
+
+        return layers.remove(arguments)
 
     def shape_keys_edit(self, arguments: ShapeKeysEditArguments) -> ShapeKeysEditResult:
         main_thread()

@@ -3687,3 +3687,14 @@ batched native shape keys, provenance-checked correction targets, restored pose/
 sweeps, compact target deviations, native group lifecycle, rest-surface weight
 transfer/mirroring, Surface Deform bind/inspect/unbind and scoped Corrective Smooth.
 The tools expose explicit topology, pose, ownership and rollback boundaries.
+
+## Deforming volumes and layer diagnostics
+
+Reuse batched native curve/profile/attachment construction for live swept volumes.
+`volume.inspect` adds closed-volume/area/path/reference measurements;
+`volume.snapshot` freezes evaluated geometry as editable meshes.
+`layer.inspect`, `layer.capture_reference` and `layer.remove_reference` provide
+bounded BVH separation/contact, directional distance and tracked tangential
+movement. Pose sweeps accept these diagnostics and restore native state.
+See [volume and layer contracts](docs/volumes-and-layers.md) for definitions,
+reference persistence, invalidation, bounds and examples.
