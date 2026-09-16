@@ -34,9 +34,14 @@ def authored(data: Any) -> Any:
 
 
 class ModifierTests(unittest.TestCase):
-    def setUp(self) -> None:
+    @classmethod
+    def setUpClass(cls) -> None:
+        # These cases exercise handlers directly. Share one worker; lifecycle
+        # restart/rollback behavior has dedicated integration coverage.
         adapter.register()
         adapter.pump()
+
+    def setUp(self) -> None:
         self.backend = adapter.BlenderBackend()
         if bpy.context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -52,13 +57,16 @@ class ModifierTests(unittest.TestCase):
     def tearDown(self) -> None:
         if bpy.context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
         runtime = adapter._runtime
         worker = runtime.worker if runtime else None
         adapter.unregister()
-        self.assertFalse(bpy.app.timers.is_registered(adapter.pump))
+        assert not bpy.app.timers.is_registered(adapter.pump)
         if worker:
-            self.assertEqual(worker.process.returncode, 0)
-            self.assertFalse(worker.spool.root.exists())
+            assert worker.process.returncode == 0
+            assert not worker.spool.root.exists()
 
     def response(self, operation: str, **arguments: Any) -> Any:
         return operations.execute(

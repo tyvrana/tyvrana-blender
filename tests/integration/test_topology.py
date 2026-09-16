@@ -3,6 +3,8 @@
 import subprocess
 from pathlib import Path
 
+from tyvrana_blender.operations import OPERATIONS
+
 from .conftest import ROOT
 
 
@@ -55,7 +57,9 @@ async def test_topology_workflow_persists_across_hosts(
             async with running_blender(env, directory, ui=False) as process:
                 pids.append(process.pid)
                 adapter = await discover(client)
-                assert adapter is not None and adapter.operation_count == 157
+                assert adapter is not None and adapter.operation_count == len(
+                    OPERATIONS
+                )
 
                 async def call(
                     name: str, /, identifier: str = adapter.instance_id, **args: Any

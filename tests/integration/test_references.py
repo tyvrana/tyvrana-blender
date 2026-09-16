@@ -11,6 +11,8 @@ import pytest
 from mcp.types import CallToolResult
 from tyvrana_protocol import ArtifactDescriptor
 
+from tyvrana_blender.operations import OPERATIONS
+
 from ..png import checker_png
 from .conftest import ROOT, running_blender
 from .test_e2e import core_client, discover, operation
@@ -82,7 +84,9 @@ async def test_reference_measurement_mcp_workflow(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=False):
             registered = await discover(client)
-            assert registered is not None and registered.operation_count == 157
+            assert registered is not None and registered.operation_count == len(
+                OPERATIONS
+            )
             identifier = registered.instance_id
             phase = "contracts"
             schemas = await client.call_tool(

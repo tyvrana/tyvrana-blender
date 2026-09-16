@@ -62,9 +62,11 @@ def dependencies(obj: Any) -> list[Any]:
     result = [obj.parent] if obj.parent else []
     for item in [*obj.modifiers, *obj.constraints]:
         if item.type == "NODES":
-            from . import curves, instances
+            from . import curves, growth, instances
 
-            if curves.KEY in obj:
+            if growth.KEY in obj:
+                result.extend(growth.evaluation_dependencies(obj))
+            elif curves.KEY in obj:
                 result.extend(curves.evaluation_dependencies(obj))
             else:
                 result.extend(instances.evaluation_dependencies(obj))

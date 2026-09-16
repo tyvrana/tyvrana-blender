@@ -3519,6 +3519,13 @@ object/bone/deforming-triangle attachments. Bounded inspection reports evaluated
 lengths, samples, frames and attachment errors. See [curve contracts and examples](docs/curves.md)
 for units, topology invalidation, ownership and persistence.
 
+## Rooted growth and grooming
+
+`blender.growth.create/configure/inspect/remove/sample` provide native Hair Curves,
+semantic regions/families, dense interpolation, shared or guide-conforming templates,
+deforming-surface attachment and restored pose/frame QA. See [rooted growth](docs/growth.md)
+for generic examples, budgets, ownership, invalidation and persistence.
+
 ## Development and packaging
 
 Requires uv, Python 3.12+, Git, and Blender 5.2.1. Create this repository's own

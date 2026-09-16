@@ -60,6 +60,17 @@ from tyvrana_blender.extension_models import (
     ExtensionState,
 )
 from tyvrana_blender.file_models import FileOpenArguments, FileSaveArguments, FileState
+from tyvrana_blender.growth_models import (
+    GrowthConfigureArguments,
+    GrowthCreateArguments,
+    GrowthDelta,
+    GrowthInspectArguments,
+    GrowthInspectResult,
+    GrowthRemoveArguments,
+    GrowthRemoveResult,
+    GrowthSampleArguments,
+    GrowthSampleResult,
+)
 from tyvrana_blender.image_models import (
     ImageConfigureArguments,
     ImageCreateArguments,
@@ -297,6 +308,21 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def growth_create(self, arguments: GrowthCreateArguments) -> GrowthDelta:
+        raise AssertionError("Growth behavior uses isolated native fixtures")
+
+    def growth_configure(self, arguments: GrowthConfigureArguments) -> GrowthDelta:
+        raise AssertionError("Growth behavior uses isolated native fixtures")
+
+    def growth_inspect(self, arguments: GrowthInspectArguments) -> GrowthInspectResult:
+        raise AssertionError("Growth behavior uses isolated native fixtures")
+
+    def growth_remove(self, arguments: GrowthRemoveArguments) -> GrowthRemoveResult:
+        raise AssertionError("Growth behavior uses isolated native fixtures")
+
+    def growth_sample(self, arguments: GrowthSampleArguments) -> GrowthSampleResult:
+        raise AssertionError("Growth behavior uses isolated native fixtures")
+
     def curve_create(self, arguments: CurveCreateArguments) -> CurveResult:
         raise NotImplementedError
 

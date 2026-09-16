@@ -30,6 +30,11 @@ def prepare(
         raise OperationError("invalid_context", "Render snapshots require Object Mode")
     if scene.camera is None:
         raise OperationError("no_camera", "The current scene has no camera")
+    from . import growth
+
+    for obj in scene.objects:
+        if obj.type == "CURVES" and growth.KEY in obj:
+            growth.evaluation_dependencies(obj)
     if arguments.show_result:
         result_editor()
     destination = None

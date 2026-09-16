@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 from mcp.types import CallToolResult
 
+from tyvrana_blender.operations import OPERATIONS
+
 from .conftest import ROOT, running_blender
 from .test_e2e import core_client, discover, operation
 
@@ -266,7 +268,9 @@ async def test_structural_fixtures_persist_across_hosts(
             }
             async with running_blender(host_profile, host_path, ui=False):
                 adapter = await discover(client)
-                assert adapter is not None and adapter.operation_count == 157
+                assert adapter is not None and adapter.operation_count == len(
+                    OPERATIONS
+                )
 
                 async def call(
                     name: str,

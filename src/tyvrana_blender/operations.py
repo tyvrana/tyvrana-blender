@@ -68,6 +68,17 @@ from .file_models import (
     FileSaveArguments,
     FileState,
 )
+from .growth_models import (
+    GrowthConfigureArguments,
+    GrowthCreateArguments,
+    GrowthDelta,
+    GrowthInspectArguments,
+    GrowthInspectResult,
+    GrowthRemoveArguments,
+    GrowthRemoveResult,
+    GrowthSampleArguments,
+    GrowthSampleResult,
+)
 from .image_models import (
     ImageConfigureArguments,
     ImageCreateArguments,
@@ -339,6 +350,18 @@ type Response = OperationSuccess | OperationFailure
 
 
 class SceneBackend(Protocol):
+    def growth_create(self, arguments: GrowthCreateArguments) -> GrowthDelta: ...
+
+    def growth_configure(self, arguments: GrowthConfigureArguments) -> GrowthDelta: ...
+
+    def growth_inspect(
+        self, arguments: GrowthInspectArguments
+    ) -> GrowthInspectResult: ...
+
+    def growth_remove(self, arguments: GrowthRemoveArguments) -> GrowthRemoveResult: ...
+
+    def growth_sample(self, arguments: GrowthSampleArguments) -> GrowthSampleResult: ...
+
     def curve_create(self, arguments: CurveCreateArguments) -> CurveResult: ...
 
     def curve_configure(self, arguments: CurveConfigureArguments) -> CurveResult: ...
@@ -1246,6 +1269,102 @@ _DECLARATIONS = (
             "distance/coverage summary, not per-vertex matrices."
         ),
         effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.growth.create",
+        GrowthCreateArguments,
+        GrowthDelta,
+        lambda b, a, q: b.growth_create(a),
+        (
+            "Create surface-rooted native Hair Curves guides, regions/families and "
+            "dense grouped interpolation in one staged transaction. Use normal "
+            "curve.* for named structural paths/profiles. Local Object Mode mesh with "
+            "non-overlapping UVs required. Enables shared native surface rest- "
+            "position generation; armatures/shape keys deform growth. Flow projects "
+            "into root tangent plane; normalized family shape defines guides. "
+            "children=0 outputs guides, otherwise exactly children curves per region. "
+            "Static template local Z[0,1]: instances share rigid geometry; deform "
+            "maps realized geometry along minimum-twist guide frames. Stable root IDs "
+            "scoped by system_id; native rest/UV/family/region/pin attributes persist "
+            "in .blend. One owned graph/carrier, no per-root objects. Limits: 10000 "
+            "guides, 50000 output curves, 800000 points, 8 families, 16 regions, 350 "
+            "nodes, 2000000 equivalent template vertices. No dynamics or arbitrary "
+            "node/property escape hatch."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.growth.configure",
+        GrowthConfigureArguments,
+        GrowthDelta,
+        lambda b, a, q: b.growth_configure(a),
+        (
+            "Transactionally replace supplied family/region recipes or batch up to "
+            "256 root-ID guide edits on the same owned system. Omitted recipes "
+            "persist. Surviving roots retain IDs; manually edited shapes persist "
+            "through style/density changes. Child output families follow region "
+            "defaults. Changed seed/selection or stale base geometry/topology/UV "
+            "requires explicit rebind=true, rebuilding rest guides with new IDs. "
+            "Shared/user-modified resources and disabled/extra modifiers are guarded. "
+            "Same creation budgets apply. Returns compact counts/delta; no full "
+            "geometry."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.growth.inspect",
+        GrowthInspectArguments,
+        GrowthInspectResult,
+        lambda b, a, q: b.growth_inspect(a),
+        (
+            "Compact owned growth counts, budgets, attachment validity, warnings and "
+            "sampled root/orientation/clearance QA. Default excludes points/recipe; "
+            "opt-in guide pages up to32 with offset. qa_samples=0 skips spatial QA, "
+            "retaining evaluated counts. Stale base geometry/topology/UV reports "
+            "invalid_roots and explicit rebind recovery. Signed nearest-surface "
+            "clearance is sampled diagnostic evidence, not exact collision proof; "
+            "root_exclusion applies to guide segments. Optional template_samples "
+            "realizes bounded geometry temporarily and includes template roots. "
+            "Tangent-flow compares configured rest flow in world space; frame normals "
+            "come from actual native evaluation."
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.growth.remove",
+        GrowthRemoveArguments,
+        GrowthRemoveResult,
+        lambda b, a, q: b.growth_remove(a),
+        (
+            "Remove owned growth object, guides, root carrier and graph after "
+            "checking external users. Preserve shared source mesh, templates, "
+            "materials and enabled native source rest-position generation. Reject "
+            "user-created Hair Curves, changed owned graph/attributes, shared data "
+            "and ambiguous ownership. Invalidated source geometry may still be "
+            "cleaned up."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.growth.sample",
+        GrowthSampleArguments,
+        GrowthSampleResult,
+        lambda b, a, q: b.growth_sample(a),
+        (
+            "Evaluate up to16 named bone/shape-key poses or timeline frames with "
+            "compact growth attachment/orientation/clearance QA. Restores native "
+            "frame, transforms, keys and pose state even on failure. Requires "
+            "armature_object for bone poses. Maximum4096 root samples per sweep; no "
+            "guide/recipe dumps. Same sampled clearance limitations as "
+            "growth.inspect; optional template vertex sampling temporarily realizes "
+            "bounded output. Does not simulate dynamics."
+        ),
+        effect="transient",
         execution="synchronous",
     ),
     _operation(

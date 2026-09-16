@@ -85,6 +85,17 @@ from .extension_models import (
     ExtensionState,
 )
 from .file_models import FileOpenArguments, FileSaveArguments, FileState
+from .growth_models import (
+    GrowthConfigureArguments,
+    GrowthCreateArguments,
+    GrowthDelta,
+    GrowthInspectArguments,
+    GrowthInspectResult,
+    GrowthRemoveArguments,
+    GrowthRemoveResult,
+    GrowthSampleArguments,
+    GrowthSampleResult,
+)
 from .image_models import (
     ALPHA_MODES,
     ImageConfigureArguments,
@@ -730,6 +741,31 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def growth_create(self, arguments: GrowthCreateArguments) -> GrowthDelta:
+        from . import growth
+
+        return growth.create(arguments)
+
+    def growth_configure(self, arguments: GrowthConfigureArguments) -> GrowthDelta:
+        from . import growth
+
+        return growth.configure(arguments)
+
+    def growth_inspect(self, arguments: GrowthInspectArguments) -> GrowthInspectResult:
+        from . import growth
+
+        return growth.inspect(arguments)
+
+    def growth_remove(self, arguments: GrowthRemoveArguments) -> GrowthRemoveResult:
+        from . import growth
+
+        return growth.remove(arguments)
+
+    def growth_sample(self, arguments: GrowthSampleArguments) -> GrowthSampleResult:
+        from . import growth_qa
+
+        return growth_qa.sample(arguments)
+
     def curve_create(self, arguments: CurveCreateArguments) -> CurveResult:
         from . import curves
 
@@ -2364,6 +2400,10 @@ class BlenderBackend:
                 "invalid_context", "Object deletion requires Object Mode"
             )
         obj = find_object(arguments.name)
+        if "tyvrana_growth" in obj:
+            raise OperationError(
+                "growth_invalid", "Use growth.remove for owned systems/root carriers"
+            )
         if "tyvrana_curve" in obj or obj.get("tyvrana_curve_helper"):
             raise OperationError(
                 "curve_invalid",

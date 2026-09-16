@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from tyvrana_blender.operations import OPERATIONS
+
 from .conftest import ROOT
 
 
@@ -62,7 +64,9 @@ async def test_paths_persist_and_reevaluate_across_hosts(
             async with running_blender(env, directory, ui=False) as process:
                 pids.append(process.pid)
                 adapter = await discover(client)
-                assert adapter is not None and adapter.operation_count == 157
+                assert adapter is not None and adapter.operation_count == len(
+                    OPERATIONS
+                )
                 print("CURVE_MCP_BUILD", adapter.model_dump_json())
 
                 async def call(
