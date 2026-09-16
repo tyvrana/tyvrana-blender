@@ -3698,3 +3698,11 @@ bounded BVH separation/contact, directional distance and tracked tangential
 movement. Pose sweeps accept these diagnostics and restore native state.
 See [volume and layer contracts](docs/volumes-and-layers.md) for definitions,
 reference persistence, invalidation, bounds and examples.
+
+## Timeline, actions and coupling
+
+Batched native action channels and keys, typed scalar coupling, explicit timeline
+control and compact restored frame QA support coordinated motion. Generated native
+drivers accept bounded mappings, never arbitrary expressions. See
+[Motion authoring and QA](docs/motion.md) for ownership, units, interpolation,
+conflicts, persistence, limits and examples.

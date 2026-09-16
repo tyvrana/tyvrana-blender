@@ -143,7 +143,7 @@ async def test_organized_assembly_room_and_chain_persist(
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=False):
             adapter = await discover(client)
-            assert adapter is not None and adapter.operation_count == 146
+            assert adapter is not None and adapter.operation_count == 157
 
             async def call(name: str, /, **arguments: Any) -> Any:
                 return await operation(

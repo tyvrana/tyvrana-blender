@@ -144,6 +144,24 @@ from tyvrana_blender.modifier_models import (
     ModifierRemoveResult,
     ModifierSummary,
 )
+from tyvrana_blender.motion_models import (
+    ActionAssignArguments,
+    ActionEditArguments,
+    ActionInspectArguments,
+    ActionRemoveArguments,
+    ActionResult,
+    CouplingConfigureArguments,
+    CouplingInspectArguments,
+    CouplingInspectResult,
+    MotionNames,
+    MotionRemoveArguments,
+    MotionSampleArguments,
+    MotionSampleResult,
+    PropertiesArguments,
+    TimelineArguments,
+    TimelineInspectArguments,
+    TimelineState,
+)
 from tyvrana_blender.operations import OperationError, execute
 from tyvrana_blender.organization_models import (
     CollectionConfigureArguments,
@@ -387,6 +405,41 @@ class Backend:
 
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary:
         raise NotImplementedError
+
+    def timeline_inspect(self, arguments: TimelineInspectArguments) -> TimelineState:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def timeline_configure(self, arguments: TimelineArguments) -> TimelineState:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def motion_set_properties(self, arguments: PropertiesArguments) -> MotionNames:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def coupling_configure(self, arguments: CouplingConfigureArguments) -> MotionNames:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def coupling_inspect(
+        self, arguments: CouplingInspectArguments
+    ) -> CouplingInspectResult:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def coupling_remove(self, arguments: MotionRemoveArguments) -> MotionNames:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def action_edit(self, arguments: ActionEditArguments) -> ActionResult:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def action_assign(self, arguments: ActionAssignArguments) -> MotionNames:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def action_inspect(self, arguments: ActionInspectArguments) -> ActionResult:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def action_remove(self, arguments: ActionRemoveArguments) -> MotionNames:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def motion_sample(self, arguments: MotionSampleArguments) -> MotionSampleResult:
+        raise NotImplementedError("Native motion has dedicated integration coverage")
 
     def volume_inspect(self, arguments: VolumeInspectArguments) -> VolumeInspectResult:
         raise NotImplementedError

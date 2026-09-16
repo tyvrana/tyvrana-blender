@@ -154,6 +154,24 @@ from .modifier_models import (
     ModifierRemoveResult,
     ModifierSummary,
 )
+from .motion_models import (
+    ActionAssignArguments,
+    ActionEditArguments,
+    ActionInspectArguments,
+    ActionRemoveArguments,
+    ActionResult,
+    CouplingConfigureArguments,
+    CouplingInspectArguments,
+    CouplingInspectResult,
+    MotionNames,
+    MotionRemoveArguments,
+    MotionSampleArguments,
+    MotionSampleResult,
+    PropertiesArguments,
+    TimelineArguments,
+    TimelineInspectArguments,
+    TimelineState,
+)
 from .organization_models import (
     CollectionConfigureArguments,
     CollectionCreateArguments,
@@ -418,6 +436,34 @@ class SceneBackend(Protocol):
     ) -> ArmatureSummary: ...
     def armature_bind(self, arguments: ArmatureBindArguments) -> BindingSummary: ...
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary: ...
+    def timeline_inspect(
+        self, arguments: TimelineInspectArguments
+    ) -> TimelineState: ...
+
+    def timeline_configure(self, arguments: TimelineArguments) -> TimelineState: ...
+
+    def motion_set_properties(self, arguments: PropertiesArguments) -> MotionNames: ...
+
+    def coupling_configure(
+        self, arguments: CouplingConfigureArguments
+    ) -> MotionNames: ...
+
+    def coupling_inspect(
+        self, arguments: CouplingInspectArguments
+    ) -> CouplingInspectResult: ...
+
+    def coupling_remove(self, arguments: MotionRemoveArguments) -> MotionNames: ...
+
+    def action_edit(self, arguments: ActionEditArguments) -> ActionResult: ...
+
+    def action_assign(self, arguments: ActionAssignArguments) -> MotionNames: ...
+
+    def action_inspect(self, arguments: ActionInspectArguments) -> ActionResult: ...
+
+    def action_remove(self, arguments: ActionRemoveArguments) -> MotionNames: ...
+
+    def motion_sample(self, arguments: MotionSampleArguments) -> MotionSampleResult: ...
+
     def volume_inspect(
         self, arguments: VolumeInspectArguments
     ) -> VolumeInspectResult: ...
@@ -701,6 +747,192 @@ def _operation[A: Model, R: Model](
 
 
 _DECLARATIONS = (
+    _operation(
+        "blender.timeline.inspect",
+        TimelineInspectArguments,
+        TimelineState,
+        lambda b, a, q: b.timeline_inspect(a),
+        (
+            "Read native scene frame/subframe, animation and preview ranges, "
+            "FPS and effective FPS. Integer frames plus subframe [0,1). No "
+            "playback UI."
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.timeline.configure",
+        TimelineArguments,
+        TimelineState,
+        lambda b, a, q: b.timeline_configure(a),
+        (
+            "Patch scene time/ranges/FPS; omitted fields preserved. frame_set"
+            " evaluates native animation and drivers in background mode. No "
+            "playback, simulation bake or action assignment."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.motion.set_properties",
+        PropertiesArguments,
+        MotionNames,
+        lambda b, a, q: b.motion_set_properties(a),
+        (
+            "Create/update 1..64 owned finite scalar controls on local "
+            "objects, at most 64/object. Explicit value/range; no arbitrary "
+            "custom property path. Existing keyed/driven controls are "
+            "protected. Use kind=property channels to animate or couple these"
+            " values."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.coupling.configure",
+        CouplingConfigureArguments,
+        MotionNames,
+        lambda b, a, q: b.coupling_configure(a),
+        (
+            "Create/update 1..64 named owned native drivers, max 256/scene. "
+            "Typed source→linear/remap→target only: object/pose-bone "
+            "transforms, relative shape values, existing constraint "
+            "influence, owned scalar controls. Transform sources use "
+            "evaluated LOCAL_SPACE including constraints; destinations use "
+            "raw local channels. XYZ radians, native units; principal "
+            "constrained joints. No arbitrary expressions, RNA paths, self, "
+            "namespaces, Python callbacks or polling. Native simple "
+            "expressions work with script auto-run disabled. Linear "
+            "scale/offset and explicit output clamp; remap may invert output,"
+            " clamps by default. Finite range targets require output bounds. "
+            "Obvious channel/parent cycles, unsupported external "
+            "dependencies, linked data, key/driver conflicts rejected before "
+            "publication; batch rollback. Non-native curve length/volume "
+            "metrics are not persistent sources. Unknown external drivers are"
+            " preserved."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.coupling.inspect",
+        CouplingInspectArguments,
+        CouplingInspectResult,
+        lambda b, a, q: b.coupling_inspect(a),
+        (
+            "Paged owned relationship summaries: typed source/target/mapping,"
+            " current source, mapped value, raw and evaluated target, "
+            "absolute mapping/constrained error, saturation, validity and "
+            "upstream relationships. No raw expression/FCurve dump. Native "
+            "object pointers survive rename/reopen; missing/edited paths are "
+            "invalid, never silently rebound."
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.coupling.remove",
+        MotionRemoveArguments,
+        MotionNames,
+        lambda b, a, q: b.coupling_remove(a),
+        (
+            "Remove 1..64 exact owned drivers after whole-batch ownership "
+            "validation. Retain unrelated drivers/actions and current scalar "
+            "values. Externally modified native drivers are protected; no "
+            "orphan purge."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.action.edit",
+        ActionEditArguments,
+        ActionResult,
+        lambda b, a, q: b.action_edit(a),
+        (
+            "Create or edit one owned slotted action without implicit "
+            "assignment. Up to 128 channels,512 integer-frame "
+            "keys/channel,8192 total keys/changes. Typed channels share "
+            "coupling semantics. Upsert/remove exact frames or replace/remove"
+            " one channel; preserve other channels. CONSTANT/LINEAR/BEZIER "
+            "with AUTO_CLAMPED handles; constant/linear extrapolation. Native"
+            " slots per owner ID, one layer/keyframe strip. Stage copy and "
+            "publish atomically to existing declared users; "
+            "unknown/shared/NLA users and driven targets protected. "
+            "Unassigned actions persist with fake user. No arbitrary paths or"
+            " animation DSL."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.action.assign",
+        ActionAssignArguments,
+        MotionNames,
+        lambda b, a, q: b.action_assign(a),
+        (
+            "Assign owned action slots to all declared owners with REPLACE "
+            "blending, influence 1, HOLD action extrapolation. replace=true "
+            "required for existing different active actions, which remain "
+            "retained. detach=true removes only matching assignment and "
+            "retains action/current values. Reject driver conflicts/NLA; "
+            "assignment rollback."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.action.inspect",
+        ActionInspectArguments,
+        ActionResult,
+        lambda b, a, q: b.action_inspect(a),
+        (
+            "Compact owned action counts, frame range and paged typed "
+            "channels with interpolation/extrapolation, key counts, "
+            "assignment, current/evaluated values and driver conflicts. Keys "
+            "only by explicit key_limit; max 1024 detailed keys/response. "
+            "Native slots/ownership validated; no full FCurve/handle dump."
+        ),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.action.remove",
+        ActionRemoveArguments,
+        MotionNames,
+        lambda b, a, q: b.action_remove(a),
+        (
+            "Delete one unused owned action; detach first. Refuse "
+            "shared/external/NLA users. No deletion of unrelated user "
+            "actions."
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.motion.sample",
+        MotionSampleArguments,
+        MotionSampleResult,
+        lambda b, a, q: b.motion_sample(a),
+        (
+            "Evaluate active scene actions/drivers over 1..128 explicit/range "
+            "integer frames in one call. Never assigns actions. Reuse "
+            "joint/deformation/target/volume/layer diagnostics; meshes "
+            "compare with evaluated reference_frame (default first sample), "
+            "not implicit rest. Aggregate min/max/mean/p 05/p 50/p 95 with worst"
+            " frames, thresholds, coupling error/saturation, "
+            "constrained/requested XYZ radians and world joint endpoints. At "
+            "most 1024 metrics, 2M evaluated vertex samples, 8 detail frames, "
+            "2048 detailed scalars, 384 KiB JSON output, 64 "
+            "returned violations, 256 scene objects. layers.worst_limit must "
+            "be 0. Restore frame/subframe, transforms, shape/control values "
+            "and constraint influences even on failure. No continuous-extrema"
+            " guarantee, hidden polling, physical simulation or arbitrary "
+            "code; non-native metrics remain read-only diagnostics."
+        ),
+        effect="transient",
+        execution="synchronous",
+    ),
     _operation(
         "blender.volume.inspect",
         VolumeInspectArguments,

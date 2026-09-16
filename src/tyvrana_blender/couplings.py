@@ -1,0 +1,584 @@
+"""Owned native drivers generated from bounded typed scalar relationships."""
+
+import hashlib
+import json
+from typing import Any
+
+import bpy  # type: ignore[import-not-found]
+from pydantic import ValidationError
+
+from . import motion_channels as channels
+from .inspection import page
+from .motion_math import coefficients, expression, mapped
+from .motion_models import (
+    CouplingConfigureArguments,
+    CouplingInspectArguments,
+    CouplingInspectResult,
+    CouplingSpec,
+    CouplingSummary,
+    MotionNames,
+    MotionRemoveArguments,
+    PropertiesArguments,
+    TransformChannel,
+)
+from .operations import OperationError
+
+KEY = "_tyvrana_couplings"
+MAX_COUPLINGS = 256
+
+
+def pointer(name: str, side: str) -> str:
+    return KEY + "_" + hashlib.sha256(name.encode()).hexdigest()[:16] + "_" + side
+
+
+def records() -> dict[str, CouplingSpec]:
+    raw = bpy.context.scene.get(KEY, "{}")
+    try:
+        if not isinstance(raw, str) or len(raw) > 262144:
+            raise ValueError
+        data = json.loads(raw)
+        if not isinstance(data, dict) or len(data) > MAX_COUPLINGS:
+            raise ValueError
+        result = {}
+        for name, value in data.items():
+            spec = CouplingSpec.model_validate_json(json.dumps(value))
+            if name != spec.name:
+                raise ValueError
+            for side in ["source", "target"]:
+                obj = bpy.context.scene.get(pointer(name, side))
+                if obj is not None and not isinstance(obj, bpy.types.Object):
+                    raise ValueError
+                if obj is not None:
+                    channel = getattr(spec, side).model_copy(
+                        update={"object_name": obj.name}
+                    )
+                    spec = spec.model_copy(update={side: channel})
+            result[name] = spec
+        return result
+    except (ValueError, TypeError, ValidationError) as exc:
+        raise OperationError(
+            "motion_invalid", "Coupling metadata is invalid or exceeds256 relationships"
+        ) from exc
+
+
+def persist(data: dict[str, CouplingSpec]) -> None:
+    raw = json.dumps(
+        {n: s.model_dump(mode="json") for n, s in data.items()}, separators=(",", ":")
+    )
+    if len(raw) > 262144 or len(data) > MAX_COUPLINGS:
+        channels.fail("Coupling catalog exceeds256 entries/256KiB")
+    bpy.context.scene[KEY] = raw
+    for name, spec in data.items():
+        for side in ["source", "target"]:
+            bpy.context.scene[pointer(name, side)] = channels.object_named(
+                getattr(spec, side).object_name
+            )
+
+
+def driver_matches(
+    spec: CouplingSpec, source: channels.Resolved, target: channels.Resolved
+) -> bool:
+    curve = target.driver()
+    if (
+        curve is None
+        or curve.mute
+        or len(curve.modifiers)
+        or len(curve.keyframe_points)
+    ):
+        return False
+    driver = curve.driver
+    if (
+        driver.type != "SCRIPTED"
+        or driver.use_self
+        or driver.expression != expression(spec.mapping)
+        or len(driver.variables) != 1
+    ):
+        return False
+    variable = driver.variables[0]
+    native = variable.targets[0]
+    if variable.name != "x" or native.id != source.owner:
+        return False
+    if isinstance(spec.source, TransformChannel):
+        return bool(
+            variable.type == "TRANSFORMS"
+            and native.bone_target == (spec.source.bone or "")
+            and native.transform_type == transform_type(spec.source)
+            and native.transform_space == "LOCAL_SPACE"
+            and native.rotation_mode == "XYZ"
+        )
+    return bool(variable.type == "SINGLE_PROP" and native.data_path == source.path)
+
+
+def transform_type(spec: TransformChannel) -> str:
+    return (
+        {"location": "LOC", "rotation": "ROT", "scale": "SCALE"}[spec.property]
+        + "_"
+        + spec.axis.upper()
+    )
+
+
+def create_driver(spec: CouplingSpec) -> None:
+    source = channels.resolve(spec.source)
+    target = channels.resolve(spec.target, write=True)
+    curve = (
+        target.owner.driver_add(target.path, target.index)
+        if isinstance(spec.target, TransformChannel)
+        else target.owner.driver_add(target.path)
+    )
+    for modifier in list(curve.modifiers):
+        curve.modifiers.remove(modifier)
+    curve.keyframe_points.clear()
+    driver = curve.driver
+    driver.type = "SCRIPTED"
+    driver.use_self = False
+    variable = driver.variables.new()
+    variable.name = "x"
+    native = variable.targets[0]
+    if isinstance(spec.source, TransformChannel):
+        variable.type = "TRANSFORMS"
+        native.id = source.owner
+        native.bone_target = spec.source.bone or ""
+        native.transform_type = transform_type(spec.source)
+        native.transform_space = "LOCAL_SPACE"
+        native.rotation_mode = "XYZ"
+    else:
+        variable.type = "SINGLE_PROP"
+        native.id_type = source.owner.id_type
+        native.id = source.owner
+        native.data_path = source.path
+    driver.expression = expression(spec.mapping)
+    if not driver.is_simple_expression:
+        channels.fail("Generated driver is not a native simple expression")
+    target.owner.update_tag()
+
+
+def delete_driver(spec: CouplingSpec) -> None:
+    target = channels.resolve(spec.target, write=True)
+    animation = target.owner.animation_data
+    curve = target.driver()
+    if animation and curve:
+        animation.drivers.remove(curve)
+        target.owner.update_tag()
+
+
+def cycle_guard(data: dict[str, CouplingSpec]) -> None:
+    dependencies: dict[tuple[int, str], set[tuple[int, str]]] = {}
+    resolved = [
+        (channels.resolve(s.source), channels.resolve(s.target)) for s in data.values()
+    ]
+    if len(resolved) > MAX_COUPLINGS:
+        channels.fail("Coupling catalog exceeds256 relationships")
+    for source, target in resolved:
+        dependencies.setdefault(target.node(), set()).add(source.node())
+        for item in [source, target]:
+            obj = item.obj
+            if obj.parent:
+                dependencies.setdefault(
+                    (int(obj.as_pointer()), "transform"), set()
+                ).add((int(obj.parent.as_pointer()), "transform"))
+            if isinstance(item.spec, TransformChannel) and item.spec.bone:
+                bone = obj.data.bones[item.spec.bone]
+                while bone:
+                    node = (int(obj.as_pointer()), "bone:" + bone.name)
+                    dependencies.setdefault(node, set()).add(
+                        (
+                            int(obj.as_pointer()),
+                            "bone:" + bone.parent.name if bone.parent else "transform",
+                        )
+                    )
+                    bone = bone.parent
+    active: set[tuple[int, str]] = set()
+    seen: set[tuple[int, str]] = set()
+
+    def visit(node: tuple[int, str]) -> None:
+        if node in active:
+            channels.fail(
+                "Dependency cycle detected; drive independent downstream channels"
+                " instead"
+            )
+        if node in seen:
+            return
+        if len(seen) + len(active) > 4096:
+            channels.fail("Dependency graph exceeds4096 channels")
+        active.add(node)
+        for source in dependencies.get(node, set()):
+            visit(source)
+        active.remove(node)
+        seen.add(node)
+
+    for node in list(dependencies):
+        visit(node)
+    # Unsupported external drivers on an involved transform can hide RNA cycles.
+    known = {
+        (target.owner.as_pointer(), target.path, target.index) for _, target in resolved
+    }
+    parents = set()
+    for source, target in resolved:
+        for item in [source, target]:
+            parent = item.obj.parent
+            while parent and parent not in parents:
+                parents.add(parent)
+                animation = parent.animation_data
+                if animation and any(
+                    (parent.as_pointer(), c.data_path, c.array_index) not in known
+                    for c in animation.drivers
+                ):
+                    channels.fail(
+                        "Ancestor has unverified external driver dependencies"
+                    )
+                if any(c.type != "LIMIT_ROTATION" for c in parent.constraints):
+                    channels.fail("Ancestor has unsupported constraint dependencies")
+                parent = parent.parent
+    for source, target in resolved:
+        for item in [source, target]:
+            animation = item.owner.animation_data
+            if animation:
+                for curve in animation.drivers:
+                    identity = (
+                        item.owner.as_pointer(),
+                        curve.data_path,
+                        curve.array_index,
+                    )
+                    if identity not in known and (
+                        isinstance(item.spec, TransformChannel)
+                        or curve.data_path == item.path
+                    ):
+                        channels.fail(
+                            "Involved channel owner has an unrelated driver "
+                            "with unverified "
+                            "dependencies; preserve it and use independent controls"
+                        )
+            if isinstance(item.spec, TransformChannel):
+                constraints = item.container.constraints
+                if any(
+                    c.type != "LIMIT_ROTATION"
+                    or any(
+                        getattr(c, p.identifier, None)
+                        for p in c.bl_rna.properties
+                        if p.type == "POINTER" and p.identifier == "target"
+                    )
+                    for c in constraints
+                ):
+                    channels.fail(
+                        "Transform source/target has unsupported external constraints; "
+                        "dependency semantics are unverified"
+                    )
+
+
+def configure(args: CouplingConfigureArguments) -> MotionNames:
+    channels.editable(bpy.context.scene)
+    old = records()
+    proposed = dict(old)
+    for spec in args.couplings:
+        if spec.name in old and not args.replace:
+            channels.fail(f'Coupling "{spec.name}" exists; use replace=true')
+        if spec.name in old:
+            prior = old[spec.name]
+            if not driver_matches(
+                prior, channels.resolve(prior.source), channels.resolve(prior.target)
+            ):
+                channels.fail(
+                    "Owned driver was edited externally; preserve it and repair "
+                    "ownership before replacing"
+                )
+        source = channels.resolve(spec.source)
+        target = channels.resolve(spec.target, write=True)
+        owned_target = next(
+            (
+                s.name
+                for s in old.values()
+                if channels.resolve(s.target).owner == target.owner
+                and channels.resolve(s.target).path == target.path
+                and channels.resolve(s.target).index == target.index
+            ),
+            None,
+        )
+        if target.driver() and owned_target != spec.name:
+            channels.fail(
+                "Target already driven; configure its existing owned relationship"
+            )
+        if target.keyed():
+            channels.fail(
+                "Target has an active keyframe channel; remove/detach that "
+                "channel before coupling"
+            )
+        _, _, clamp = coefficients(spec.mapping)
+        if (target.minimum, target.maximum) != (-1e9, 1e9):
+            if clamp is None or clamp[0] < target.minimum or clamp[1] > target.maximum:
+                channels.fail(
+                    "Bounded target requires an explicit output clamp within its "
+                    "writable range"
+                )
+        channels.check_value(
+            target, mapped(spec.mapping, source.value(evaluated=True))[0]
+        )
+        proposed[spec.name] = spec
+    identities = [
+        (r.owner.as_pointer(), r.path, r.index)
+        for r in (channels.resolve(s.target) for s in proposed.values())
+    ]
+    if len(identities) != len(set(identities)):
+        channels.fail("A native scalar target can have only one coupling")
+    cycle_guard(proposed)
+    previous_metadata = {
+        k: bpy.context.scene[k] for k in bpy.context.scene.keys() if k.startswith(KEY)
+    }
+    created: list[CouplingSpec] = []
+    removed: list[CouplingSpec] = []
+    previous_animation = {
+        channels.resolve(s.target).owner: channels.resolve(
+            s.target
+        ).owner.animation_data
+        is not None
+        for s in args.couplings
+    }
+    original_values = [
+        (channels.resolve(s.target), channels.resolve(s.target).value())
+        for s in args.couplings
+    ]
+    try:
+        for spec in args.couplings:
+            if spec.name in old:
+                delete_driver(old[spec.name])
+                removed.append(old[spec.name])
+            created.append(spec)
+            create_driver(spec)
+        channels.refresh()
+        if any(
+            not channels.resolve(s.target).driver().driver.is_valid
+            for s in args.couplings
+        ):
+            channels.fail(
+                "Native dependency evaluation rejected a relationship; batch "
+                "rolled back"
+            )
+        persist(proposed)
+    except BaseException:
+        for key in list(bpy.context.scene.keys()):
+            if key.startswith(KEY):
+                del bpy.context.scene[key]
+        for key, value in previous_metadata.items():
+            bpy.context.scene[key] = value
+        for spec in reversed(created):
+            delete_driver(spec)
+        for spec in removed:
+            create_driver(spec)
+        for target, value in original_values:
+            set_value(target, value)
+        for owner, existed in previous_animation.items():
+            if not existed:
+                channels.clear_empty_animation(owner)
+        channels.refresh()
+        raise
+    return MotionNames(names=[s.name for s in args.couplings])
+
+
+def set_value(target: channels.Resolved, value: float) -> None:
+    if isinstance(target.spec, TransformChannel):
+        getattr(target.container, target.property)[target.index] = value
+    elif target.spec.kind == "property":
+        target.container[target.property] = value
+    else:
+        setattr(target.container, target.property, value)
+    target.owner.update_tag()
+
+
+def summary(spec: CouplingSpec, data: dict[str, CouplingSpec]) -> CouplingSummary:
+    result: dict[str, Any] = dict(
+        name=spec.name,
+        source=spec.source,
+        target=spec.target,
+        mapping=spec.mapping,
+        valid=False,
+    )
+    try:
+        for side in ["source", "target"]:
+            if bpy.context.scene.get(pointer(spec.name, side)) is None:
+                channels.fail(
+                    "Referenced source/target was removed; relationship is invalid"
+                )
+        source, target = channels.resolve(spec.source), channels.resolve(spec.target)
+        if not driver_matches(spec, source, target):
+            channels.fail(
+                "Native driver differs from the owned mapping or channel; repair "
+                "explicitly"
+            )
+        curve = target.driver()
+        if (
+            not curve.is_valid
+            or not curve.driver.is_valid
+            or not curve.driver.is_simple_expression
+        ):
+            channels.fail("Native driver reports invalid dependency evaluation")
+        value = source.value(evaluated=True)
+        expected, saturated = mapped(spec.mapping, value)
+        actual = target.value()
+        evaluated = target.value(evaluated=True)
+        dependencies = [
+            name
+            for name, other in data.items()
+            if channels.resolve(other.target).node() == source.node()
+        ][:64]
+        return CouplingSummary(
+            **(
+                result
+                | dict(
+                    valid=True,
+                    source_value=value,
+                    mapped_value=expected,
+                    target_value=actual,
+                    evaluated_target_value=evaluated,
+                    mapping_error=abs(actual - expected),
+                    constrained_error=abs(evaluated - expected),
+                    saturated=saturated,
+                    dependencies=dependencies,
+                )
+            )
+        )
+    except (OperationError, ValueError, KeyError, ReferenceError) as exc:
+        return CouplingSummary(**result, issues=[str(exc)[:256]])
+
+
+def inspect(args: CouplingInspectArguments) -> CouplingInspectResult:
+    data = records()
+    bpy.context.view_layer.update()
+    selected, info = page(list(data), args, lambda n: n)
+    return CouplingInspectResult(
+        couplings=[summary(data[n], data) for n in selected], page=info
+    )
+
+
+def removable(spec: CouplingSpec) -> bool:
+    scene = bpy.context.scene
+    if scene.get(pointer(spec.name, "target")) is None:
+        return False  # Deleted owner: clear only the stale relationship metadata.
+    target = channels.resolve(spec.target, write=True)
+    if scene.get(pointer(spec.name, "source")) is not None:
+        if not driver_matches(spec, channels.resolve(spec.source), target):
+            channels.fail("Native driver is no longer owned; preserve unrelated data")
+        return True
+    curve = target.driver()
+    if curve is None:
+        return False
+    driver = curve.driver
+    if (
+        driver.type != "SCRIPTED"
+        or driver.expression != expression(spec.mapping)
+        or driver.use_self
+        or len(driver.variables) != 1
+        or curve.modifiers
+        or curve.keyframe_points
+        or driver.variables[0].name != "x"
+        or driver.variables[0].targets[0].id is not None
+    ):
+        channels.fail("Missing-source driver was edited; refusing unrelated data")
+    return True
+
+
+def remove(args: MotionRemoveArguments) -> MotionNames:
+    channels.editable(bpy.context.scene)
+    data = records()
+    remove_native = set()
+    for name in args.names:
+        if name not in data:
+            channels.fail(f'Coupling "{name}" is missing')
+        if removable(data[name]):
+            remove_native.add(name)
+    previous_metadata = {
+        k: bpy.context.scene[k] for k in bpy.context.scene.keys() if k.startswith(KEY)
+    }
+    removed = []
+    try:
+        for name in args.names:
+            if name in remove_native:
+                delete_driver(data[name])
+                removed.append(data[name])
+        persist({n: s for n, s in data.items() if n not in args.names})
+    except BaseException:
+        for key in list(bpy.context.scene.keys()):
+            if key.startswith(KEY):
+                del bpy.context.scene[key]
+        for key, value in previous_metadata.items():
+            bpy.context.scene[key] = value
+        for spec in removed:
+            create_driver(spec)
+        channels.refresh()
+        raise
+    for spec in removed:
+        channels.clear_empty_animation(channels.resolve(spec.target).owner)
+    for name in args.names:
+        for side in ["source", "target"]:
+            key = pointer(name, side)
+            if key in bpy.context.scene:
+                del bpy.context.scene[key]
+    channels.refresh()
+    return MotionNames(names=args.names)
+
+
+def set_properties(args: PropertiesArguments) -> MotionNames:
+    staged = []
+    proposed_controls: dict[int, dict[str, list[float]]] = {}
+    for spec in args.properties:
+        obj = channels.object_named(spec.object_name)
+        channels.editable(obj)
+        catalog = channels.control_catalog(obj)
+        name = channels.CONTROL_PREFIX + spec.name
+        if name in obj and spec.name not in catalog:
+            channels.fail("Scalar property name is occupied by unrelated data")
+        if spec.name in catalog:
+            from .motion_models import PropertyChannel
+
+            target = channels.resolve(
+                PropertyChannel(object_name=obj.name, property=spec.name), write=True
+            )
+            if target.driver() or target.keyed():
+                channels.fail(
+                    "Scalar property is animated/driven; edit the action or coupling"
+                )
+        proposed = proposed_controls.setdefault(int(obj.as_pointer()), dict(catalog))
+        proposed[spec.name] = [spec.minimum, spec.maximum]
+        if len(proposed) > 64:
+            channels.fail("Object scalar control catalog exceeds64 properties")
+        staged.append((obj, spec, obj.get(name), obj.get(channels.CONTROLS)))
+    try:
+        for obj, spec, _, _ in staged:
+            obj[channels.CONTROL_PREFIX + spec.name] = float(spec.value)
+            catalog = channels.control_catalog(obj)
+            catalog[spec.name] = [spec.minimum, spec.maximum]
+            obj[channels.CONTROLS] = json.dumps(catalog)
+            obj.update_tag()
+        channels.refresh()
+    except BaseException:
+        for obj, spec, value, metadata in staged:
+            key = channels.CONTROL_PREFIX + spec.name
+            if value is None:
+                if key in obj:
+                    del obj[key]
+            else:
+                obj[key] = value
+            if metadata is None:
+                if channels.CONTROLS in obj:
+                    del obj[channels.CONTROLS]
+            else:
+                obj[channels.CONTROLS] = metadata
+        channels.refresh()
+        raise
+    return MotionNames(names=[s.object_name + ":" + s.name for s in args.properties])
+
+
+def internal_driver_dependency(obj: Any, curve: Any) -> bool:
+    """Recognize same-rig native channels already checked at property granularity."""
+    data = records()
+    for spec in data.values():
+        if spec.source.object_name == obj.name and spec.target.object_name == obj.name:
+            try:
+                source, target = (
+                    channels.resolve(spec.source),
+                    channels.resolve(spec.target),
+                )
+                if target.driver() == curve and driver_matches(spec, source, target):
+                    cycle_guard(data)
+                    return True
+            except OperationError:
+                return False
+    return False

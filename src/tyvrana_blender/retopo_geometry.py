@@ -97,14 +97,24 @@ def dependencies(obj: Any) -> list[Any]:
                 for target in variable.targets:
                     value = target.id
                     if isinstance(value, bpy.types.Object):
+                        if value == obj:
+                            from .couplings import internal_driver_dependency
+
+                            if internal_driver_dependency(obj, driver):
+                                continue
                         result.append(value)
                     elif isinstance(value, bpy.types.Mesh | bpy.types.Key):
-                        result.extend(
-                            o
-                            for o in bpy.data.objects
-                            if o.type == "MESH"
-                            and (o.data == value or o.data.shape_keys == value)
-                        )
+                        for linked in bpy.data.objects:
+                            if linked.type != "MESH" or not (
+                                linked.data == value or linked.data.shape_keys == value
+                            ):
+                                continue
+                            if linked == obj:
+                                from .couplings import internal_driver_dependency
+
+                                if internal_driver_dependency(obj, driver):
+                                    continue
+                            result.append(linked)
     return result
 
 

@@ -170,6 +170,24 @@ from .modifier_models import (
     ModifierRemoveResult,
     ModifierSummary,
 )
+from .motion_models import (
+    ActionAssignArguments,
+    ActionEditArguments,
+    ActionInspectArguments,
+    ActionRemoveArguments,
+    ActionResult,
+    CouplingConfigureArguments,
+    CouplingInspectArguments,
+    CouplingInspectResult,
+    MotionNames,
+    MotionRemoveArguments,
+    MotionSampleArguments,
+    MotionSampleResult,
+    PropertiesArguments,
+    TimelineArguments,
+    TimelineInspectArguments,
+    TimelineState,
+)
 from .operations import OperationError, execute, registration
 from .organization_models import (
     CollectionConfigureArguments,
@@ -1091,6 +1109,74 @@ class BlenderBackend:
     def armature_pose(self, arguments: ArmaturePoseArguments) -> ArmatureSummary:
         main_thread()
         return rig.pose(arguments)
+
+    def timeline_inspect(self, arguments: TimelineInspectArguments) -> TimelineState:
+        main_thread()
+        from . import timeline
+
+        return timeline.inspect(arguments)
+
+    def timeline_configure(self, arguments: TimelineArguments) -> TimelineState:
+        main_thread()
+        from . import timeline
+
+        return timeline.configure(arguments)
+
+    def motion_set_properties(self, arguments: PropertiesArguments) -> MotionNames:
+        main_thread()
+        from . import couplings
+
+        return couplings.set_properties(arguments)
+
+    def coupling_configure(self, arguments: CouplingConfigureArguments) -> MotionNames:
+        main_thread()
+        from . import couplings
+
+        return couplings.configure(arguments)
+
+    def coupling_inspect(
+        self, arguments: CouplingInspectArguments
+    ) -> CouplingInspectResult:
+        main_thread()
+        from . import couplings
+
+        return couplings.inspect(arguments)
+
+    def coupling_remove(self, arguments: MotionRemoveArguments) -> MotionNames:
+        main_thread()
+        from . import couplings
+
+        return couplings.remove(arguments)
+
+    def action_edit(self, arguments: ActionEditArguments) -> ActionResult:
+        main_thread()
+        from . import actions
+
+        return actions.edit(arguments)
+
+    def action_assign(self, arguments: ActionAssignArguments) -> MotionNames:
+        main_thread()
+        from . import actions
+
+        return actions.assign(arguments)
+
+    def action_inspect(self, arguments: ActionInspectArguments) -> ActionResult:
+        main_thread()
+        from . import actions
+
+        return actions.inspect(arguments)
+
+    def action_remove(self, arguments: ActionRemoveArguments) -> MotionNames:
+        main_thread()
+        from . import actions
+
+        return actions.remove(arguments)
+
+    def motion_sample(self, arguments: MotionSampleArguments) -> MotionSampleResult:
+        main_thread()
+        from . import motion
+
+        return motion.sample(arguments)
 
     def volume_inspect(self, arguments: VolumeInspectArguments) -> VolumeInspectResult:
         from . import volumes
