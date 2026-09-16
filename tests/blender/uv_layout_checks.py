@@ -1,12 +1,16 @@
 """Native production UV preservation, packing, evaluation and diagnostic checks."""
 
 import importlib
+import sys
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import bpy  # type: ignore[import-not-found]
 from tyvrana_protocol import OperationRequest, OperationSuccess
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 package = "bl_ext.user_default.tyvrana_blender"
 operations = importlib.import_module(package + ".operations")
