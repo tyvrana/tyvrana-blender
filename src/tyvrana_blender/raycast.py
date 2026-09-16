@@ -7,7 +7,7 @@ import bpy  # type: ignore[import-not-found]
 from mathutils import Vector  # type: ignore[import-not-found]
 
 from . import modifiers
-from .operations import OperationError
+from .errors import OperationError
 from .sculpt_models import CameraRayArguments, RaycastArguments, RaycastResult
 
 

@@ -6,8 +6,8 @@ from contextlib import contextmanager
 import bpy  # type: ignore[import-not-found]
 
 from . import uv
+from .errors import OperationError
 from .models import SurfaceRenderOptions, UVCheckerRenderOptions
-from .operations import OperationError
 
 
 @contextmanager

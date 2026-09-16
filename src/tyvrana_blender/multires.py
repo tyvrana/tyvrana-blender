@@ -6,7 +6,7 @@ from typing import Any
 import bpy  # type: ignore[import-not-found]
 
 from . import mesh, modifiers
-from .operations import OperationError
+from .errors import OperationError
 from .sculpt_models import (
     MAX_MULTIRES_LEVEL,
     SCALE_TOLERANCE,

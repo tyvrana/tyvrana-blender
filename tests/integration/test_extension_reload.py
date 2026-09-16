@@ -21,6 +21,7 @@ from tyvrana_blender.operations import OPERATIONS
 
 from ..png import assert_image_variation
 from .conftest import ROOT
+from .rendering import complete_render
 from .test_e2e import catalog_names, core_client, wait_for_project
 
 
@@ -233,6 +234,7 @@ async def test_repeated_live_reload_and_registration_rollback(
                         },
                     },
                 )
+                render = await complete_render(client, current["instance_id"], render)
                 assert not render.is_error, render.content
                 images = [
                     item for item in render.content if isinstance(item, ImageContent)

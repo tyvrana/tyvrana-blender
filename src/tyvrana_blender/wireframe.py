@@ -7,8 +7,8 @@ from typing import Any
 import bpy  # type: ignore[import-not-found]
 
 from . import modifiers, retopo_geometry
+from .errors import OperationError
 from .models import WireframeRenderOptions
-from .operations import OperationError
 
 MAX_WIRE_EDGES = 8192
 

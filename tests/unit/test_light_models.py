@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 from tyvrana_protocol import JsonValue, OperationFailure, OperationSuccess
 
+from tyvrana_blender.errors import OperationError
 from tyvrana_blender.light_models import (
     ANGLE_MAX,
     LIGHT_TYPES,
@@ -16,7 +17,7 @@ from tyvrana_blender.light_models import (
     light_state,
 )
 from tyvrana_blender.numeric import FLOAT32_MAX, binary32
-from tyvrana_blender.operations import OPERATIONS, OperationError
+from tyvrana_blender.operations import OPERATIONS
 
 from .test_operations import EMPTY_PAGE, Backend, call, light_summary
 

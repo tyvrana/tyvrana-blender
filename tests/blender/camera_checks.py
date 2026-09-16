@@ -52,9 +52,9 @@ class CameraTests(unittest.TestCase):
 
     def render(self) -> bytes:
         spool = adapter._runtime.worker.spool
-        result, descriptor = self.backend.render(
-            objects.RenderArguments(width=256, height=256)
-        )
+        result, descriptor = importlib.import_module(
+            "bl_ext.user_default.tyvrana_blender.render"
+        ).render_image(objects.RenderArguments(width=256, height=256), spool)
         data = Path(spool.root, descriptor.artifact_id + ".png").read_bytes()
         self.assertEqual(png_helpers.inspect_png(data), (256, 256))
         spool.release((descriptor,))

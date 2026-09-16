@@ -25,7 +25,7 @@ def test_real_blender_background_operations_and_lifecycle(
         timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_TESTS_PASSED 115" in result.stdout
+    assert "BLENDER_TESTS_PASSED 119" in result.stdout
     assert "Traceback" not in result.stdout + result.stderr
     assert "WARNING" not in result.stdout + result.stderr
 

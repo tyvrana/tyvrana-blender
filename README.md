@@ -300,7 +300,10 @@ Names are advertised in sorted order:
 | `blender.camera.create` | Optional name, projection, initial transform, optics, clipping, shifts, activation | Created camera summary |
 | `blender.camera.configure` | Required `name`; optional projection, optics, clipping, shifts | Updated camera summary |
 | `blender.camera.set_active` | Required `name` | Selected camera summary |
-| `blender.render.image` | Optional dimensions, format and Cycles render options | Render metadata and a typed PNG artifact |
+| `blender.render.image` | Dimensions, Cycles/diagnostic options, bounded initial wait, optional persistent output | Job metadata; optional completed PNG artifact |
+| `blender.render.status` | Optional job ID/revision; event wait up to 20 seconds | Compact state/timing/error; no image bytes |
+| `blender.render.cancel` | Job ID | Idempotent cancellation acknowledgement/state |
+| `blender.render.result` | Job ID | Successful retained PNG through binary artifact transport |
 | `blender.uv.inspect` | Object name | UV map summaries and active roles |
 | `blender.uv.create_map` | Object name; optional map name and activation flags | Updated UV inspection |
 | `blender.uv.set_active` | Object/map names; editing and render activation flags | Updated UV inspection |
@@ -2905,24 +2908,26 @@ with native Blender checks for stored precision and render behavior.
 
 ## Rendered images
 
-`blender.render.image` renders the current scene with its current camera and
-render engine. Arguments are strict and reject unknown fields:
+`blender.render.image` submits an observable, cancellable still-render job using
+an isolated snapshot of the active scene. A default bounded five-second wait
+returns an inline image for short renders; longer work returns a job identity.
+Use `render.status` with revision-based event waits up to 20 seconds, then
+`render.result` for the image. Set `wait_seconds: 0` for prompt submission.
+Always inspect the returned job state. No native-render duration is tied to the
+ordinary request deadline.
 
 ```json
-{"width": 512, "height": 512, "format": "png"}
+{"width":512,"height":512,"format":"png","wait_seconds":0}
 ```
 
-All three fields are optional. Width and height default to 512 and each must be
-an integer from 64 through 1024, inclusive. Only `"png"` is supported. No camera is
-created automatically: a scene without one returns `no_camera`. An existing
-render job returns `invalid_context`. Rendering works in background and UI modes.
+Dimensions default to512 and range64–1024; output is PNG RGBA8. The current camera,
+frame and engine are used unless supported temporary overrides are supplied.
+`show_result: true` displays a packed `Tyvrana Render` preview in an interactive
+host; background hosts reject this option. The host's native Render Result is not
+replaced. Optional `output` atomically persists an explicit PNG destination.
 
-Set `show_result: true` to leave the completed Render Result visible and fitted
-in the active window's largest 3D View or Image Editor. This deliberately changes
-that editor to an Image Editor; scene geometry and render settings are preserved.
-The default false leaves editors unchanged. The option requires a visible window
-and a suitable editor, and rejects background mode before rendering. It is useful
-for visible inspection checkpoints alongside the returned MCP image.
+See [render jobs](docs/render_jobs.md) for states, errors, cancellation, ownership,
+limits, file/bake/reload conflicts, snapshot fidelity and host-loss semantics.
 
 An optional `wireframe` object displays the actual evaluated edges of named Mesh
 objects as cyan native wire geometry in this render:
@@ -2962,55 +2967,15 @@ bound requested samples, not scene complexity or elapsed render time.
 The native settings follow Blender 5.2.1's
 [Cycles properties](https://github.com/blender/blender/blob/v5.2.1/intern/cycles/blender/addon/properties.py).
 
-The successful protocol response has this shape (IDs and hash shown schematically):
+Successful submission/status returns `RenderJobStatus`, including `job_id`, state,
+revision, timestamps, dimensions, engine/frame, native duration and output
+availability. Only completed short submissions and explicit `render.result`
+retrieval return artifacts. Core uses the existing correlated binary transfer,
+verifies hashes, emits MCP ImageContent and automatically releases received output
+artifacts. Do not release each outbound image explicitly. The adapter retains four
+source results for retries and sixteen job records, until eviction or runtime reset.
+Status replies are compact and never contain binary image bytes.
 
-```text
-{
-  "type": "operation.success",
-  "request_id": "<original request ID>",
-  "result": {"width": 512, "height": 512, "format": "png"},
-  "artifacts": [{
-    "artifact_id": "<32 lowercase hexadecimal digits>",
-    "name": "render.png",
-    "media_type": "image/png",
-    "byte_size": <exact PNG byte count>,
-    "sha256": "<64 lowercase hexadecimal digits>"
-  }]
-}
-```
-
-Rendering uses `bpy.ops.render.render` synchronously on Blender's main thread,
-then `Render Result.save_render()` writes an 8-bit RGBA PNG into an
-extension-owned temporary directory. Resolution is used at 100%, with border,
-crop, multiview, and sequencer output disabled for this single-camera image.
-Compositor image processing is retained; File Output nodes, including nodes in
-groups, are temporarily muted to prevent unrelated file writes. Modified settings
-and mute flags are restored on success or failure. The usual Blender Render
-Result remains in Blender; no extra image datablock is loaded for transport.
-
-The networking subprocess receives the prepared descriptor through the private
-extension pipe. It streams the file with canonical `artifact.begin` → `ready` →
-binary chunks → `complete` → `accepted`, and sends operation success only after
-core acknowledges verified bytes. The private spool is shared only within this
-extension and its owned child process. No artifact filename or directory is sent
-to core or an MCP client. Artifact bytes are never embedded in `JsonValue`.
-
-The spool permits four prepared renders, each at most 16 MiB (64 MiB maximum
-capacity); these constants are in `tyvrana_blender.artifacts`. Dimension limits
-also constrain output generation before size validation. Chunks use the protocol's
-65,536-byte payload limit. Acknowledgements have a 10-second deadline and network
-writes have a 5-second deadline; core's overall operation deadline also applies.
-Temporary files are deleted after delivery, rejection, cancellation, disconnect,
-or extension shutdown. Rendering itself cannot be interrupted safely: if cancelled
-while rendering, its result is discarded when native work returns. Cancellation
-continues to be processed by the networking subprocess during rendering/transfer.
-
-Through `tyvrana_execute_operation`, core returns the metadata in
-`structuredContent` and an actual MCP image content block containing the PNG.
-Core defaults to 4 MiB total raw inline image bytes per result; larger images
-return `image_too_large`. Future production-resolution outputs will need resource
-or file delivery semantics rather than unbounded inline images. Use a core build
-and extension bundle pinned to the same current protocol revision.
 
 ## Execution and lifecycle
 

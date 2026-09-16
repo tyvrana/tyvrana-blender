@@ -6,8 +6,8 @@ import struct
 from array import array
 from typing import Any
 
+from .errors import OperationError
 from .modifier_models import MeshSurfaceBasis, TangentRepeatability
-from .operations import OperationError
 
 
 def float_bytes(values: Any) -> bytes:

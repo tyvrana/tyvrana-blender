@@ -8,7 +8,7 @@ from typing import Any
 import bmesh  # type: ignore[import-not-found]
 import bpy  # type: ignore[import-not-found]
 
-from .operations import OperationError
+from .errors import OperationError
 from .uv_models import (
     UVCreateArguments,
     UVInspectResult,

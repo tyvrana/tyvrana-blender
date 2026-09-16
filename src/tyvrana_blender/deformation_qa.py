@@ -14,7 +14,7 @@ from .deformation_models import (
     EdgeDistortion,
     RatioDistribution,
 )
-from .operations import OperationError
+from .errors import OperationError
 
 
 def percentile(values: list[float], fraction: float) -> float:

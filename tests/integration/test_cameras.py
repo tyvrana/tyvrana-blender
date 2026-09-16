@@ -13,6 +13,7 @@ from tyvrana_blender.models import ObjectSummary
 
 from ..png import inspect_png, red_bounds, rgb_pixels
 from .conftest import running_blender
+from .rendering import complete_render
 from .test_e2e import catalog_names, core_client, discover, operation
 
 
@@ -25,6 +26,7 @@ async def render(client: Client, identifier: str, **options: JsonValue) -> bytes
             "arguments": {"width": 256, "height": 256, **options},
         },
     )
+    response = await complete_render(client, identifier, response)
     assert not response.is_error, response.content
     images = [item for item in response.content if isinstance(item, ImageContent)]
     assert len(images) == 1 and images[0].mime_type == "image/png"
@@ -53,6 +55,11 @@ async def error(
             "arguments": arguments,
         },
     )
+    if name == "blender.render.image" and not response.is_error:
+        response = await complete_render(client, identifier, response)
+        assert response.structured_content["result"]["state"] == "failed"
+        assert response.structured_content["result"]["error"]["code"] == code
+        return
     assert response.is_error
     block = response.content[0]
     assert isinstance(block, TextContent)

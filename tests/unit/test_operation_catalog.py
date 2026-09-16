@@ -38,7 +38,7 @@ def test_complete_catalog_fits_transport_and_preserves_patch_omissions() -> None
         REGISTRY["blender.image.create_from_artifact"].contract.input_artifacts
         == "required"
     )
-    assert REGISTRY["blender.render.image"].contract.output_artifacts == "required"
+    assert REGISTRY["blender.render.image"].contract.output_artifacts == "optional"
 
 
 def test_pages_filter_before_summarizing_and_keep_counts() -> None:

@@ -46,7 +46,7 @@ async def request_render(socket: ServerConnection, messages: list[Message]) -> N
     request = OperationRequest(
         type="operation.request",
         request_id="render",
-        operation="blender.render.image",
+        operation="blender.image.export",
         arguments={},
     )
     await socket.send(encode_message(request).decode())

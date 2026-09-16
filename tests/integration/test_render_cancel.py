@@ -14,6 +14,8 @@ from tyvrana_protocol import (
 )
 from websockets.asyncio.server import ServerConnection, serve
 
+from tyvrana_blender.transport import MAX_FRAME
+
 from .conftest import running_blender
 from .test_e2e import spooled_count
 
@@ -30,7 +32,9 @@ async def test_cancellation_after_real_render_during_binary_transfer(
         connected.put_nowait(socket)
         await socket.wait_closed()
 
-    async with serve(accept, "127.0.0.1", 0, close_timeout=0.1) as server:
+    async with serve(
+        accept, "127.0.0.1", 0, close_timeout=0.1, max_size=MAX_FRAME
+    ) as server:
         profile["TYVRANA_TEST_RENDER"] = "1"
         profile["TYVRANA_TEST_PORT"] = str(server.sockets[0].getsockname()[1])
         async with running_blender(profile, tmp_path, ui=False):
@@ -39,9 +43,49 @@ async def test_cancellation_after_real_render_during_binary_transfer(
                 encode_message(
                     OperationRequest(
                         type="operation.request",
-                        request_id="cancel-render",
+                        request_id="submit-render",
                         operation="blender.render.image",
-                        arguments={"width": 512, "height": 512},
+                        arguments={"width": 512, "height": 512, "wait_seconds": 0},
+                    )
+                ).decode()
+            )
+            data = await asyncio.wait_for(socket.recv(), 5)
+            assert isinstance(data, str)
+            submitted = decode_message(data.encode())
+            assert isinstance(submitted, OperationSuccess) and isinstance(
+                submitted.result, dict
+            )
+            status = submitted.result
+            while status["state"] not in {"succeeded", "failed", "cancelled"}:
+                await socket.send(
+                    encode_message(
+                        OperationRequest(
+                            type="operation.request",
+                            request_id="wait-render",
+                            operation="blender.render.status",
+                            arguments={
+                                "job_id": status["job_id"],
+                                "after_revision": status["revision"],
+                                "wait_seconds": 20,
+                            },
+                        )
+                    ).decode()
+                )
+                data = await asyncio.wait_for(socket.recv(), 25)
+                assert isinstance(data, str)
+                observed = decode_message(data.encode())
+                assert isinstance(observed, OperationSuccess) and isinstance(
+                    observed.result, dict
+                )
+                status = observed.result
+            assert status["state"] == "succeeded"
+            await socket.send(
+                encode_message(
+                    OperationRequest(
+                        type="operation.request",
+                        request_id="cancel-render",
+                        operation="blender.render.result",
+                        arguments={"job_id": status["job_id"]},
                     )
                 ).decode()
             )

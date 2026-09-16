@@ -4,10 +4,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from .errors import OperationError
 from .inspection import page
 from .material_author_models import RampStop
 from .models import PageInfo
-from .operations import OperationError
 from .shader_models import (
     NODE_SOCKETS,
     NODE_TYPES,

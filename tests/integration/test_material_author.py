@@ -11,6 +11,7 @@ from tyvrana_blender.material_models import MaterialInspectResult, MaterialSumma
 
 from ..png import mean_pixel_difference
 from .conftest import running_blender
+from .rendering import complete_render
 from .test_e2e import core_client, discover, operation, wait_for_project
 
 
@@ -42,6 +43,7 @@ async def test_semantic_material_patch_and_fresh_process_persistence(
                         },
                     },
                 )
+                result = await complete_render(client, identifier, result)
                 assert not result.is_error
                 return base64.b64decode(
                     next(c.data for c in result.content if c.type == "image")

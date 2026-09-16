@@ -16,7 +16,7 @@ from mathutils import Vector  # type: ignore[import-not-found]
 from mathutils.bvhtree import BVHTree  # type: ignore[import-not-found]
 
 from . import modifiers, multires, sculpt_regions
-from .operations import OperationError
+from .errors import OperationError
 from .sculpt_models import (
     MaskClearArguments,
     MaskInvertArguments,

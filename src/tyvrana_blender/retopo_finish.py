@@ -8,7 +8,7 @@ import bmesh  # type: ignore[import-not-found]
 from . import mesh
 from . import retopo as retopo
 from . import retopo_geometry as geometry
-from .operations import OperationError
+from .errors import OperationError
 from .retopo_models import (
     MAX_COLLAPSE_EDGES,
     MAX_FINISH_EDGES,

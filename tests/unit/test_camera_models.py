@@ -14,9 +14,10 @@ from tyvrana_blender.camera_models import (
     CameraSummary,
     normalize_projection,
 )
+from tyvrana_blender.errors import OperationError
 from tyvrana_blender.models import Model
 from tyvrana_blender.numeric import FLOAT32_MAX
-from tyvrana_blender.operations import OPERATIONS, OperationError, registration
+from tyvrana_blender.operations import OPERATIONS, registration
 
 from .test_operations import EMPTY_PAGE, Backend, call, camera_summary
 

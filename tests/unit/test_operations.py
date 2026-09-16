@@ -53,6 +53,7 @@ from tyvrana_blender.deformation_sweep_models import (
     DeformationSweepArguments,
     DeformationSweepResult,
 )
+from tyvrana_blender.errors import OperationError
 from tyvrana_blender.extension_models import (
     ExtensionReloadArguments,
     ExtensionReloadResult,
@@ -133,7 +134,6 @@ from tyvrana_blender.models import (
     ObjectSummary,
     PageInfo,
     RenderArguments,
-    RenderResult,
     SceneInspectArguments,
     SceneSummary,
     TransformArguments,
@@ -171,7 +171,7 @@ from tyvrana_blender.motion_models import (
     TimelineInspectArguments,
     TimelineState,
 )
-from tyvrana_blender.operations import OperationError, execute
+from tyvrana_blender.operations import execute
 from tyvrana_blender.organization_models import (
     CollectionConfigureArguments,
     CollectionCreateArguments,
@@ -206,6 +206,11 @@ from tyvrana_blender.reference_models import (
     ReferenceResult,
     UnitsConfigureArguments,
     UnitsSummary,
+)
+from tyvrana_blender.render_models import (
+    RenderJobArguments,
+    RenderJobStatus,
+    RenderStatusArguments,
 )
 from tyvrana_blender.rig_models import (
     ArmatureBindArguments,
@@ -1347,12 +1352,46 @@ class Backend:
         self.calls.append("camera_set_active")
         return camera_summary(arguments.name)
 
-    def render(
-        self, arguments: RenderArguments
-    ) -> tuple[RenderResult, ArtifactDescriptor]:
+    def render(self, arguments: RenderArguments, job_id: str) -> RenderJobStatus:
         self.calls.append("render")
-        return RenderResult(
-            width=arguments.width, height=arguments.height
+        return RenderJobStatus(
+            job_id=job_id,
+            state="queued",
+            submitted_at="now",
+            width=arguments.width,
+            height=arguments.height,
+        )
+
+    def render_status(self, arguments: RenderStatusArguments) -> RenderJobStatus:
+        self.calls.append("render_status")
+        return RenderJobStatus(
+            job_id=arguments.job_id or "a" * 32,
+            state="running",
+            submitted_at="now",
+            width=64,
+            height=64,
+        )
+
+    def render_cancel(self, arguments: RenderJobArguments) -> RenderJobStatus:
+        self.calls.append("render_cancel")
+        return RenderJobStatus(
+            job_id=arguments.job_id,
+            state="cancelled",
+            submitted_at="now",
+            width=64,
+            height=64,
+        )
+
+    def render_result(
+        self, arguments: RenderJobArguments
+    ) -> tuple[RenderJobStatus, ArtifactDescriptor]:
+        self.calls.append("render_result")
+        return RenderJobStatus(
+            job_id=arguments.job_id,
+            state="succeeded",
+            submitted_at="now",
+            width=64,
+            height=64,
         ), ArtifactDescriptor(
             artifact_id="1" * 32, media_type="image/png", byte_size=1, sha256="0" * 64
         )

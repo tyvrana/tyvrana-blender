@@ -7,8 +7,8 @@ import bmesh  # type: ignore[import-not-found]
 import bpy  # type: ignore[import-not-found]
 from mathutils import Matrix  # type: ignore[import-not-found]
 
+from .errors import OperationError
 from .inspection import page
-from .operations import OperationError
 from .organization_models import (
     CollectionConfigureArguments,
     CollectionCreateArguments,

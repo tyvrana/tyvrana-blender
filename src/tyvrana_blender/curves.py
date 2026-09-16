@@ -28,9 +28,9 @@ from .curve_models import (
     SplineSummary,
     SurfaceAnchor,
 )
+from .errors import OperationError
 from .inspection import page
 from .joints import positive_uniform
-from .operations import OperationError
 
 KEY = curve_nodes.KEY
 

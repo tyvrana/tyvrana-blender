@@ -13,7 +13,7 @@ from tyvrana_protocol import ArtifactDescriptor
 from .artifacts import MAX_DATA_IMAGE_BYTES, ArtifactSpool, ArtifactTooLarge, SpoolFull
 from .bake import image_pixels
 from .bake_models import ImageSaveArguments, ImageSaveResult
-from .operations import OperationError
+from .errors import OperationError
 
 
 def save(

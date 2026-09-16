@@ -38,7 +38,7 @@ class LayoutTests(unittest.TestCase):
 
     def call(self, operation: str, **arguments: Any) -> Any:
         self.counter += 1
-        result = operations.execute(
+        result = importlib.import_module("tests.blender.native_render").execute(
             self.backend,
             OperationRequest(
                 type="operation.request",

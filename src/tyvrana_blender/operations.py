@@ -55,6 +55,7 @@ from .curve_models import (
     CurveResult,
 )
 from .deformation_sweep_models import DeformationSweepArguments, DeformationSweepResult
+from .errors import OperationError
 from .extension_models import (
     ExtensionInspectArguments,
     ExtensionReloadArguments,
@@ -142,7 +143,6 @@ from .models import (
     Model,
     ObjectSummary,
     RenderArguments,
-    RenderResult,
     SceneInspectArguments,
     SceneSummary,
     TransformArguments,
@@ -222,6 +222,7 @@ from .remesh_models import (
     VoxelRemeshResult,
     VoxelRemeshSummary,
 )
+from .render_models import RenderJobArguments, RenderJobStatus, RenderStatusArguments
 from .retopo_models import (
     RetopoBridgeArguments,
     RetopoCollapseArguments,
@@ -335,12 +336,6 @@ from .weight_transfer_models import (
 
 logger = logging.getLogger(__name__)
 type Response = OperationSuccess | OperationFailure
-
-
-class OperationError(Exception):
-    def __init__(self, code: str, message: str, details: JsonValue = None) -> None:
-        super().__init__(message)
-        self.error = ProtocolError(code=code, message=message, details=details)
 
 
 class SceneBackend(Protocol):
@@ -701,9 +696,12 @@ class SceneBackend(Protocol):
     def create(self, arguments: CreateArguments) -> ObjectSummary: ...
     def transform(self, arguments: TransformArguments) -> ObjectSummary: ...
     def delete(self, arguments: DeleteArguments) -> DeleteResult: ...
-    def render(
-        self, arguments: RenderArguments
-    ) -> tuple[RenderResult, ArtifactDescriptor]: ...
+    def render(self, arguments: RenderArguments, job_id: str) -> RenderJobStatus: ...
+    def render_status(self, arguments: RenderStatusArguments) -> RenderJobStatus: ...
+    def render_cancel(self, arguments: RenderJobArguments) -> RenderJobStatus: ...
+    def render_result(
+        self, arguments: RenderJobArguments
+    ) -> tuple[RenderJobStatus, ArtifactDescriptor]: ...
 
 
 def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure:
@@ -2375,14 +2373,69 @@ _DECLARATIONS = (
     _operation(
         "blender.render.image",
         RenderArguments,
-        RenderResult,
-        lambda b, a, q: b.render(a),
-        "Render a bounded PNG using current scene state or temporary "
-        "Cycles/diagnostic overrides. Returns inline image bytes through "
-        "artifacts; show_result requires an interactive host. Synchronous "
-        "native rendering can outlast a client's deadline.",
+        RenderJobStatus,
+        lambda b, a, q: b.render(a, q.request_id),
+        "Submit one isolated still-render job promptly; queued includes scene "
+        "snapshot preparation. One active job, no queue; mutations, bake, file "
+        "and reload are blocked while active. Current scene camera/frame/engine "
+        "or temporary Cycles/diagnostic settings; PNG RGBA8, 64..1024 px. "
+        "Optional wait_seconds 0..5 (default 5) returns inline image on success "
+        "or a job ID to resume via render.status. Render time has no request "
+        "deadline. Jobs/results survive client disconnect, not host/reload/file-open; "
+        "retain 16 job records/4 result files. Optional output persists PNG "
+        "atomically to an explicit destination; temporary output is not saved "
+        "in the project. Live image snapshot buffers cap at 512 MiB/128 images. "
+        "show_result needs an interactive host.",
+        effect="mutating",
+        execution="job_start",
+        output_artifacts="optional",
+    ),
+    _operation(
+        "blender.render.status",
+        RenderStatusArguments,
+        RenderJobStatus,
+        lambda b, a, q: b.render_status(a),
+        "Compact render-job metadata only, never image bytes. Omit job_id to "
+        "recover the active or most recent job after a lost submit reply. Bounded "
+        "event wait 0..20s: return when revision differs from after_revision "
+        "or job terminates; omitted revision observes current state then waits. "
+        "Timeout returns unchanged status. Use 20s waits for long jobs. Running "
+        "means native render entered; no sample percentage is claimed. Latest "
+        "16 records retained until host/reload/file-open; result availability is "
+        "separate. "
+        "Unknown/evicted job: render_job_not_found; disconnected host has no "
+        "queryable jobs. Cancelling this request only stops waiting.",
+        effect="read_only",
+        execution="job_status",
+    ),
+    _operation(
+        "blender.render.cancel",
+        RenderJobArguments,
+        RenderJobStatus,
+        lambda b, a, q: b.render_cancel(a),
+        "Request real cancellation of queued/running render; returns promptly "
+        "with cancel_requested, then cancelled after child exit/cleanup. "
+        "Uses interrupt then bounded terminate/kill; never kills the host. "
+        "Repeated or terminal cancel is idempotent and preserves terminal "
+        "state. Completion already committed wins; otherwise cancellation "
+        "discards output. Unknown job: render_job_not_found.",
         effect="transient",
-        execution="synchronous",
+        execution="job_status",
+    ),
+    _operation(
+        "blender.render.result",
+        RenderJobArguments,
+        RenderJobStatus,
+        lambda b, a, q: b.render_result(a),
+        "Retrieve a succeeded render as binary PNG artifact/inline MCP image. "
+        "Only this operation and completed short submits deliver image bytes. "
+        "Core auto-releases transfer artifacts; no explicit release needed. "
+        "Retained source permits retries until evicted by four newer results "
+        "or host/reload/file-open shutdown. Metadata retains success after eviction, "
+        "with result_available=false. Unfinished/failed/cancelled/evicted "
+        "output: render_result_unavailable. Explicit saved output persists.",
+        effect="read_only",
+        execution="job_status",
         output_artifacts="required",
     ),
     _operation(

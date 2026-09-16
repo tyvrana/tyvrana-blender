@@ -24,12 +24,14 @@ operations = importlib.import_module(extension.__name__ + ".operations")
 models = importlib.import_module(extension.__name__ + ".models")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 scene_helpers = importlib.import_module("tests.blender.scene")
+native_render = importlib.import_module("tests.blender.native_render")
 png_helpers = importlib.import_module("tests.png")
 camera_checks = importlib.import_module("tests.blender.camera_checks")
 light_checks = importlib.import_module("tests.blender.light_checks")
 material_checks = importlib.import_module("tests.blender.material_checks")
 material_author_checks = importlib.import_module("tests.blender.material_author_checks")
 shader_checks = importlib.import_module("tests.blender.shader_checks")
+render_snapshot_checks = importlib.import_module("tests.blender.render_snapshot_checks")
 
 
 class BlenderTests(unittest.TestCase):
@@ -55,7 +57,7 @@ class BlenderTests(unittest.TestCase):
             render.filepath,
         )
         spool = adapter._runtime.worker.spool
-        response = operations.execute(
+        response = native_render.execute(
             adapter.BlenderBackend(spool),
             OperationRequest(
                 type="operation.request",
@@ -132,7 +134,7 @@ class BlenderTests(unittest.TestCase):
             ops=SimpleNamespace(render=SimpleNamespace(render=cancelled_render)),
         )
         with patch.object(render_module, "bpy", boundary):
-            response = operations.execute(
+            response = native_render.execute(
                 adapter.BlenderBackend(spool),
                 OperationRequest(
                     type="operation.request",
@@ -173,7 +175,7 @@ class BlenderTests(unittest.TestCase):
         scene.cycles.use_layer_samples = "USE"
         scene.cycles.use_sample_subset = True
         spool = adapter._runtime.worker.spool
-        response = operations.execute(
+        response = native_render.execute(
             adapter.BlenderBackend(spool),
             OperationRequest(
                 type="operation.request",
@@ -200,7 +202,7 @@ class BlenderTests(unittest.TestCase):
         self.assertEqual(list(spool.root.iterdir()), [])
 
     def test_render_without_camera_is_structured_failure(self) -> None:
-        response = operations.execute(
+        response = native_render.execute(
             adapter.BlenderBackend(adapter._runtime.worker.spool),
             OperationRequest(
                 type="operation.request",
@@ -276,7 +278,7 @@ class BlenderTests(unittest.TestCase):
         self.assertEqual(backend.inspect().object_count, 0)
 
     def test_invalid_primitive_is_protocol_failure(self) -> None:
-        result = operations.execute(
+        result = native_render.execute(
             adapter.BlenderBackend(),
             OperationRequest(
                 type="operation.request",
@@ -291,7 +293,7 @@ class BlenderTests(unittest.TestCase):
 
     def test_missing_objects_are_protocol_failures(self) -> None:
         for operation in ("blender.object.delete", "blender.object.set_transform"):
-            result = operations.execute(
+            result = native_render.execute(
                 adapter.BlenderBackend(),
                 OperationRequest(
                     type="operation.request",
@@ -374,7 +376,7 @@ class BlenderTests(unittest.TestCase):
             ("blender.object.delete", {"name": "Edit"}),
         ]
         for operation, arguments in cases:
-            result = operations.execute(
+            result = native_render.execute(
                 adapter.BlenderBackend(),
                 OperationRequest(
                     type="operation.request",
@@ -400,7 +402,7 @@ class BlenderTests(unittest.TestCase):
         self.assertTrue(bpy.app.timers.is_registered(adapter.pump))
 
     def test_protocol_success_has_json_summary(self) -> None:
-        result = operations.execute(
+        result = native_render.execute(
             adapter.BlenderBackend(),
             OperationRequest(
                 type="operation.request",
@@ -425,6 +427,9 @@ try:
                     shader_checks.ShaderTests
                 ),
                 unittest.defaultTestLoader.loadTestsFromTestCase(BlenderTests),
+                unittest.defaultTestLoader.loadTestsFromTestCase(
+                    render_snapshot_checks.RenderSnapshotTests
+                ),
                 unittest.defaultTestLoader.loadTestsFromTestCase(
                     material_author_checks.MaterialAuthorTests
                 ),

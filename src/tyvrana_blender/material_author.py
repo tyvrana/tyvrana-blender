@@ -9,6 +9,7 @@ from typing import Any, NoReturn
 
 from pydantic import ValidationError
 
+from .errors import OperationError
 from .material_author_models import (
     Assignment,
     Coordinates,
@@ -22,7 +23,6 @@ from .material_models import (
     SurfaceParameters,
     TextureChannelSummary,
 )
-from .operations import OperationError
 
 OWNER = "tyvrana_material"
 SURFACE_SOCKETS = {

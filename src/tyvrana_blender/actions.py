@@ -8,6 +8,7 @@ from bpy_extras import anim_utils  # type: ignore[import-not-found]
 from pydantic import TypeAdapter, ValidationError
 
 from . import motion_channels as channels
+from .errors import OperationError
 from .motion_models import (
     ActionAssignArguments,
     ActionChannelSummary,
@@ -19,7 +20,6 @@ from .motion_models import (
     MotionKey,
     MotionNames,
 )
-from .operations import OperationError
 
 KEY = "_tyvrana_action_channels"
 ADAPTER: TypeAdapter[Channel] = TypeAdapter(Channel)

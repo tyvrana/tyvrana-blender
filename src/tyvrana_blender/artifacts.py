@@ -23,11 +23,17 @@ class ArtifactTooLarge(Exception):
 
 
 class ArtifactSpool:
-    def __init__(self) -> None:
-        self._directory = tempfile.TemporaryDirectory(
-            prefix="tyvrana-blender-artifacts-"
+    def __init__(self, root: Path | None = None) -> None:
+        self._directory = (
+            tempfile.TemporaryDirectory(prefix="tyvrana-blender-artifacts-")
+            if root is None
+            else None
         )
-        self.root = Path(self._directory.name)
+        if self._directory is not None:
+            self.root: Path = Path(self._directory.name)
+        else:
+            assert root is not None
+            self.root = root
 
     @contextmanager
     def reserve(self) -> Iterator[tuple[str, Path]]:
@@ -70,4 +76,5 @@ class ArtifactSpool:
             (self.root / (descriptor.artifact_id + ".png")).unlink(missing_ok=True)
 
     def close(self) -> None:
-        self._directory.cleanup()
+        if self._directory is not None:
+            self._directory.cleanup()

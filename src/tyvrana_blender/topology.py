@@ -11,9 +11,9 @@ import bpy  # type: ignore[import-not-found]
 
 from . import mesh
 from .deformation_qa import distribution
+from .errors import OperationError
 from .mesh_models import ElementCounts
 from .mesh_selectors import SelectionError, select
-from .operations import OperationError
 from .topology_models import (
     MeshInsertLoopsArguments,
     PoleSample,

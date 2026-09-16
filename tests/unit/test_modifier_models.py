@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 from tyvrana_protocol import OperationFailure, OperationRequest, OperationSuccess
 
+from tyvrana_blender.errors import OperationError
 from tyvrana_blender.modifier_models import (
     CONFIGURE,
     CREATE,
@@ -18,7 +19,7 @@ from tyvrana_blender.modifier_models import (
     ModifierSummary,
     SubdivisionSettings,
 )
-from tyvrana_blender.operations import OPERATIONS, OperationError, execute
+from tyvrana_blender.operations import OPERATIONS, execute
 
 from .test_operations import Backend
 

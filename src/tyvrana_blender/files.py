@@ -4,8 +4,8 @@ from pathlib import Path
 
 import bpy  # type: ignore[import-not-found]
 
+from .errors import OperationError
 from .file_models import FileOpenArguments, FileSaveArguments, FileState
-from .operations import OperationError
 
 
 def inspect() -> FileState:

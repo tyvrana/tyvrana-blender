@@ -40,6 +40,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
+        "markers", "long_render: exercises native rendering beyond 30 seconds"
+    )
+    config.addinivalue_line(
         "markers", "interactive: requires an interactive Blender event loop"
     )
 

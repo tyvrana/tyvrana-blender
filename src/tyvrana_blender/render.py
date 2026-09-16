@@ -3,14 +3,16 @@
 import logging
 import struct
 import threading
+import time
+from collections.abc import Callable
 from typing import Any
 
 import bpy  # type: ignore[import-not-found]
 from tyvrana_protocol import ArtifactDescriptor
 
 from .artifacts import ArtifactSpool, ArtifactTooLarge, SpoolFull
+from .errors import OperationError
 from .models import RenderArguments, RenderResult
-from .operations import OperationError
 from .uv_checker import display as checker_display
 from .wireframe import display
 
@@ -62,7 +64,10 @@ def show_result(editor: tuple[Any, Any], result: Any) -> None:
 
 
 def render_image(
-    arguments: RenderArguments, spool: ArtifactSpool
+    arguments: RenderArguments,
+    spool: ArtifactSpool,
+    *,
+    observe: Callable[[str, float], None] | None = None,
 ) -> tuple[RenderResult, ArtifactDescriptor]:
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("Rendering requires Blender's main thread")
@@ -122,7 +127,12 @@ def render_image(
                     display(arguments.wireframe),
                     checker_display(arguments.uv_checker or arguments.surface),
                 ):
+                    if observe is not None:
+                        observe("running", 0)
+                    started = time.monotonic()
                     outcome = bpy.ops.render.render("EXEC_DEFAULT", write_still=False)
+                    if observe is not None:
+                        observe("completed", time.monotonic() - started)
                 result = bpy.data.images.get("Render Result")
                 if "FINISHED" not in outcome or result is None:
                     raise OperationError(

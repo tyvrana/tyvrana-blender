@@ -177,6 +177,11 @@ class SurfaceRenderOptions(Model):
         return self
 
 
+class RenderOutput(Model):
+    filepath: str = Field(min_length=1, max_length=4096)
+    overwrite: bool = False
+
+
 class RenderArguments(Model):
     width: int = Field(default=512, ge=64, le=1024)
     height: int = Field(default=512, ge=64, le=1024)
@@ -186,6 +191,8 @@ class RenderArguments(Model):
     uv_checker: UVCheckerRenderOptions | None = None
     surface: SurfaceRenderOptions | None = None
     show_result: bool = False
+    wait_seconds: FiniteFloat = Field(default=5, ge=0, le=5)
+    output: RenderOutput | None = None
 
     @field_validator("cycles", "wireframe", "uv_checker", "surface", mode="before")
     @classmethod

@@ -6,6 +6,7 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 from tyvrana_protocol import OperationFailure, OperationRequest, OperationSuccess
 
+from tyvrana_blender.errors import OperationError
 from tyvrana_blender.mesh_models import (
     AllSelector,
     BoundarySelector,
@@ -38,7 +39,7 @@ from tyvrana_blender.mesh_models import (
 )
 from tyvrana_blender.mesh_selectors import SelectionError, select
 from tyvrana_blender.models import Model
-from tyvrana_blender.operations import OPERATIONS, OperationError, execute
+from tyvrana_blender.operations import OPERATIONS, execute
 
 from .test_operations import Backend
 

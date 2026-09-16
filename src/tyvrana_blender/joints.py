@@ -8,6 +8,7 @@ from typing import Any
 import bpy  # type: ignore[import-not-found]
 from mathutils import Matrix, Vector  # type: ignore[import-not-found]
 
+from .errors import OperationError
 from .inspection import page
 from .joint_models import (
     MAX_XZ,
@@ -23,7 +24,6 @@ from .joint_models import (
     StructureSummary,
     orthonormal_axes,
 )
-from .operations import OperationError
 from .rig_models import (
     ArmatureCreateArguments,
     ArmatureRestArguments,

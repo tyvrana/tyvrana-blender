@@ -10,7 +10,7 @@ import bpy  # type: ignore[import-not-found]
 from mathutils import Matrix  # type: ignore[import-not-found]
 
 from . import deformation_qa, modifiers, retopo_geometry
-from .operations import OperationError
+from .errors import OperationError
 from .rig_models import (
     MAX_BONES,
     MAX_VERTICES,

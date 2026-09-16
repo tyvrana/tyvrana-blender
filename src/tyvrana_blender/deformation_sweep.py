@@ -25,8 +25,8 @@ from .deformation_sweep_models import (
     PoseMeshEvaluation,
     RegionEvaluation,
 )
+from .errors import OperationError
 from .mesh_selectors import SelectionError
-from .operations import OperationError
 from .rig_models import ArmaturePoseArguments
 from .topology_selection import contains, region_matrix
 

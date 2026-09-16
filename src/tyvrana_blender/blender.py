@@ -78,6 +78,7 @@ from .curve_models import (
 )
 from .deformation_sweep_models import DeformationSweepArguments, DeformationSweepResult
 from .dispatch import CommandQueue
+from .errors import OperationError
 from .extension_models import (
     ExtensionReloadArguments,
     ExtensionReloadResult,
@@ -161,7 +162,6 @@ from .models import (
     InspectArguments,
     ObjectSummary,
     RenderArguments,
-    RenderResult,
     SceneInspectArguments,
     SceneSummary,
     TransformArguments,
@@ -198,7 +198,7 @@ from .motion_models import (
     TimelineInspectArguments,
     TimelineState,
 )
-from .operations import OperationError, execute, registration
+from .operations import execute, registration
 from .organization_models import (
     CollectionConfigureArguments,
     CollectionCreateArguments,
@@ -241,6 +241,7 @@ from .remesh_models import (
     VoxelRemeshResult,
     VoxelRemeshSummary,
 )
+from .render_models import RenderJobArguments, RenderJobStatus, RenderStatusArguments
 from .retopo_models import (
     RetopoCreateArguments,
     RetopoCreateResult,
@@ -2264,15 +2265,30 @@ class BlenderBackend:
             scene.camera = previous
             raise
 
-    def render(
-        self, arguments: RenderArguments
-    ) -> tuple[RenderResult, ArtifactDescriptor]:
+    def render(self, arguments: RenderArguments, job_id: str) -> RenderJobStatus:
         main_thread()
-        from .render import render_image
+        from .render_snapshot import prepare
 
         if self.spool is None:
             raise OperationError("invalid_context", "Render storage is unavailable")
-        return render_image(arguments, self.spool)
+        return prepare(arguments, self.spool, job_id)
+
+    def render_status(self, arguments: RenderStatusArguments) -> RenderJobStatus:
+        raise OperationError(
+            "invalid_context", "Render status is owned by the networking worker"
+        )
+
+    def render_cancel(self, arguments: RenderJobArguments) -> RenderJobStatus:
+        raise OperationError(
+            "invalid_context", "Render cancellation is owned by the networking worker"
+        )
+
+    def render_result(
+        self, arguments: RenderJobArguments
+    ) -> tuple[RenderJobStatus, ArtifactDescriptor]:
+        raise OperationError(
+            "invalid_context", "Render retrieval is owned by the networking worker"
+        )
 
     def inspect(self, arguments: SceneInspectArguments | None = None) -> SceneSummary:
         main_thread()
@@ -2384,6 +2400,26 @@ class Runtime:
                 self.queue.cancel(message.request_id)
             elif (
                 isinstance(message, AdapterEvent)
+                and message.event == "blender.render.show"
+            ):
+                from .render_snapshot import display_result
+
+                assert isinstance(message.payload, dict)
+                identifier = str(message.payload["job_id"])
+                error = None
+                try:
+                    display_result(self.worker.spool, identifier)
+                except Exception:
+                    error = "Could not display the completed render"
+                self.worker.send(
+                    AdapterEvent(
+                        type="adapter.event",
+                        event="blender.render.shown",
+                        payload={"job_id": identifier, "error": error},
+                    )
+                )
+            elif (
+                isinstance(message, AdapterEvent)
                 and message.event == "blender.response.sent"
             ):
                 from . import lifecycle
@@ -2397,7 +2433,9 @@ class Runtime:
             ):
                 self.status = str(message.payload["state"])
                 if self.status != "connected":
-                    self.queue.clear()
+                    self.queue.clear(
+                        preserve_operations=frozenset({"blender.render.image"})
+                    )
             else:
                 raise ValueError("Unexpected networking worker message")
         self.queue.drain(self.worker.send)

@@ -11,7 +11,7 @@ from tyvrana_protocol import ArtifactDescriptor
 
 from . import retopo_geometry, uv, uv_quality
 from .artifacts import ArtifactSpool, ArtifactTooLarge, SpoolFull
-from .operations import OperationError
+from .errors import OperationError
 from .uv_models import UVLayoutArguments, UVLayoutResult, UVPackArguments, UVPackResult
 
 

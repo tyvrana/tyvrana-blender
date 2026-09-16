@@ -65,12 +65,13 @@ class CommandQueue:
                     self._queue.remove(job)
                     self._jobs.pop(request_id)
 
-    def clear(self) -> None:
+    def clear(self, *, preserve_operations: frozenset[str] = frozenset()) -> None:
         with self._lock:
-            for job in self._jobs.values():
-                job.cancelled = True
-            self._jobs.clear()
-            self._queue.clear()
+            for identifier, job in list(self._jobs.items()):
+                if job.request.operation not in preserve_operations:
+                    job.cancelled = True
+                    del self._jobs[identifier]
+            self._queue = deque(job for job in self._queue if not job.cancelled)
 
     def close(self) -> None:
         with self._lock:

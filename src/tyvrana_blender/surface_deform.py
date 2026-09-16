@@ -9,7 +9,7 @@ from mathutils.kdtree import KDTree  # type: ignore[import-not-found]
 
 from . import deformation_geometry as geo
 from . import mesh, modifiers, retopo_geometry
-from .operations import OperationError
+from .errors import OperationError
 from .surface_deform_models import (
     SurfaceBindArguments,
     SurfaceBinding,

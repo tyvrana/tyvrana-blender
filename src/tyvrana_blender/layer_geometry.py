@@ -18,9 +18,9 @@ from . import (
     retopo_geometry,
 )
 from .curve_models import CurveInspectArguments
+from .errors import OperationError
 from .mesh_models import MeshElementSelector
 from .mesh_selectors import SelectionError, select
-from .operations import OperationError
 from .volume_models import VolumeMetrics
 
 MAX_VERTICES = 250_000

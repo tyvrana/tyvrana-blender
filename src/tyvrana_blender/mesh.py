@@ -12,6 +12,7 @@ import bmesh  # type: ignore[import-not-found]
 import bpy  # type: ignore[import-not-found]
 from mathutils import Euler, Matrix, Vector  # type: ignore[import-not-found]
 
+from .errors import OperationError
 from .mesh_models import (
     MAX_FACE_VERTICES,
     MAX_QUERY_RESULTS,
@@ -42,7 +43,6 @@ from .mesh_models import (
     VertexQueryResult,
 )
 from .mesh_selectors import SelectionError, select
-from .operations import OperationError
 from .topology_models import MeshInsertLoopsArguments
 from .uv import mesh_users
 

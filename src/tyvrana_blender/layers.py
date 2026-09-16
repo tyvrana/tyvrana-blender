@@ -12,6 +12,7 @@ from pydantic import Field, ValidationError, model_validator
 
 from . import deformation_qa, layer_math, organization
 from . import layer_geometry as geometry
+from .errors import OperationError
 from .layer_models import (
     CurrentLayerQuery,
     LayerCaptureArguments,
@@ -28,7 +29,6 @@ from .layer_models import (
 )
 from .models import Model
 from .numeric import Vector32
-from .operations import OperationError
 
 KEY = "_tyvrana_layer_references"
 MAX_REFERENCES = 32

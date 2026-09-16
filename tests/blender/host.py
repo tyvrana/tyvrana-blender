@@ -28,6 +28,13 @@ if os.environ.get("TYVRANA_TEST_CPU_RENDER") == "1":
 if os.environ.get("TYVRANA_TEST_RENDER") == "1":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     importlib.import_module("tests.blender.scene").prepare_scene()
+if os.environ.get("TYVRANA_TEST_RENDER_LONG") == "1":
+    scene = bpy.context.scene
+    scene.render.threads_mode = "FIXED"
+    scene.render.threads = 1
+    scene.cycles.use_adaptive_sampling = False
+    scene.cycles.time_limit = 36
+
 if os.environ.get("TYVRANA_TEST_LIGHTING") == "1":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     importlib.import_module("tests.blender.scene").prepare_lighting_scene()
@@ -89,7 +96,7 @@ def check() -> float | None:
                         "status": runtime.status,
                         "worker_pid": runtime.worker.process.pid,
                         "spooled_artifacts": len(
-                            list(runtime.worker.spool.root.iterdir())
+                            list(runtime.worker.spool.root.glob("*.png"))
                         ),
                     }
                 )
@@ -99,7 +106,8 @@ def check() -> float | None:
             if os.environ.get("TYVRANA_TEST_SHOW_RENDER") == "1":
                 assert any(
                     area.type == "IMAGE_EDITOR"
-                    and area.spaces.active.image == bpy.data.images.get("Render Result")
+                    and area.spaces.active.image is not None
+                    and area.spaces.active.image.get("tyvrana_render_preview")
                     for window in bpy.context.window_manager.windows
                     for area in window.screen.areas
                 )

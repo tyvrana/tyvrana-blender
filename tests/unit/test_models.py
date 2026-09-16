@@ -143,6 +143,8 @@ def test_render_defaults_and_dimension_bounds() -> None:
         "uv_checker": None,
         "surface": None,
         "show_result": False,
+        "wait_seconds": 5,
+        "output": None,
     }
     assert RenderArguments(width=64, height=1024).height == 1024
     assert RenderArguments.model_validate({"cycles": {}}).cycles is not None

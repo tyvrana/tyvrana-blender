@@ -7,8 +7,8 @@ from typing import Any
 import bpy  # type: ignore[import-not-found]
 
 from . import mesh, modifiers, multires
+from .errors import OperationError
 from .mesh_selectors import SelectionError, select
-from .operations import OperationError
 from .sculpt_models import (
     MAX_FACE_SETS,
     FaceSetsAssignArguments,

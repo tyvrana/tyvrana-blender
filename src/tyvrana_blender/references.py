@@ -6,8 +6,8 @@ from typing import Any, cast
 import bpy  # type: ignore[import-not-found]
 from mathutils import Matrix, Vector  # type: ignore[import-not-found]
 
+from .errors import OperationError
 from .inspection import page
-from .operations import OperationError
 from .reference_models import (
     AngleQuery,
     BoundsQuery,

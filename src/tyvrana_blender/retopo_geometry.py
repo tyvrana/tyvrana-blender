@@ -10,8 +10,8 @@ from mathutils.bvhtree import BVHTree  # type: ignore[import-not-found]
 from mathutils.geometry import closest_point_on_tri  # type: ignore[import-not-found]
 
 from . import mesh, modifiers
+from .errors import OperationError
 from .mesh_models import BoundedIndices
-from .operations import OperationError
 from .remesh import distribution
 from .retopo_models import (
     EXTREME_ASPECT_RATIO,

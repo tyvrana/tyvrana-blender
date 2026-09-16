@@ -7,6 +7,7 @@ state events are local to the parent; they are not sent to core.
 import asyncio
 import logging
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -37,6 +38,9 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 from .incoming import InputError, InputStore
+from .operations import REGISTRY, Response
+from .render_jobs import OPERATIONS as RENDER_OPERATIONS
+from .render_jobs import RenderJobs
 
 logger = logging.getLogger(__name__)
 MAX_FRAME = 4 * 1024 * 1024
@@ -111,6 +115,8 @@ class NetworkClient:
         self.reload_barrier = False
         self.spool = spool
         self.inputs = InputStore(spool)
+        self.renders = RenderJobs(spool, output.send)
+        self._requests: dict[str, asyncio.Task[None]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._transfers: dict[
             str,
@@ -128,6 +134,9 @@ class NetworkClient:
 
     def cancel_request(self, request_id: str) -> None:
         self.pending.discard(request_id)
+        task = self._requests.pop(request_id, None)
+        if task is not None:
+            task.cancel()
         self.reload_requests.discard(request_id)
         self.inputs.discard_request(request_id)
         for transfer_id, (related, queue) in self._transfers.items():
@@ -153,6 +162,7 @@ class NetworkClient:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self._transfers.clear()
+        self._requests.clear()
         self.inputs.clear()
 
     def release(self, response: OperationSuccess | OperationFailure) -> None:
@@ -290,6 +300,33 @@ class NetworkClient:
             self.reload_requests.discard(response.request_id)
             self.inputs.discard_request(response.request_id)
             self.release(response)
+
+    def start_render_response(
+        self, socket: ClientConnection, request: OperationRequest
+    ) -> None:
+        response = self.renders.begin(request)
+        task = asyncio.create_task(self.render_response(socket, request, response))
+        self._requests[request.request_id] = task
+        self._tasks.add(task)
+
+        def done(completed: asyncio.Task[None]) -> None:
+            # A cancelled task may never enter its coroutine. Result transfer
+            # copies created during synchronous admission still need release.
+            self.release(response)
+            self._requests.pop(request.request_id, None)
+            self.completed(completed)
+
+        task.add_done_callback(done)
+
+    async def render_response(
+        self, socket: ClientConnection, request: OperationRequest, response: Response
+    ) -> None:
+        try:
+            response = await self.renders.handle(request, response)
+            await self.deliver(socket, response)
+        finally:
+            self._requests.pop(request.request_id, None)
+            self.pending.discard(request.request_id)
 
     async def input_message(
         self,
@@ -440,6 +477,17 @@ class NetworkClient:
                                     or self.reload_requests
                                     or self.reload_barrier
                                     or (
+                                        self.renders.active is not None
+                                        and message.operation not in RENDER_OPERATIONS
+                                        and (
+                                            message.operation not in REGISTRY
+                                            or REGISTRY[
+                                                message.operation
+                                            ].contract.effect
+                                            != "read_only"
+                                        )
+                                    )
+                                    or (
                                         message.operation == "blender.extension.reload"
                                         and self.pending
                                     )
@@ -483,7 +531,10 @@ class NetworkClient:
                                 self.pending.add(message.request_id)
                                 if message.operation == "blender.extension.reload":
                                     self.reload_requests.add(message.request_id)
-                                await self.output.send(message)
+                                if message.operation in RENDER_OPERATIONS:
+                                    self.start_render_response(websocket, message)
+                                else:
+                                    await self.output.send(message)
                             elif isinstance(message, CancelRequest):
                                 self.cancel_request(message.request_id)
                                 await self.output.send(message)
@@ -543,6 +594,16 @@ class NetworkClient:
                     raise ValueError("A project refresh cannot change adapter identity")
                 self.registration = message
                 continue
+            if (
+                isinstance(message, AdapterEvent)
+                and message.event == "blender.render.shown"
+            ):
+                self.renders.accept_shown(message)
+                continue
+            if isinstance(
+                message, (OperationSuccess, OperationFailure)
+            ) and self.renders.accept_prepared(message):
+                continue
             if not isinstance(message, (OperationSuccess, OperationFailure)):
                 raise ValueError("Unsupported parent message direction")
             # Main-thread execution is finished; input files are no longer needed,
@@ -588,8 +649,10 @@ async def run(uri: str, spool: Path) -> None:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await client.cleanup()
+            await client.renders.close()
     finally:
         transport.close()
+        shutil.rmtree(spool, ignore_errors=True)
         logger.info("Networking worker stopped")
 
 

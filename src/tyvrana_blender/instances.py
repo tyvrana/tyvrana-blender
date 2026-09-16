@@ -14,6 +14,7 @@ from mathutils.bvhtree import BVHTree  # type: ignore[import-not-found]
 from mathutils.geometry import barycentric_transform  # type: ignore[import-not-found]
 
 from . import mesh
+from .errors import OperationError
 from .instance_models import (
     InstanceSample,
     MeshCreateArguments,
@@ -21,7 +22,6 @@ from .instance_models import (
     SurfaceInstancesSummary,
 )
 from .mesh_models import MeshSummary
-from .operations import OperationError
 
 KEY = "tyvrana_surface_instances"
 MAX_SURFACE_TRIANGLES = 250_000

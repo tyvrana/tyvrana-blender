@@ -9,6 +9,7 @@ import bpy  # type: ignore[import-not-found]
 from bpy_extras import anim_utils  # type: ignore[import-not-found]
 
 from . import organization, rig
+from .errors import OperationError
 from .motion_models import (
     Channel,
     ConstraintChannel,
@@ -16,7 +17,6 @@ from .motion_models import (
     ShapeChannel,
     TransformChannel,
 )
-from .operations import OperationError
 
 CONTROL_PREFIX = "tyvrana_control_"
 CONTROLS = "_tyvrana_scalar_controls"

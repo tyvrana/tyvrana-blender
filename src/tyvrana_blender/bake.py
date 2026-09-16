@@ -23,7 +23,7 @@ from .bake_models import (
     BakeTiming,
     NormalImageQA,
 )
-from .operations import OperationError
+from .errors import OperationError
 
 EVALUATION = (
     "frozen current evaluated meshes; matching viewport/render modifier settings"

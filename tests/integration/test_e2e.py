@@ -22,6 +22,7 @@ from tyvrana_blender.operations import OPERATIONS
 
 from ..png import assert_image_variation, inspect_png
 from .conftest import running_blender
+from .rendering import complete_render
 
 
 @asynccontextmanager
@@ -88,7 +89,11 @@ async def test_real_render_reaches_mcp_image_content(
                         "arguments": {"show_result": True},
                     },
                 )
-                assert failure.is_error
+                failure = await complete_render(client, registered.instance_id, failure)
+                assert (
+                    failure.structured_content["result"]["error"]["code"]
+                    == "invalid_context"
+                )
             result = await client.call_tool(
                 "tyvrana_execute_operation",
                 {
@@ -107,6 +112,7 @@ async def test_real_render_reaches_mcp_image_content(
                     },
                 },
             )
+            result = await complete_render(client, registered.instance_id, result)
             assert not result.is_error, result.content
             images = [
                 content
@@ -125,11 +131,8 @@ async def test_real_render_reaches_mcp_image_content(
             )
             assert descriptor.byte_size == len(data) and len(data) > 1000
             assert descriptor.sha256 == hashlib.sha256(data).hexdigest()
-            assert result.structured_content["result"] == {
-                "width": 512,
-                "height": 512,
-                "format": "png",
-            }
+            assert result.structured_content["result"]["state"] == "succeeded"
+            assert result.structured_content["result"]["width"] == 512
             assert (
                 "/tmp/" not in result.model_dump_json()
                 and "file:" not in result.model_dump_json()
@@ -257,7 +260,8 @@ async def test_full_mcp_core_blender_vertical_slice(
                     "arguments": {},
                 },
             )
-            assert no_camera.is_error
+            no_camera = await complete_render(client, identifier, no_camera)
+            assert no_camera.structured_content["result"]["state"] == "failed"
             assert '"no_camera"' in no_camera.model_dump_json().replace('\\"', '"')
             created = ObjectSummary.model_validate(
                 await operation(

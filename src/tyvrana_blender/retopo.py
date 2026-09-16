@@ -10,9 +10,9 @@ from mathutils.geometry import intersect_line_line  # type: ignore[import-not-fo
 
 from . import mesh, modifiers
 from . import retopo_geometry as geometry
+from .errors import OperationError
 from .mesh_models import ElementCounts
 from .mesh_selectors import SelectionError, select
-from .operations import OperationError
 from .retopo_models import (
     MAX_BOUNDARY_EDGES,
     MAX_RELAX_WORK,

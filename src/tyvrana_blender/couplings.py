@@ -8,6 +8,7 @@ import bpy  # type: ignore[import-not-found]
 from pydantic import ValidationError
 
 from . import motion_channels as channels
+from .errors import OperationError
 from .inspection import page
 from .motion_math import coefficients, expression, mapped
 from .motion_models import (
@@ -21,7 +22,6 @@ from .motion_models import (
     PropertiesArguments,
     TransformChannel,
 )
-from .operations import OperationError
 
 KEY = "_tyvrana_couplings"
 MAX_COUPLINGS = 256

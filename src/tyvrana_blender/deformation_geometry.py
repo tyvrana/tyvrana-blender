@@ -6,9 +6,9 @@ import struct
 from typing import Any, Never
 
 from . import mesh, modifiers, retopo_geometry
+from .errors import OperationError
 from .mesh_models import MeshElementSelector
 from .mesh_selectors import SelectionError, select
-from .operations import OperationError
 
 MAX_VERTICES = 100_000
 MAX_KEY_COORDINATES = 2_000_000

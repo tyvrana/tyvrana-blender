@@ -9,7 +9,7 @@ import bpy  # type: ignore[import-not-found]
 
 from . import bake
 from .bake_models import BakeImageArguments, BakeImageResult, BakeJobStatus
-from .operations import OperationError
+from .errors import OperationError
 
 log = logging.getLogger(__name__)
 _jobs: dict[str, BakeJobStatus] = {}

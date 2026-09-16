@@ -7,6 +7,7 @@ import bmesh  # type: ignore[import-not-found]
 import bpy  # type: ignore[import-not-found]
 
 from . import mesh
+from .errors import OperationError
 from .modifier_models import (
     MAX_MODIFIERS,
     MAX_SUBDIVISION_LEVEL,
@@ -28,7 +29,6 @@ from .modifier_models import (
     SubdivisionSettings,
     TriangulateSettings,
 )
-from .operations import OperationError
 
 TYPES = {
     "corrective_smooth": "CORRECTIVE_SMOOTH",
