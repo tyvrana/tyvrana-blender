@@ -1,5 +1,7 @@
 """Named material resources, numeric shader inputs, and object slot results."""
 
+from __future__ import annotations
+
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
@@ -56,6 +58,7 @@ class MaterialSummary(Model):
     assignments: list[MaterialAssignment] = Field(max_length=32)
     assignment_count: int
     assignments_truncated: bool
+    graph: MaterialGraphSummary | None = None
 
     @model_validator(mode="after")
     def matching_surface(self) -> Self:
@@ -100,6 +103,64 @@ class MaterialCreateArguments(PrincipledPatch):
 
 class MaterialConfigureArguments(PrincipledPatch):
     name: ObjectName
+
+
+class SurfaceParameters(PrincipledPatch):
+    """Linear RGB colors; distances in scene units, film thickness in nanometers."""
+
+    metallic: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    roughness: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    ior: Annotated[Float32, Field(ge=1, le=1000)] | None = None
+    alpha: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    subsurface_weight: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    subsurface_radius: ShaderColor | None = None
+    subsurface_scale: Nonnegative32 | None = None
+    transmission_weight: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    coat_weight: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    coat_roughness: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    emission_strength: Nonnegative32 | None = None
+    thin_wall: bool | None = None
+    diffuse_roughness: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    subsurface_anisotropy: Annotated[Float32, Field(ge=-1, le=1)] | None = None
+    specular_ior_level: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    specular_tint: ShaderColor | None = None
+    anisotropy: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    anisotropy_rotation: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    coat_ior: Annotated[Float32, Field(ge=1, le=1000)] | None = None
+    coat_tint: ShaderColor | None = None
+    sheen_weight: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    sheen_roughness: Annotated[Float32, Field(ge=0, le=1)] | None = None
+    sheen_tint: ShaderColor | None = None
+    thin_film_thickness: Annotated[Float32, Field(ge=0, le=100000)] | None = None
+    thin_film_ior: Annotated[Float32, Field(ge=1, le=1000)] | None = None
+
+
+class TextureChannelSummary(Model):
+    channel: str
+    image: str
+    color_space: str
+
+
+class MaterialGraphSummary(Model):
+    ownership: Literal["semantic", "declarative", "modified", "unowned"]
+    fingerprint: str
+    fingerprint_complete: bool
+    node_count: int
+    link_count: int
+    image_count: int
+    surface_connected: bool
+    displacement_connected: bool
+    parameters: SurfaceParameters | None
+    linked_inputs: list[str] = Field(max_length=32)
+    subsurface_method: str | None
+    displacement_method: str
+    textures: list[TextureChannelSummary] = Field(max_length=16)
+    features: list[str] = Field(max_length=24)
+    warnings: list[str] = Field(max_length=16)
+
+
+MaterialSummary.model_rebuild()
+MaterialInspectResult.model_rebuild()
 
 
 class MaterialAssignArguments(Model):

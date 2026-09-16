@@ -19,6 +19,7 @@ from tyvrana_blender.rig_models import (
     ArmatureRestArguments,
     RestBone,
 )
+from tyvrana_blender.transport import MAX_FRAME
 
 
 def test_frame_is_right_handed_and_normalized() -> None:
@@ -174,7 +175,7 @@ def test_joint_batch_and_inspection_bounds() -> None:
 
 
 def test_registry_remains_bounded() -> None:
-    assert len(OPERATIONS) == 157
+    assert len(OPERATIONS) == 162
     assert (
-        len(registration("fixture", "5.2.1", "").model_dump_json().encode()) < 1048576
+        len(registration("fixture", "5.2.1", "").model_dump_json().encode()) < MAX_FRAME
     )

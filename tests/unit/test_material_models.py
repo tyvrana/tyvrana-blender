@@ -35,9 +35,13 @@ def test_empty_inspection_and_canonical_registration() -> None:
     assert tuple(sorted(OPERATIONS)) == OPERATIONS
     assert [op for op in OPERATIONS if op.startswith("blender.material.")] == [
         "blender.material.assign",
+        "blender.material.assign_batch",
+        "blender.material.author",
         "blender.material.configure_principled",
+        "blender.material.copy",
         "blender.material.create_principled",
         "blender.material.inspect",
+        "blender.material.remove",
     ]
     response = call(Backend(), "blender.material.inspect", {})
     assert isinstance(response, OperationSuccess) and response.result == {

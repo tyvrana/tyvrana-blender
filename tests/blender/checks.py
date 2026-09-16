@@ -28,6 +28,7 @@ png_helpers = importlib.import_module("tests.png")
 camera_checks = importlib.import_module("tests.blender.camera_checks")
 light_checks = importlib.import_module("tests.blender.light_checks")
 material_checks = importlib.import_module("tests.blender.material_checks")
+material_author_checks = importlib.import_module("tests.blender.material_author_checks")
 shader_checks = importlib.import_module("tests.blender.shader_checks")
 
 
@@ -424,6 +425,9 @@ try:
                     shader_checks.ShaderTests
                 ),
                 unittest.defaultTestLoader.loadTestsFromTestCase(BlenderTests),
+                unittest.defaultTestLoader.loadTestsFromTestCase(
+                    material_author_checks.MaterialAuthorTests
+                ),
                 unittest.defaultTestLoader.loadTestsFromTestCase(
                     material_checks.MaterialTests
                 ),

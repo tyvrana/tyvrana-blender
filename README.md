@@ -271,6 +271,11 @@ Names are advertised in sorted order:
 | `blender.object.create_primitive` | Required `primitive`; optional `name`, `location`, `rotation`, `scale` | Created object summary |
 | `blender.object.set_transform` | Required `name`; optional `location`, `rotation`, `scale` | Updated object summary |
 | `blender.object.delete` | Required `name` | `{"deleted": "object name"}` |
+| `blender.material.author` | Typed parameters, texture channels, variation and assignments | Coherent staged semantic material |
+| `blender.shader.author` | Typed nodes/links and create/patch/replace mode | Bounded staged graph |
+| `blender.material.copy` | Source and new name | Independent graph, shared images |
+| `blender.material.remove` | Unused material name | Removed material; images retained |
+| `blender.material.assign_batch` | Material and up to 64 object slots | Atomic compact assignments |
 | `blender.material.inspect` | `{}` | Sorted material resources and assignments |
 | `blender.material.create_principled` | Optional name and Principled fields | Created material summary |
 | `blender.material.configure_principled` | Required name; partial Principled fields | Updated material summary |
@@ -546,9 +551,15 @@ with native checks for property limits, defaults, shared data, and rollback.
 
 ## Materials
 
+For coherent texture-driven, procedural and advanced Principled surfaces, start
+with [semantic material and shader authoring](docs/material_authoring.md).
+`material.author` combines parameters, branches and optional assignments;
+`shader.author` supports bounded explicit graphs and patches. The constant-only
+and individual node operations below remain useful for targeted edits.
+
 Materials are named reusable resources in the blend file. Configuring a named
 material updates that resource for every user; it never silently duplicates the
-material. Creation and assignment are separate. Object transforms remain
+material. Semantic authoring can include assignments. Object transforms remain
 `blender.object.set_transform`; assigning slots does not edit face-material
 indices.
 
@@ -562,7 +573,8 @@ and linked materials. Each material has:
   surface: "principled" | "custom" | "none",
   principled: PrincipledSummary | null,
   assignments: [{object: string, slot: integer}, ...],
-  assignment_count: integer, assignments_truncated: boolean
+  assignment_count: integer, assignments_truncated: boolean,
+  graph: MaterialGraphSummary
 }
 ```
 

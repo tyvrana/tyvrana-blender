@@ -92,6 +92,15 @@ from tyvrana_blender.light_models import (
     LightSummary,
     light_state,
 )
+from tyvrana_blender.material_author_models import (
+    AssignBatchArguments,
+    AssignBatchResult,
+    GraphAuthorArguments,
+    MaterialAuthorArguments,
+    MaterialCopyArguments,
+    MaterialRemoveArguments,
+    MaterialRemoveResult,
+)
 from tyvrana_blender.material_models import (
     MaterialAssignArguments,
     MaterialAssignResult,
@@ -1251,6 +1260,25 @@ class Backend:
             to_socket=arguments.to_socket,
             removed=0,
         )
+
+    def material_author(self, arguments: MaterialAuthorArguments) -> MaterialSummary:
+        return self.material_create(MaterialCreateArguments(name=arguments.name))
+
+    def shader_author(self, arguments: GraphAuthorArguments) -> MaterialSummary:
+        return self.material_create(MaterialCreateArguments(name=arguments.name))
+
+    def material_copy(self, arguments: MaterialCopyArguments) -> MaterialSummary:
+        return self.material_create(MaterialCreateArguments(name=arguments.name))
+
+    def material_remove(
+        self, arguments: MaterialRemoveArguments
+    ) -> MaterialRemoveResult:
+        return MaterialRemoveResult(name=arguments.name)
+
+    def material_assign_batch(
+        self, arguments: AssignBatchArguments
+    ) -> AssignBatchResult:
+        return AssignBatchResult(material_name=arguments.material_name, assignments=[])
 
     def material_inspect(self, arguments: InspectArguments) -> MaterialInspectResult:
         self.calls.append("material_inspect")

@@ -99,6 +99,15 @@ from .light_models import (
     LightInspectResult,
     LightSummary,
 )
+from .material_author_models import (
+    AssignBatchArguments,
+    AssignBatchResult,
+    GraphAuthorArguments,
+    MaterialAuthorArguments,
+    MaterialCopyArguments,
+    MaterialRemoveArguments,
+    MaterialRemoveResult,
+)
 from .material_models import (
     MaterialAssignArguments,
     MaterialAssignResult,
@@ -652,6 +661,18 @@ class SceneBackend(Protocol):
     def shader_delete(self, arguments: NodeDeleteArguments) -> NodeDeleteResult: ...
     def shader_connect(self, arguments: ConnectArguments) -> LinkSummary: ...
     def shader_disconnect(self, arguments: DisconnectArguments) -> DisconnectResult: ...
+
+    def material_author(
+        self, arguments: MaterialAuthorArguments
+    ) -> MaterialSummary: ...
+    def shader_author(self, arguments: GraphAuthorArguments) -> MaterialSummary: ...
+    def material_copy(self, arguments: MaterialCopyArguments) -> MaterialSummary: ...
+    def material_remove(
+        self, arguments: MaterialRemoveArguments
+    ) -> MaterialRemoveResult: ...
+    def material_assign_batch(
+        self, arguments: AssignBatchArguments
+    ) -> AssignBatchResult: ...
 
     def material_inspect(
         self, arguments: InspectArguments
@@ -1941,6 +1962,59 @@ _DECLARATIONS = (
         "Inspect a filtered, bounded page of light objects and their typed "
         "data properties.",
         effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.material.author",
+        MaterialAuthorArguments,
+        MaterialSummary,
+        lambda b, a, q: b.material_author(a),
+        "Author or patch an owned Principled material with coherent textures, "
+        "coordinates, variation, advanced shading and optional assignments. Shared "
+        "updates require explicit intent. Staged rollback.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.shader.author",
+        GraphAuthorArguments,
+        MaterialSummary,
+        lambda b, a, q: b.shader_author(a),
+        "Create, patch or explicitly replace a bounded typed shader graph. Up to 64 "
+        "nodes, 128 links and 16 images; no groups or scripting. A replacement "
+        "requires the current fingerprint. Staged rollback.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.material.copy",
+        MaterialCopyArguments,
+        MaterialSummary,
+        lambda b, a, q: b.material_copy(a),
+        "Copy a local material with an independent node tree and shared images; no "
+        "inheritance. Assign the copy explicitly.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.material.remove",
+        MaterialRemoveArguments,
+        MaterialRemoveResult,
+        lambda b, a, q: b.material_remove(a),
+        "Remove an unused local material, preserving referenced images and node "
+        "groups. Refuse materials with users.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.material.assign_batch",
+        AssignBatchArguments,
+        AssignBatchResult,
+        lambda b, a, q: b.material_assign_batch(a),
+        "Assign a shared material to up to 64 object slots atomically, preserving "
+        "unrelated slots and face indices. Extending shared geometry isolates its "
+        "slots.",
+        effect="mutating",
         execution="synchronous",
     ),
     _operation(

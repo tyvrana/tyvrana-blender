@@ -19,6 +19,7 @@ from tyvrana_protocol import (
 
 from . import (
     instances,
+    material_author,
     mesh,
     modifiers,
     multires,
@@ -121,6 +122,15 @@ from .light_models import (
     LightInspectResult,
     LightSummary,
     light_state,
+)
+from .material_author_models import (
+    AssignBatchArguments,
+    AssignBatchResult,
+    GraphAuthorArguments,
+    MaterialAuthorArguments,
+    MaterialCopyArguments,
+    MaterialRemoveArguments,
+    MaterialRemoveResult,
 )
 from .material_models import (
     PRINCIPLED_SOCKETS,
@@ -593,6 +603,7 @@ def material_summary(material: Any) -> MaterialSummary:
     ]
     return MaterialSummary(
         name=str(material.name),
+        graph=material_author.inspect(material),
         surface=surface,
         principled=values,
         assignments=[
@@ -1672,6 +1683,145 @@ class BlenderBackend:
         tree = shader.editable_tree(find_material(arguments.material_name))
         return shader.disconnect(tree, arguments)
 
+    def material_assign_batch(
+        self, arguments: AssignBatchArguments
+    ) -> AssignBatchResult:
+        data_mutation_context()
+        with material_author.assignment_transaction(
+            bpy.data,
+            arguments.assignments,
+            material_index_snapshot,
+            bpy.context.view_layer.update,
+        ):
+            assigned = []
+            for binding in arguments.assignments:
+                result = self.material_assign(
+                    MaterialAssignArguments(
+                        object_name=binding.object_name,
+                        slot_index=binding.slot_index,
+                        material_name=arguments.material_name,
+                    )
+                )
+                assigned.append(
+                    MaterialAssignment(
+                        object=result.object_name, slot=result.assigned_slot
+                    )
+                )
+            return AssignBatchResult(
+                material_name=arguments.material_name, assignments=assigned
+            )
+
+    def material_author(self, arguments: MaterialAuthorArguments) -> MaterialSummary:
+        data_mutation_context()
+        with material_author.staged(
+            bpy.data,
+            arguments.name,
+            arguments.mode,
+            arguments.affect_shared,
+            arguments.expected_fingerprint,
+        ) as (previous, candidate):
+            recipe = material_author.semantic_recipe(arguments, previous)
+            material_author.apply_graph(
+                candidate,
+                material_author.recipe_graph(arguments.name, recipe),
+                bpy.data,
+            )
+            material_author.mark(candidate, "semantic", recipe)
+            material_author.validate_users(
+                candidate, previous, bpy.data, arguments.assignments
+            )
+            material_author.publish(
+                previous, candidate, arguments.name, bpy.context.view_layer.update
+            )
+            with material_author.assignment_transaction(
+                bpy.data,
+                arguments.assignments,
+                material_index_snapshot,
+                bpy.context.view_layer.update,
+            ):
+                if arguments.assignments:
+                    self.material_assign_batch(
+                        AssignBatchArguments(
+                            material_name=arguments.name,
+                            assignments=arguments.assignments,
+                        )
+                    )
+                return material_summary(candidate)
+
+    def shader_author(self, arguments: GraphAuthorArguments) -> MaterialSummary:
+        data_mutation_context()
+        with material_author.staged(
+            bpy.data,
+            arguments.name,
+            arguments.mode,
+            arguments.affect_shared,
+            arguments.expected_fingerprint,
+        ) as (previous, candidate):
+            if (
+                previous
+                and arguments.mode == "replace"
+                and not material_author.owner(previous)
+                and not arguments.replace_unowned
+            ):
+                raise OperationError(
+                    "invalid_arguments",
+                    "Replacing an unowned graph requires replace_unowned=true",
+                )
+            material_author.apply_graph(candidate, arguments, bpy.data)
+            material_author.mark(candidate, "declarative")
+            material_author.validate_users(
+                candidate, previous, bpy.data, arguments.assignments
+            )
+            material_author.publish(
+                previous, candidate, arguments.name, bpy.context.view_layer.update
+            )
+            with material_author.assignment_transaction(
+                bpy.data,
+                arguments.assignments,
+                material_index_snapshot,
+                bpy.context.view_layer.update,
+            ):
+                if arguments.assignments:
+                    self.material_assign_batch(
+                        AssignBatchArguments(
+                            material_name=arguments.name,
+                            assignments=arguments.assignments,
+                        )
+                    )
+                return material_summary(candidate)
+
+    def material_copy(self, arguments: MaterialCopyArguments) -> MaterialSummary:
+        data_mutation_context()
+        source = find_material(arguments.source)
+        material_author.writable(source, bpy.data, affect_shared=True)
+        if any(material.name == arguments.name for material in bpy.data.materials):
+            raise OperationError("invalid_arguments", "Material name already exists")
+        copy = source.copy()
+        try:
+            copy.name = arguments.name
+            if copy.name != arguments.name:
+                raise OperationError(
+                    "operation_failed", "Blender did not retain material name"
+                )
+            return material_summary(copy)
+        except Exception:
+            bpy.data.materials.remove(copy)
+            raise
+
+    def material_remove(
+        self, arguments: MaterialRemoveArguments
+    ) -> MaterialRemoveResult:
+        data_mutation_context()
+        material = find_material(arguments.name)
+        material_author.writable(material, bpy.data, affect_shared=True)
+        if material.users:
+            raise OperationError(
+                "invalid_arguments", "Material still has users; reassign them first"
+            )
+        result = MaterialRemoveResult(name=arguments.name)
+        bpy.data.materials.remove(material)
+        return result
+
     def material_inspect(
         self, arguments: InspectArguments | None = None
     ) -> MaterialInspectResult:
@@ -1792,6 +1942,7 @@ class BlenderBackend:
                 {"name": arguments.object_name},
             )
         material = find_material(arguments.material_name)
+        material_author.validate_uv(material, obj)
         if material.is_grease_pencil:
             raise OperationError(
                 "invalid_arguments",

@@ -11,6 +11,7 @@ from tyvrana_blender.organization_models import (
     ObjectSetCreateArguments,
     ObjectSetInspectArguments,
 )
+from tyvrana_blender.transport import MAX_FRAME
 
 
 def member(**changes: object) -> dict[str, object]:
@@ -126,5 +127,5 @@ def test_all_organization_contracts_registered_and_bounded() -> None:
             contract.input_artifacts == "none" and contract.output_artifacts == "none"
         )
     assert (
-        len(registration("fixture", "5.2.1", "").model_dump_json().encode()) < 1048576
+        len(registration("fixture", "5.2.1", "").model_dump_json().encode()) < MAX_FRAME
     )
