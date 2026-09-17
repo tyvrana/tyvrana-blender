@@ -254,9 +254,15 @@ async def test_structural_fixtures_persist_across_hosts(
     rest: dict[str, Any] = {}
     path = str(tmp_path / "structures.blend")
     async with core_client(tmp_path) as (client, port):
-        assert client.instructions and "infer the professional workflow" in " ".join(
-            client.instructions.split()
-        )
+        assert client.instructions
+        guidance = " ".join(client.instructions.lower().split())
+        for concept in (
+            "infer",
+            "workflow",
+            "domain structure",
+            "before dependent detail",
+        ):
+            assert concept in guidance
         profile["TYVRANA_TEST_PORT"] = str(port)
         for host_index in range(2):
             host_path = tmp_path / f"host-{host_index}"

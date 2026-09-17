@@ -1386,7 +1386,8 @@ _DECLARATIONS = (
         CurveResult,
         lambda b, a, q: b.curve_create(a),
         (
-            "Create 1..64 native Curve objects with shared "
+            "Author swept structural geometry or procedural guides as 1..64 native "
+            "Curve objects with shared "
             "spline/profile/material defaults; up to 8 splines/1024 points "
             "per curve, 4096 points and 128 attachments per request. POLY, "
             "BEZIER handles and rational NURBS. Local/world authored points; "
@@ -1470,7 +1471,8 @@ _DECLARATIONS = (
         ArmatureRestArguments,
         ArmatureSummary,
         lambda b, a, q: b.armature_configure_rest(a),
-        "Edit an existing unbound neutral armature using up to 128 full "
+        "Edit articulation/deformation rest data on an unbound neutral armature "
+        "using up to 128 full "
         "bone definitions/additions and unused-name renames. Rest "
         "endpoints use armature/world vectors or shared typed point "
         "sources; x_reference constructs an orthonormal frame "
@@ -1510,6 +1512,7 @@ _DECLARATIONS = (
         StructureInspectArguments,
         StructureSummary,
         lambda b, a, q: b.armature_inspect_structure(a),
+        "Inspect articulation data, not anatomical/physical geometry acceptance. "
         "Compact rest/joint/pose QA for one armature (max 128 bones), "
         "optionally a subtree/named set. Default 16/max 128 paged rows; "
         "select rest/frame/limits/pose fields. Explicit "
@@ -1580,14 +1583,16 @@ _DECLARATIONS = (
         ObjectSetCreateArguments,
         ObjectSetCreateResult,
         lambda b, a, q: b.object_set_create(a),
-        "Author 1..64 coherent objects: cubes, planes, UV spheres, "
+        "Author explicit physical components or structural approximations in "
+        "1..64 coherent objects: cubes, planes, UV spheres, "
         "cylinders, plain empties or copies of plain local "
         "mesh/light/camera/empty objects. Request-local keys allow "
         "forward parent/copy references. Transforms are parent-local "
         "XYZ radians. Collections default to scene root, max 16/object. "
         "Explicit linked/independent data and shared/independent "
         "materials; independent materials require independent data, "
-        "nested shader groups/images remain shared. Role/tags are "
+        "nested shader groups/images remain shared. Distinguish domain structure, "
+        "control/proxy and production surface with role/tags. These are "
         "bounded persistent adapter-owned metadata; keys are not "
         "persistent. Reject cycles, collisions and "
         "animated/constrained/modifier/shape-key/domain-owned copy "
@@ -1787,8 +1792,10 @@ _DECLARATIONS = (
         ArmatureCreateArguments,
         ArmatureSummary,
         lambda b, a, q: b.armature_create(a),
-        "Create a bounded rest-bone hierarchy with explicit head/tail/roll, "
-        "parent and connection geometry. Rejects duplicate names, cycles and "
+        "Create an articulation/deformation armature, not anatomical bone or "
+        "physical component geometry. Bounded rest-bone hierarchy with explicit "
+        "head/tail/roll, parent and connected endpoints. Rejects duplicate names, "
+        "cycles and "
         "inconsistent connected joints. Up to 128 bones. Raw endpoints use "
         "armature/world request space; shared typed point sources resolve to "
         "world then armature space. Head is the joint center. x_reference "
@@ -2237,7 +2244,8 @@ _DECLARATIONS = (
         MeshCreateArguments,
         MeshSummary,
         lambda b, a, q: b.mesh_create(a),
-        "Create one bounded original triangle/quad mesh with optional corner "
+        "Author explicit structural/component or surface geometry as one bounded "
+        "original triangle/quad mesh with optional corner "
         "UVs, materials and shading. Vertex indices belong to this supplied "
         "mesh only.",
         effect="mutating",

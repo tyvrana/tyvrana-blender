@@ -60,9 +60,10 @@ async def test_motion_corrective_layers_persist(
         targets=[dict(object_name="Surface", target="Desired")],
     )
     async with core_client(tmp_path) as (client, port):
-        assert client.instructions and "infer the professional workflow" in " ".join(
-            client.instructions.split()
-        )
+        assert client.instructions
+        guidance = " ".join(client.instructions.lower().split())
+        for concept in ("infer", "workflow", "dependencies", "requested result"):
+            assert concept in guidance
         assert "visual" in client.instructions.lower()
         profile["TYVRANA_TEST_PORT"] = str(port)
         for host in range(2):

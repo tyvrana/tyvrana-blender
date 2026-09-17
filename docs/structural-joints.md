@@ -1,9 +1,12 @@
 # Rest structures and constrained joints
 
-Rest structure defines segment geometry, joint centers, axes, hierarchy and motion
-limits. Deformation binding transfers that motion to a surface. Animation controls
-add interfaces, IK, drivers and timed motion. These are separate layers: a useful
-structural armature requires neither a mesh nor a control rig.
+An armature defines articulation/deformation data: segment endpoints, joint centers,
+axes, hierarchy and motion limits. It does not create anatomical bone or physical
+component geometry. When correctness depends on those structures, author and inspect
+them separately with mesh, object-set or swept-curve operations at suitable fidelity.
+Binding transfers motion to geometry; animation controls provide interfaces, IK,
+drivers and timed motion. Armature validation checks its data and motion, not the
+adequacy of the underlying domain structure.
 
 ## Operations
 
@@ -24,7 +27,7 @@ binding summaries. Both create and pose already support batching.
 
 ## Centers, frames and units
 
-Each native bone represents a structural segment. Its **head is the joint center**;
+Each native bone represents an articulation segment. Its **head is the joint center**;
 its tail is the other endpoint. A connected child's head must coincide with its
 parent's tail within 1e-6 armature units. A disconnected child retains an explicit
 offset from its parent while inheriting its motion.

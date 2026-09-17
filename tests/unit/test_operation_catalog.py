@@ -75,3 +75,23 @@ def test_argument_feedback_is_bounded_and_identifies_repair() -> None:
     assert isinstance(result.error.details, list) and len(result.error.details) == 8
     assert len(json.dumps(result.error.details)) < 3000
     assert backend.calls == []
+
+
+def test_structural_authoring_contracts_distinguish_geometry_from_controls() -> None:
+    descriptions = {
+        name: spec.contract.description.lower() for name, spec in REGISTRY.items()
+    }
+    create = descriptions["blender.armature.create"]
+    assert "articulation/deformation" in create
+    assert "not anatomical bone or physical component geometry" in create
+    inspect = descriptions["blender.armature.inspect_structure"]
+    assert "not anatomical/physical geometry acceptance" in inspect
+    for name in (
+        "blender.object_set.create",
+        "blender.mesh.create",
+        "blender.curve.create",
+    ):
+        assert "structural" in descriptions[name]
+    assert "role/tags" in descriptions["blender.object_set.create"]
+    for description in descriptions.values():
+        assert "mallard" not in description and "duck" not in description

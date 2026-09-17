@@ -48,9 +48,10 @@ async def test_reference_measurement_mcp_workflow(
     rows: list[dict[str, Any]] = []
     phase = "startup"
     async with core_client(tmp_path) as (client, port):
-        assert client.instructions and "infer the professional workflow" in " ".join(
-            client.instructions.split()
-        )
+        assert client.instructions
+        guidance = " ".join(client.instructions.lower().split())
+        for concept in ("infer", "workflow", "dependencies", "requested result"):
+            assert concept in guidance
         original = client.call_tool
 
         async def observed(
