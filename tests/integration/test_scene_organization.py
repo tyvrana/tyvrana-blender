@@ -134,7 +134,7 @@ def test_native_organization(profile: dict[str, str], tmp_path: Path) -> None:
     log = result.stdout + result.stderr
     (tmp_path / "organization.log").write_text(log)
     assert result.returncode == 0, log
-    assert "ORGANIZATION_NATIVE_PASSED 31" in log
+    assert "ORGANIZATION_NATIVE_PASSED 32" in log
 
 
 async def test_organized_assembly_room_and_chain_persist(

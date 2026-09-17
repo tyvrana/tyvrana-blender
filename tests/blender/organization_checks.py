@@ -422,6 +422,61 @@ class OrganizationTests(unittest.TestCase):
         self.assertIn("A", bpy.context.scene.collection.objects)
         self.assertNotIn(org.ROLE, bpy.data.objects["A"])
 
+    def test_bound_geometry_metadata_preserves_domain_ownership(self) -> None:
+        self.create(part("Surface"))
+        call(
+            "armature.create",
+            name="Rig",
+            bones=[
+                dict(
+                    name="Segment", head=[0, 0, -1], tail=[0, 0, 1], envelope_distance=3
+                )
+            ],
+        )
+        call(
+            "armature.bind",
+            object_name="Surface",
+            armature_object="Rig",
+            weights=dict(method="envelopes", bones=["Segment"]),
+        )
+        obj = bpy.data.objects["Surface"]
+        owned = {k: obj[k] for k in obj.keys() if k not in {org.ROLE, org.TAGS}}
+        self.assertTrue(owned)
+        before = call("armature.inspect", object_name="Rig")
+        world = obj.matrix_world.copy()
+        weights = [[(g.group, g.weight) for g in v.groups] for v in obj.data.vertices]
+        call(
+            "object_set.configure",
+            objects=[dict(name="Surface", role="domain_structure", tags=["prototype"])],
+        )
+        self.assertEqual(obj[org.ROLE], "domain_structure")
+        self.assertEqual(list(obj[org.TAGS]), ["prototype"])
+        for patch_fields in (
+            {"rename": "Changed"},
+            {"parent": None},
+            {"collections": [None]},
+        ):
+            reject(
+                "object_set.configure", objects=[dict(name="Surface", **patch_fields)]
+            )
+        with patch.object(org, "object_summary", side_effect=RuntimeError("injected")):
+            reject(
+                "object_set.configure",
+                objects=[dict(name="Surface", role="wrong", tags=[])],
+            )
+        self.assertEqual(obj[org.ROLE], "domain_structure")
+        self.assertEqual(list(obj[org.TAGS]), ["prototype"])
+        self.assertEqual({k: obj[k] for k in owned}, owned)
+        self.assertEqual(call("armature.inspect", object_name="Rig"), before)
+        self.assertEqual(
+            [[(g.group, g.weight) for g in v.groups] for v in obj.data.vertices],
+            weights,
+        )
+        self.same_matrix(obj.matrix_world, world)
+        call("object_set.configure", objects=[dict(name="Surface", role=None, tags=[])])
+        self.assertNotIn(org.ROLE, obj)
+        self.assertNotIn(org.TAGS, obj)
+
     def test_safe_deletion_and_data_retention(self) -> None:
         self.create(part("A"), part("B", parent={"key": "A"}, location=[3, 4, 5]))
         mesh = bpy.data.objects["A"].data.name

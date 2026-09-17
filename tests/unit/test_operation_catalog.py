@@ -93,5 +93,6 @@ def test_structural_authoring_contracts_distinguish_geometry_from_controls() -> 
     ):
         assert "structural" in descriptions[name]
     assert "role/tags" in descriptions["blender.object_set.create"]
+    assert "role/tag-only patches" in descriptions["blender.object_set.configure"]
     for description in descriptions.values():
         assert "mallard" not in description and "duck" not in description

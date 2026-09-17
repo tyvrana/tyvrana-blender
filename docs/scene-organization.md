@@ -130,7 +130,9 @@ unique list of at most 16 entries. They persist as adapter-owned
 and an empty tag list clear values; omitted patch fields remain unchanged.
 Copy declarations assign their own metadata rather than inheriting it implicitly.
 Arbitrary property keys/values are not accepted. Objects owned by another adapter
-domain must use that domain's operations.
+domain permit role/tag-only patches here; other changes must use that domain's
+operations. This allows classifying existing bound geometry or controls without
+changing their owned data, bindings or transforms.
 
 For compact verification, use `object_set.inspect` with a collection or names,
 optional prefix/role/all-tags filters and selected `fields`: `hierarchy`,

@@ -671,12 +671,13 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
     for p in args.objects:
         obj = items[p.name]
         object_editable(obj)
-        if any(
+        metadata_only = p.model_fields_set <= {"name", "role", "tags"}
+        if not metadata_only and any(
             str(k).startswith("tyvrana_") and k not in {ROLE, TAGS} for k in obj.keys()
         ):
             fail(
-                f'Object "{obj.name}" has domain-owned metadata; use its '
-                f"typed operations"
+                f'Object "{obj.name}" has domain-owned metadata; only role/tag '
+                f"patches are allowed here; use its typed operations for other changes"
             )
         if p.rename is not None:
             named_available(p.rename, bpy.data.objects, obj)
