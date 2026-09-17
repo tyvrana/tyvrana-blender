@@ -37,7 +37,13 @@ async def core_client(
     with log_path.open("w") as log:
         params = StdioServerParameters(
             command=executable,
-            args=["mcp", "--port", str(port)],
+            args=[
+                "mcp",
+                "--port",
+                str(port),
+                "--state-directory",
+                str(tmp_path / "semantic-state"),
+            ],
             env={"PYTHONASYNCIODEBUG": "1", "TMPDIR": str(tmp_path)},
         )
         async with Client(
