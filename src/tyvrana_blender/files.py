@@ -5,7 +5,12 @@ from pathlib import Path
 import bpy  # type: ignore[import-not-found]
 
 from .errors import OperationError
-from .file_models import FileOpenArguments, FileSaveArguments, FileState
+from .file_models import (
+    FileNewArguments,
+    FileOpenArguments,
+    FileSaveArguments,
+    FileState,
+)
 
 
 def inspect() -> FileState:
@@ -104,4 +109,24 @@ def open_project(arguments: FileOpenArguments) -> FileState:
     except Exception as exc:
         raise OperationError(
             "file_open_failed", str(exc), {"possible_partial_load": True}
+        ) from exc
+
+
+def new_project(arguments: FileNewArguments) -> FileState:
+    """Load an empty unsaved factory document, preserving user preferences."""
+    if bpy.context.mode != "OBJECT" or bpy.app.is_job_running("RENDER"):
+        raise OperationError("invalid_context", "New requires idle Object Mode")
+    try:
+        outcome = bpy.ops.wm.read_homefile(
+            use_empty=True, use_factory_startup=True, use_splash=False, load_ui=False
+        )
+        if "FINISHED" not in outcome:
+            raise RuntimeError("Native new project did not finish")
+        result = inspect()
+        if result.filepath or result.is_saved or result.project_id or bpy.data.objects:
+            raise RuntimeError("Native new project is not empty and unsaved")
+        return result
+    except Exception as exc:
+        raise OperationError(
+            "file_new_failed", str(exc), {"possible_partial_load": True}
         ) from exc

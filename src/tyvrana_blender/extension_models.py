@@ -25,6 +25,12 @@ class ExtensionReloadResult(Model):
 
 
 class ExtensionState(Model):
+    host_pid: int
+    background: bool
+    window_count: int
+    application_version: str
+    project_path: str | None
+    project_id: str | None
     build: str
     implementation_build: str | None
     generation: int

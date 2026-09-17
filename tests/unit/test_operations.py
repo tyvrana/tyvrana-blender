@@ -63,7 +63,12 @@ from tyvrana_blender.extension_models import (
     ExtensionReloadResult,
     ExtensionState,
 )
-from tyvrana_blender.file_models import FileOpenArguments, FileSaveArguments, FileState
+from tyvrana_blender.file_models import (
+    FileNewArguments,
+    FileOpenArguments,
+    FileSaveArguments,
+    FileState,
+)
 from tyvrana_blender.growth_models import (
     GrowthConfigureArguments,
     GrowthCreateArguments,
@@ -287,6 +292,12 @@ from tyvrana_blender.uv_models import (
     UVPackResult,
     UVSetActiveArguments,
     UVUnwrapArguments,
+)
+from tyvrana_blender.viewport_models import (
+    ViewportFrameArguments,
+    ViewportInspectArguments,
+    ViewportInspection,
+    ViewportState,
 )
 from tyvrana_blender.volume_models import (
     VolumeInspectArguments,
@@ -596,6 +607,12 @@ class Backend:
 
     def extension_inspect(self) -> ExtensionState:
         return ExtensionState(
+            host_pid=123,
+            background=False,
+            window_count=1,
+            application_version="5.2",
+            project_path=None,
+            project_id=None,
             build="a" * 64,
             implementation_build="a" * 64,
             generation=0,
@@ -648,6 +665,17 @@ class Backend:
             ],
             fingerprint_scope="Test identity only",
         )
+
+    def file_new(self, arguments: FileNewArguments) -> FileState:
+        return self.file_inspect()
+
+    def viewport_inspect(
+        self, arguments: ViewportInspectArguments
+    ) -> ViewportInspection:
+        return ViewportInspection(viewports=[])
+
+    def viewport_frame(self, arguments: ViewportFrameArguments) -> ViewportState:
+        raise NotImplementedError
 
     def file_open(self, arguments: FileOpenArguments) -> FileState:
         return self.file_inspect()

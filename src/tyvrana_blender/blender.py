@@ -1,6 +1,7 @@
 """The Blender API boundary. All entry points execute on the main thread."""
 
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any, cast
@@ -87,7 +88,12 @@ from .extension_models import (
     ExtensionReloadResult,
     ExtensionState,
 )
-from .file_models import FileOpenArguments, FileSaveArguments, FileState
+from .file_models import (
+    FileNewArguments,
+    FileOpenArguments,
+    FileSaveArguments,
+    FileState,
+)
 from .growth_models import (
     GrowthConfigureArguments,
     GrowthCreateArguments,
@@ -340,6 +346,12 @@ from .uv_models import (
     UVPackResult,
     UVSetActiveArguments,
     UVUnwrapArguments,
+)
+from .viewport_models import (
+    ViewportFrameArguments,
+    ViewportInspectArguments,
+    ViewportInspection,
+    ViewportState,
 )
 from .volume_models import (
     VolumeInspectArguments,
@@ -942,8 +954,19 @@ class BlenderBackend:
     def extension_inspect(self) -> ExtensionState:
         main_thread()
         from . import lifecycle
+        from .bindings import project_id
 
-        return ExtensionState.model_validate(lifecycle.inspect())
+        return ExtensionState.model_validate(
+            {
+                **lifecycle.inspect(),
+                "host_pid": os.getpid(),
+                "background": bool(bpy.app.background),
+                "window_count": len(bpy.context.window_manager.windows),
+                "application_version": str(bpy.app.version_string),
+                "project_path": str(bpy.data.filepath) or None,
+                "project_id": project_id(),
+            }
+        )
 
     def extension_reload(
         self, arguments: ExtensionReloadArguments, request_id: str
@@ -985,6 +1008,32 @@ class BlenderBackend:
         from . import files
 
         return files.save(arguments)
+
+    def viewport_inspect(
+        self, arguments: ViewportInspectArguments
+    ) -> ViewportInspection:
+        main_thread()
+        from . import viewport
+
+        return viewport.inspect(arguments)
+
+    def viewport_frame(self, arguments: ViewportFrameArguments) -> ViewportState:
+        main_thread()
+        from . import viewport
+
+        return viewport.frame(arguments)
+
+    def file_new(self, arguments: FileNewArguments) -> FileState:
+        global _opening_project
+        main_thread()
+        from . import files
+
+        _opening_project = True
+        try:
+            return files.new_project(arguments)
+        finally:
+            _opening_project = False
+            after_save()
 
     def file_open(self, arguments: FileOpenArguments) -> FileState:
         global _opening_project

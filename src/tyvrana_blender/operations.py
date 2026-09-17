@@ -67,6 +67,7 @@ from .extension_models import (
 )
 from .file_models import (
     FileInspectArguments,
+    FileNewArguments,
     FileOpenArguments,
     FileSaveArguments,
     FileState,
@@ -334,6 +335,12 @@ from .uv_models import (
     UVSetActiveArguments,
     UVUnwrapArguments,
 )
+from .viewport_models import (
+    ViewportFrameArguments,
+    ViewportInspectArguments,
+    ViewportInspection,
+    ViewportState,
+)
 from .volume_models import (
     VolumeInspectArguments,
     VolumeInspectResult,
@@ -573,6 +580,14 @@ class SceneBackend(Protocol):
     ) -> ExtensionReloadResult: ...
 
     def file_inspect(self) -> FileState: ...
+    def file_new(self, arguments: FileNewArguments) -> FileState: ...
+
+    def viewport_inspect(
+        self, arguments: ViewportInspectArguments
+    ) -> ViewportInspection: ...
+
+    def viewport_frame(self, arguments: ViewportFrameArguments) -> ViewportState: ...
+
     def file_open(self, arguments: FileOpenArguments) -> FileState: ...
     def project_bind(self, arguments: ProjectBindArguments) -> ProjectBindResult: ...
     def resource_inspect(
@@ -1958,8 +1973,10 @@ _DECLARATIONS = (
         ExtensionInspectArguments,
         ExtensionState,
         lambda b, a, q: b.extension_inspect(),
-        "Inspect extension build identity, connection, lifecycle state and "
-        "owned resource counts without reloading it.",
+        "Inspect adapter/build identity, host PID, background flag, window count, "
+        "application version, project path/UUID, connection and lifecycle counts. "
+        "Interactive means background=false with windows; it does not prove "
+        "physical monitor visibility. Read before selecting a real-work target.",
         effect="read_only",
         execution="synchronous",
     ),
@@ -2016,6 +2033,44 @@ _DECLARATIONS = (
         "resources with duplicate custom IDs remain ambiguous.",
         effect="read_only",
         execution="synchronous",
+    ),
+    _operation(
+        "blender.file.new",
+        FileNewArguments,
+        FileState,
+        lambda b, a, q: b.file_new(a),
+        "Discard the current document and load an empty unsaved factory project. "
+        "Requires discard_current=true; preserves host process, preferences and "
+        "UI layout. Clears document data/path/identity, without saving. "
+        "Wait for registration to report null project_path/project_id afterward.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.viewport.inspect",
+        ViewportInspectArguments,
+        ViewportInspection,
+        lambda b, a, q: b.viewport_inspect(a),
+        "Inspect up to32 interactive 3D viewports with session-local IDs, "
+        "scene/layer, selection (first64 plus count), active object and framing. "
+        "Background hosts return no viewports. IDs expire on UI/file changes; "
+        "rediscover after reload. Window presence does not prove monitor visibility.",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.viewport.frame",
+        ViewportFrameArguments,
+        ViewportState,
+        lambda b, a, q: b.viewport_frame(a),
+        "Select 1..64 named objects (first active) and frame them in the explicit "
+        "interactive viewport for a visible checkpoint. Requires Object Mode, "
+        "visible/selectable objects in that view layer, non-camera/non-quad view. "
+        "Does not unhide objects, change geometry, or raise an OS window. Selection "
+        "is shared by views of the same layer; returns resulting framing/state.",
+        effect="mutating",
+        execution="synchronous",
+        requires_interactive=True,
     ),
     _operation(
         "blender.file.open",

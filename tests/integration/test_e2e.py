@@ -164,7 +164,8 @@ async def discover(client: Client, *, empty: bool = False) -> DiscoveredAdapter 
         "application": "blender",
         "wait_seconds": 0 if empty else 12,
     }
-    async with asyncio.timeout(15):
+    # Large catalogs need more than 15s through an idle native UI timer/pipe.
+    async with asyncio.timeout(45):
         while True:
             response = await client.call_tool("tyvrana_list_adapters", query)
             assert not response.is_error
@@ -204,7 +205,9 @@ async def catalog_names(client: Client, adapter_id: str, prefix: str = "") -> se
         offset = result["next_offset"]
 
 
-async def wait_for_project(client: Client, adapter_id: str, filepath: str) -> None:
+async def wait_for_project(
+    client: Client, adapter_id: str, filepath: str | None
+) -> None:
     query: dict[str, JsonValue] = {"adapter_id": adapter_id}
     async with asyncio.timeout(15):
         while True:

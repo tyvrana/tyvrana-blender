@@ -285,6 +285,9 @@ Names are advertised in sorted order:
 | `blender.image.create_generated` | Width/height; optional name, generation and color settings | Created image summary |
 | `blender.image.create_from_artifact` | Attached artifact ID; optional name, color space and alpha mode | Packed image summary |
 | `blender.file.inspect` | No arguments | Native filepath, saved/dirty flags and disk state |
+| `blender.file.new` | Required `discard_current: true` | Empty unsaved factory document; same host and UI layout |
+| `blender.viewport.inspect` | Optional session-local `viewport_id` | Interactive 3D view, selection and framing state |
+| `blender.viewport.frame` | Explicit `viewport_id`; 1..64 `object_names`, first active | Select and frame a meaningful checkpoint in the intended view |
 | `blender.file.open` | Absolute `.blend` filepath; required `discard_current: true`; optional `load_ui` | Replace current project while retaining MCP response and registration |
 | `blender.file.save` | Optional absolute `.blend` filepath; explicit overwrite permission | Save the current project and update registration metadata |
 | `blender.image.configure` | Name; optional color space and alpha mode | Updated image summary |
@@ -2721,7 +2724,34 @@ A professional sequence is: inspect → add/remove local density → redirect fl
 verify. Generic dissolve, arbitrary ngon filling, screen-space sliding, automatic
 pole creation and automatic density-transition generation are deliberately absent.
 
+## Interactive identity and checkpoints
+
+`blender.extension.inspect` reports `adapter_id`, `host_pid`, `background`,
+`window_count`, `application_version`, `project_path` and `project_id` alongside
+build/connection state. Select the intended host explicitly. An interactive host
+has `background == false` and a positive window count; neither signal proves a
+window is unobscured or physically visible on a monitor. Background hosts may
+still contain window data. Core routes each call only to its requested adapter.
+A reload changes adapter identity but preserves the host PID and project.
+
+Discover a 3D view with `blender.viewport.inspect`, then pass its `viewport_id`
+and relevant `object_names` to `blender.viewport.frame`. IDs are session-local
+and must be rediscovered after file/UI changes. The operation selects those objects,
+makes the first active, frames their native bounds and returns the resulting view.
+It requires Object Mode and visible, selectable objects in that window's view layer;
+camera and quad views are rejected. It does not unhide resources or raise an OS
+window. Selection is shared by views using that layer. Inspection returns at most
+32 views and the first 64 selected names with a total count. These are editor-state
+checks, not physical desktop-visibility certification.
+
 ## Project persistence
+
+`blender.file.new` requires `discard_current: true` and discards the current
+document, including unsaved changes, for an empty unsaved factory project. It
+clears the filepath and document UUID, preserves the host, user preferences and UI
+layout, and does not delete existing saved files. Wait for registration to report
+null `project_path` and `project_id`. Like file open, native failure may leave a
+partial load (`file_new_failed`); inspect before proceeding. This is not undoable.
 
 `blender.file.inspect` takes no arguments and reports `filepath`, `is_saved`,
 `is_dirty`, `exists`, and `byte_size`. The dirty flag is Blender's native signal;

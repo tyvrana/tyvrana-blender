@@ -6,6 +6,7 @@ from tyvrana_protocol import OperationRequest, OperationSuccess
 
 from tyvrana_blender.file_models import (
     FileInspectArguments,
+    FileNewArguments,
     FileOpenArguments,
     FileSaveArguments,
 )
@@ -48,6 +49,7 @@ def test_file_inspection_has_no_arguments() -> None:
     ("name", "arguments"),
     [
         ("inspect", {}),
+        ("new", {"discard_current": True}),
         ("open", {"filepath": "/project/model.blend", "discard_current": True}),
         ("save", {}),
         ("save", {"overwrite": True}),
@@ -92,3 +94,18 @@ def test_file_dispatch(name: str, arguments: dict[str, str | bool]) -> None:
 def test_open_requires_explicit_typed_project_replacement(arguments: object) -> None:
     with pytest.raises(ValidationError):
         FileOpenArguments.model_validate(arguments)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"discard_current": False},
+        {"discard_current": 1},
+        {"discard_current": "true"},
+        {"discard_current": True, "filepath": "/tmp/model.blend"},
+    ],
+)
+def test_new_requires_explicit_discard(arguments: object) -> None:
+    with pytest.raises(ValidationError):
+        FileNewArguments.model_validate(arguments)

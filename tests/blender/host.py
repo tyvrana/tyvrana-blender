@@ -73,6 +73,16 @@ if "TYVRANA_TEST_FINISH" in os.environ:
     importlib.import_module("tests.blender.retopo_finish_scene").prepare_scene(
         os.environ["TYVRANA_TEST_FINISH"]
     )
+if os.environ.get("TYVRANA_TEST_NEW") == "1":
+    bpy.context.preferences.edit.undo_steps = 41
+    for group in (
+        bpy.data.materials,
+        bpy.data.meshes,
+        bpy.data.armatures,
+        bpy.data.collections,
+        bpy.data.texts,
+    ):
+        group.new("Discarded fixture")
 if os.environ.get("TYVRANA_TEST_FILE_OPEN") == "1":
     probe = bpy.data.texts.new("AutoRunProbe.py")
     probe.write("import bpy\nbpy.context.scene['file_script_executed'] = True\n")
@@ -93,6 +103,9 @@ def check() -> float | None:
                 json.dumps(
                     {
                         "instance_id": adapter.INSTANCE_ID,
+                        "host_pid": os.getpid(),
+                        "background": bool(bpy.app.background),
+                        "window_count": len(bpy.context.window_manager.windows),
                         "status": runtime.status,
                         "worker_pid": runtime.worker.process.pid,
                         "spooled_artifacts": len(
@@ -116,6 +129,18 @@ def check() -> float | None:
             if os.environ.get("TYVRANA_TEST_CYCLES_OVERRIDE") == "1":
                 assert bpy.context.scene.render.engine == "BLENDER_EEVEE"
                 assert bpy.context.scene.cycles.samples == 73
+            if os.environ.get("TYVRANA_TEST_NEW") == "1":
+                assert not bpy.data.filepath and not bpy.data.objects
+                for group in (
+                    bpy.data.materials,
+                    bpy.data.meshes,
+                    bpy.data.armatures,
+                    bpy.data.collections,
+                    bpy.data.texts,
+                ):
+                    assert group.get("Discarded fixture") is None
+                assert bpy.context.preferences.edit.undo_steps == 41
+                assert preferences.port == int(os.environ["TYVRANA_TEST_PORT"])
             worker = runtime.worker if runtime is not None else None
             if (
                 "TYVRANA_TEST_RETOPO" in os.environ

@@ -30,6 +30,17 @@ class FileSaveArguments(Arguments):
         return value
 
 
+class FileNewArguments(Arguments):
+    discard_current: Literal[True]
+
+    @field_validator("discard_current", mode="before")
+    @classmethod
+    def explicit_replacement(cls, value: object) -> object:
+        if value is not True:
+            raise ValueError("A new project requires discard_current: true")
+        return value
+
+
 class FileOpenArguments(Arguments):
     filepath: Annotated[str, Field(min_length=1, max_length=4096)]
     discard_current: Literal[True]
