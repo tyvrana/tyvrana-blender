@@ -209,6 +209,7 @@ async def test_large_catalog_crosses_parent_worker_and_socket_boundaries() -> No
     template = message.operations[0]
     message = message.model_copy(
         update={
+            "resource_inspection": None,
             "operations": tuple(
                 template.model_copy(
                     update={
@@ -220,7 +221,7 @@ async def test_large_catalog_crosses_parent_worker_and_socket_boundaries() -> No
                     }
                 )
                 for i in range(20)
-            )
+            ),
         }
     )
     assert 1024 * 1024 < len(encode_message(message)) < MAX_FRAME
@@ -255,6 +256,7 @@ def test_oversized_catalog_is_rejected_before_spawning(
     template = message.operations[0]
     message = message.model_copy(
         update={
+            "resource_inspection": None,
             "operations": tuple(
                 template.model_copy(
                     update={
@@ -266,7 +268,7 @@ def test_oversized_catalog_is_rejected_before_spawning(
                     }
                 )
                 for i in range(43)
-            )
+            ),
         }
     )
 

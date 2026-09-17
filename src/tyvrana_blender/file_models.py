@@ -50,6 +50,7 @@ class FileOpenArguments(Arguments):
 
 
 class FileState(Model):
+    project_id: str | None = None
     filepath: str | None
     is_saved: bool
     is_dirty: bool

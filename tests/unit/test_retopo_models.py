@@ -82,7 +82,7 @@ def test_canonical_dispatch(name: str, model: Any, arguments: dict[str, Any]) ->
         else model.__name__
     )
     assert backend.calls[0] == expected
-    assert len(OPERATIONS) == 170 and tuple(sorted(OPERATIONS)) == OPERATIONS
+    assert len(OPERATIONS) == 172 and tuple(sorted(OPERATIONS)) == OPERATIONS
     if name == "inspect":
         assert "spatial QA" in str(response.result)
         assert "separate authored low-poly target" in str(response.result)

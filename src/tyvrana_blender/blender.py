@@ -15,6 +15,8 @@ from tyvrana_protocol import (
     CancelRequest,
     JsonValue,
     OperationRequest,
+    ResourceInspectionRequest,
+    ResourceInspectionResult,
 )
 
 from . import (
@@ -43,6 +45,7 @@ from .bake_models import (
     ImageSaveArguments,
     ImageSaveResult,
 )
+from .binding_models import ProjectBindArguments, ProjectBindResult
 from .camera_models import (
     CameraConfigureArguments,
     CameraCreateArguments,
@@ -955,6 +958,22 @@ class BlenderBackend:
         from . import files
 
         return files.inspect()
+
+    def project_bind(self, arguments: ProjectBindArguments) -> ProjectBindResult:
+        main_thread()
+        from . import bindings
+
+        result = bindings.bind(arguments)
+        after_save()
+        return result
+
+    def resource_inspect(
+        self, arguments: ResourceInspectionRequest
+    ) -> ResourceInspectionResult:
+        main_thread()
+        from . import bindings
+
+        return bindings.inspect(arguments)
 
     def file_save(self, arguments: FileSaveArguments) -> FileState:
         main_thread()
@@ -2419,9 +2438,14 @@ class Runtime:
         main_thread()
         self.config = config
         self.filepath = str(bpy.data.filepath)
+        from .bindings import project_id
+
+        self.project_id = project_id()
         self.worker = WorkerProcess(
             config,
-            registration(INSTANCE_ID, str(bpy.app.version_string), self.filepath),
+            registration(
+                INSTANCE_ID, str(bpy.app.version_string), self.filepath, self.project_id
+            ),
         )
         self.queue = CommandQueue(
             lambda request: execute(BlenderBackend(self.worker.spool), request),
@@ -2547,10 +2571,18 @@ def after_load(*args: object) -> None:
 
 
 def after_save(*args: object) -> None:
-    if _runtime is not None and _runtime.filepath != str(bpy.data.filepath):
+    from .bindings import project_id
+
+    identity = project_id()
+    if _runtime is not None and (
+        _runtime.filepath != str(bpy.data.filepath) or _runtime.project_id != identity
+    ):
         _runtime.filepath = str(bpy.data.filepath)
+        _runtime.project_id = identity
         _runtime.worker.send(
-            registration(INSTANCE_ID, str(bpy.app.version_string), _runtime.filepath)
+            registration(
+                INSTANCE_ID, str(bpy.app.version_string), _runtime.filepath, identity
+            )
         )
 
 

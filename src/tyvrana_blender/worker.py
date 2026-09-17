@@ -587,7 +587,10 @@ class NetworkClient:
             if isinstance(message, AdapterRegistration):
                 if (
                     message.model_copy(
-                        update={"project_path": self.registration.project_path}
+                        update={
+                            "project_path": self.registration.project_path,
+                            "project_id": self.registration.project_id,
+                        }
                     )
                     != self.registration
                 ):

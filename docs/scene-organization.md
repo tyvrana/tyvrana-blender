@@ -119,7 +119,9 @@ Generic authored transforms continue through `blender.object.set_transform`.
 Blender stores parenting and membership as native references. They survive
 renaming and save/reopen; callers use the returned current names for later calls.
 A deleted/replaced object has no continuity guarantee. Collections plus filtered
-roles/tags provide scoped rediscovery. There is no UUID service or project database.
+roles/tags provide scoped rediscovery. `blender.project.bind` establishes saved
+resource IDs when durable core semantic bindings are needed; native organization
+operations continue to accept current names. Core owns the semantic project store.
 
 Only fixed `role` and `tags` metadata are exposed. Roles/tags are at most 48 ASCII
 letters, digits, `_`, `.`, `:`, or `-`, start with a letter/digit, and tags are a

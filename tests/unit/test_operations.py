@@ -7,6 +7,9 @@ from tyvrana_protocol import (
     OperationFailure,
     OperationRequest,
     OperationSuccess,
+    ResourceInspectionRequest,
+    ResourceInspectionResult,
+    ResourceObservation,
 )
 
 from tyvrana_blender import remesh_models as voxel
@@ -21,6 +24,7 @@ from tyvrana_blender.bake_models import (
     ImageSaveArguments,
     ImageSaveResult,
 )
+from tyvrana_blender.binding_models import ProjectBindArguments, ProjectBindResult
 from tyvrana_blender.camera_models import (
     CameraConfigureArguments,
     CameraCreateArguments,
@@ -623,6 +627,25 @@ class Backend:
     def file_inspect(self) -> FileState:
         return FileState(
             filepath=None, is_saved=False, is_dirty=False, exists=False, byte_size=None
+        )
+
+    def project_bind(self, arguments: ProjectBindArguments) -> ProjectBindResult:
+        self.calls.append("project_bind")
+        return ProjectBindResult(
+            project_id="a" * 32, filepath=None, resources=[], save_required=True
+        )
+
+    def resource_inspect(
+        self, arguments: ResourceInspectionRequest
+    ) -> ResourceInspectionResult:
+        self.calls.append("resource_inspect")
+        return ResourceInspectionResult(
+            project_id=arguments.project_id,
+            resources=[
+                ResourceObservation(**r.model_dump(), state="missing")
+                for r in arguments.resources
+            ],
+            fingerprint_scope="Test identity only",
         )
 
     def file_open(self, arguments: FileOpenArguments) -> FileState:
@@ -1611,6 +1634,15 @@ def camera_summary(name: str) -> CameraSummary:
             "camera_configure",
         ),
         ("blender.camera.set_active", {"name": "Camera"}, "camera_set_active"),
+        ("blender.project.bind", {}, "project_bind"),
+        (
+            "blender.resource.inspect",
+            {
+                "project_id": "p",
+                "resources": [{"resource_kind": "object", "resource_id": "r"}],
+            },
+            "resource_inspect",
+        ),
         ("blender.scene.inspect", {}, "inspect"),
         ("blender.render.image", {}, "render"),
         (

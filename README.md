@@ -3697,3 +3697,23 @@ control and compact restored frame QA support coordinated motion. Generated nati
 drivers accept bounded mappings, never arbitrary expressions. See
 [Motion authoring and QA](docs/motion.md) for ownership, units, interpolation,
 conflicts, persistence, limits and examples.
+
+### Persistent semantic bindings
+
+`blender.project.bind` explicitly establishes a saved document UUID and stable IDs
+for selected local objects, materials and collections. Save the native file after
+establishing identities. Registration reports `project_id` and advertises portable
+`blender.resource.inspect`; core can verify saved resource bindings without owning
+Blender's native data model. Resource renames and file reopening preserve IDs.
+
+Save-as keeps document lineage. `fork_project` deliberately creates a new document
+identity for an independent copy. Native copies may duplicate custom resource IDs;
+inspection reports ambiguity. `renew_resource_ids` explicitly gives selected copies
+new IDs, after which old semantic bindings require reconciliation. No identity is
+silently selected by name. The identity marker is a small persistent Text datablock,
+not a conversation or semantic project database.
+
+Resource inspection checks existence and a scoped structural fingerprint. It does
+not validate full geometry, shader values, rigs, animation, behavior or appearance.
+Core owns durable project meaning, checkpoints, freshness and continuation; the
+adapter owns only native identity establishment and inspection.

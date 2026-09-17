@@ -9,6 +9,8 @@ from .file_models import FileOpenArguments, FileSaveArguments, FileState
 
 
 def inspect() -> FileState:
+    from .bindings import project_id
+
     filepath = str(bpy.data.filepath) or None
     size = None
     if filepath:
@@ -19,6 +21,7 @@ def inspect() -> FileState:
         except OSError as exc:
             raise OperationError("file_access_failed", str(exc)) from exc
     return FileState(
+        project_id=project_id(),
         filepath=filepath,
         is_saved=bool(bpy.data.is_saved),
         is_dirty=bool(bpy.data.is_dirty),

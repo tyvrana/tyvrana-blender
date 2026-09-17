@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol, cast
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from tyvrana_protocol import (
     AdapterRegistration,
     ArtifactDescriptor,
@@ -15,6 +15,8 @@ from tyvrana_protocol import (
     OperationRequest,
     OperationSuccess,
     ProtocolError,
+    ResourceInspectionRequest,
+    ResourceInspectionResult,
 )
 
 from .bake_models import (
@@ -26,6 +28,7 @@ from .bake_models import (
     ImageSaveArguments,
     ImageSaveResult,
 )
+from .binding_models import ProjectBindArguments, ProjectBindResult
 from .camera_models import (
     CameraConfigureArguments,
     CameraCreateArguments,
@@ -151,7 +154,6 @@ from .models import (
     DeleteArguments,
     DeleteResult,
     InspectArguments,
-    Model,
     ObjectSummary,
     RenderArguments,
     SceneInspectArguments,
@@ -566,6 +568,10 @@ class SceneBackend(Protocol):
 
     def file_inspect(self) -> FileState: ...
     def file_open(self, arguments: FileOpenArguments) -> FileState: ...
+    def project_bind(self, arguments: ProjectBindArguments) -> ProjectBindResult: ...
+    def resource_inspect(
+        self, arguments: ResourceInspectionRequest
+    ) -> ResourceInspectionResult: ...
     def file_save(self, arguments: FileSaveArguments) -> FileState: ...
 
     def scene_raycast(self, arguments: RaycastArguments) -> RaycastResult: ...
@@ -736,14 +742,14 @@ def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure
 @dataclass(frozen=True, slots=True)
 class OperationSpec:
     contract: OperationContract
-    parse: Callable[[JsonValue], Model]
+    parse: Callable[[JsonValue], BaseModel]
     invoke: Callable[
-        [SceneBackend, Model, OperationRequest],
-        tuple[Model, tuple[ArtifactDescriptor, ...]],
+        [SceneBackend, BaseModel, OperationRequest],
+        tuple[BaseModel, tuple[ArtifactDescriptor, ...]],
     ]
 
 
-def _operation[A: Model, R: Model](
+def _operation[A: BaseModel, R: BaseModel](
     name: str,
     arguments: type[A] | TypeAdapter[A],
     result_model: type[R] | TypeAdapter[R],
@@ -775,8 +781,8 @@ def _operation[A: Model, R: Model](
     )
 
     def invoke(
-        backend: SceneBackend, parsed: Model, request: OperationRequest
-    ) -> tuple[Model, tuple[ArtifactDescriptor, ...]]:
+        backend: SceneBackend, parsed: BaseModel, request: OperationRequest
+    ) -> tuple[BaseModel, tuple[ArtifactDescriptor, ...]]:
         value = handler(backend, cast(A, parsed), request)
         if isinstance(value, tuple):
             result, artifact = value
@@ -1598,8 +1604,9 @@ _DECLARATIONS = (
         "unrepresentable parenting (animation/constraints/bone "
         "parents/nonidentity deltas/shear on clear). Native "
         "relationships persist through "
-        "rename/save/reopen; returned names are canonical, no stable "
-        "UUID. Generic transforms remain object.set_transform.",
+        "rename/save/reopen; returned names are canonical. Use "
+        "project.bind for saved resource IDs. Generic transforms remain "
+        "object.set_transform.",
         effect="mutating",
         execution="synchronous",
     ),
@@ -1960,6 +1967,38 @@ _DECLARATIONS = (
         "Inspect native project path, saved/dirty flags and file size. Native"
         " dirty state is not a complete audit of every external/scripted "
         "edit.",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.project.bind",
+        ProjectBindArguments,
+        ProjectBindResult,
+        lambda b, a, q: b.project_bind(a),
+        "Establish saved document UUID and stable IDs for up to64 named local "
+        "objects/materials/collections. Explicit identity metadata mutation; "
+        "save the file to persist. Names are used only for initial selection. "
+        "Existing identities are reused; duplicate IDs fail instead of silently "
+        "rebinding. renew_resource_ids explicitly renews selected IDs to repair "
+        "duplicates; prior bindings need reconciliation. fork_project=true "
+        "assigns a new document UUID for a deliberate "
+        "independent copy; ordinary save-as preserves lineage. Wait for adapter "
+        "registration to report project_id before semantic attachment. Core owns "
+        "project meaning. No geometry changes.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.resource.inspect",
+        ResourceInspectionRequest,
+        ResourceInspectionResult,
+        lambda b, a, q: b.resource_inspect(a),
+        "Resolve up to64 saved resource IDs in the expected document UUID. "
+        "Reports present/missing/ambiguous/unsupported and current names, without "
+        "assigning IDs or changing Blender. A different file identity is rejected. "
+        "Structural fingerprints have an explicit bounded scope, not complete "
+        "geometry/material/animation validation. Reopening preserves IDs; copied "
+        "resources with duplicate custom IDs remain ambiguous.",
         effect="read_only",
         execution="synchronous",
     ),
@@ -3033,13 +3072,17 @@ if len(REGISTRY) != len(_DECLARATIONS):
 OPERATIONS = tuple(sorted(REGISTRY))
 
 
-def registration(instance_id: str, version: str, filepath: str) -> AdapterRegistration:
+def registration(
+    instance_id: str, version: str, filepath: str, project_id: str | None = None
+) -> AdapterRegistration:
     return AdapterRegistration(
         type="adapter.register",
         instance_id=instance_id,
         application="blender",
         application_version=version,
         project_path=filepath or None,
+        project_id=project_id,
+        resource_inspection="blender.resource.inspect",
         operations=tuple(REGISTRY[name].contract for name in OPERATIONS),
     )
 
