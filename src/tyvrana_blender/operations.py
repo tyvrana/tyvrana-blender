@@ -235,7 +235,13 @@ from .remesh_models import (
     VoxelRemeshResult,
     VoxelRemeshSummary,
 )
-from .render_models import RenderJobArguments, RenderJobStatus, RenderStatusArguments
+from .render_models import (
+    RenderDevicesArguments,
+    RenderDevicesResult,
+    RenderJobArguments,
+    RenderJobStatus,
+    RenderStatusArguments,
+)
 from .retopo_models import (
     RetopoBridgeArguments,
     RetopoCollapseArguments,
@@ -726,6 +732,7 @@ class SceneBackend(Protocol):
     def transform(self, arguments: TransformArguments) -> ObjectSummary: ...
     def delete(self, arguments: DeleteArguments) -> DeleteResult: ...
     def render(self, arguments: RenderArguments, job_id: str) -> RenderJobStatus: ...
+    def render_devices(self) -> RenderDevicesResult: ...
     def render_status(self, arguments: RenderStatusArguments) -> RenderJobStatus: ...
     def render_cancel(self, arguments: RenderJobArguments) -> RenderJobStatus: ...
     def render_result(
@@ -2526,6 +2533,19 @@ _DECLARATIONS = (
         "Patch object-local location/rotation/scale; omitted channels stay "
         "unchanged. This does not edit authored mesh coordinates.",
         effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.render.devices",
+        RenderDevicesArguments,
+        RenderDevicesResult,
+        lambda b, a, q: b.render_devices(),
+        "Inspect Cycles' selected compute backend, its available devices and "
+        "saved enable flags, supported backend kinds and current scene device. "
+        "Does not refresh/change preferences or render. Unknown enable flags "
+        "are null; scene_uses_gpu also requires Cycles and scene GPU selection. "
+        "Device page caps at 128 with full count. Availability is not a render test.",
+        effect="read_only",
         execution="synchronous",
     ),
     _operation(

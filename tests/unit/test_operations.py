@@ -223,6 +223,7 @@ from tyvrana_blender.reference_models import (
     UnitsSummary,
 )
 from tyvrana_blender.render_models import (
+    RenderDevicesResult,
     RenderJobArguments,
     RenderJobStatus,
     RenderStatusArguments,
@@ -1400,6 +1401,20 @@ class Backend:
     def camera_set_active(self, arguments: CameraSetActiveArguments) -> CameraSummary:
         self.calls.append("camera_set_active")
         return camera_summary(arguments.name)
+
+    def render_devices(self) -> RenderDevicesResult:
+        self.calls.append("render_devices")
+        return RenderDevicesResult(
+            scene_engine="BLENDER_EEVEE_NEXT",
+            scene_device=None,
+            cycles_available=False,
+            compute_backend=None,
+            supported_backends=[],
+            devices=[],
+            device_count=0,
+            configured_gpu_available=False,
+            scene_uses_gpu=False,
+        )
 
     def render(self, arguments: RenderArguments, job_id: str) -> RenderJobStatus:
         self.calls.append("render")

@@ -235,6 +235,7 @@ Names are advertised in sorted order:
 | Operation | Arguments | Result |
 | --- | --- | --- |
 | `blender.extension.inspect` | `{}` | Active/staged build, transition state and owned resources |
+| `blender.render.devices` | `{}` | Selected Cycles backend, available devices, saved enable flags and scene device |
 | `blender.extension.reload` | Required staged `expected_build` SHA-256 | Scheduled reload acknowledgement; verify completion after rediscovery |
 | `blender.scene.inspect` | Optional names/prefix/types/offset/limit | Bounded scene summary |
 | `blender.scene.raycast` | World origin/direction or normalized camera image coordinates | Evaluated surface hit or miss |

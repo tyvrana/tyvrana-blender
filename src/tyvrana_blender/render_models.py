@@ -12,6 +12,29 @@ JobState = Literal[
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 
 
+class RenderDevicesArguments(Model):
+    pass
+
+
+class RenderDevice(Model):
+    name: str
+    backend: str
+    device_id: str
+    enabled: bool | None
+
+
+class RenderDevicesResult(Model):
+    scene_engine: str
+    scene_device: str | None
+    cycles_available: bool
+    compute_backend: str | None
+    supported_backends: list[str]
+    devices: list[RenderDevice] = Field(max_length=128)
+    device_count: int
+    configured_gpu_available: bool
+    scene_uses_gpu: bool
+
+
 class RenderJobArguments(Model):
     job_id: str = Field(min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")
 

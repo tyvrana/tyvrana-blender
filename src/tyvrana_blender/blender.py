@@ -255,7 +255,12 @@ from .remesh_models import (
     VoxelRemeshResult,
     VoxelRemeshSummary,
 )
-from .render_models import RenderJobArguments, RenderJobStatus, RenderStatusArguments
+from .render_models import (
+    RenderDevicesResult,
+    RenderJobArguments,
+    RenderJobStatus,
+    RenderStatusArguments,
+)
 from .retopo_models import (
     RetopoCreateArguments,
     RetopoCreateResult,
@@ -2327,6 +2332,14 @@ class BlenderBackend:
         if self.spool is None:
             raise OperationError("invalid_context", "Render storage is unavailable")
         return prepare(arguments, self.spool, job_id)
+
+    def render_devices(self) -> RenderDevicesResult:
+        main_thread()
+        import _cycles  # type: ignore[import-not-found]
+
+        from .render_devices import inspect_devices
+
+        return inspect_devices(bpy.context, _cycles.available_devices)
 
     def render_status(self, arguments: RenderStatusArguments) -> RenderJobStatus:
         raise OperationError(

@@ -142,7 +142,7 @@ def test_sweep_key_channels_are_unique_and_explicit() -> None:
 
 
 def test_new_contracts_are_current_and_self_contained() -> None:
-    assert len(OPERATIONS) == 172
+    assert len(OPERATIONS) == 173
     names = [
         "shape_keys.edit",
         "shape_keys.inspect",
