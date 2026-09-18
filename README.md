@@ -234,6 +234,23 @@ Names are advertised in sorted order:
 
 | Operation | Arguments | Result |
 | --- | --- | --- |
+| `blender.loft.create` | Batched component sections, radii, twist and sampling | Created native meshes and identity |
+| `blender.loft.configure` | Same-topology section revisions | Preserved identity/data and updated geometry |
+| `blender.loft.inspect` | Selected components; optional definitions | Integrity, bounds and counts |
+| `blender.constraint.configure` | Typed ordered constraint batch; explicit replace | Owned native relationships and evaluated state |
+| `blender.constraint.inspect` | Selected object/bone owners | Bounded validity and optional definitions |
+| `blender.constraint.remove` | Owned constraint references | Atomic removal |
+| `blender.constraint.switch_space` | Owned child-of and new target | Verified maintained world transform |
+| `blender.armature.match` | World source/target pairs and tolerance | Verified matrix matching |
+| `blender.control_rig.configure` | Explicit FK/IK/deform chains and controls | Owned two-segment network |
+| `blender.control_rig.inspect` | Armature and network name | Integrity and evaluated output error |
+| `blender.control_rig.switch` | Network, mode and matching tolerance | Verified FK/IK matching |
+| `blender.control_rig.remove` | Owned network | Remove relationships while preserving bones |
+| `blender.growth.dynamics.bake` | Typed rod settings, frame range and budgets | Observable job; atomic durable cache |
+| `blender.growth.dynamics.status` | Job ID | Progress, result or error |
+| `blender.growth.dynamics.cancel` | Job ID | Cooperative cancellation and cleanup |
+| `blender.growth.dynamics.inspect` | Growth object | Cache hash/settings, range and stale state |
+| `blender.growth.dynamics.clear` | Growth object | Remove owned cache and restore authored path |
 | `blender.extension.inspect` | `{}` | Active/staged build, transition state and owned resources |
 | `blender.render.devices` | `{}` | Selected Cycles backend, available devices, saved enable flags and scene device |
 | `blender.extension.reload` | Required staged `expected_build` SHA-256 | Scheduled reload acknowledgement; verify completion after rediscovery |

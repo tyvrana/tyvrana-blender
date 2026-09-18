@@ -107,7 +107,10 @@ must be at most `pi - 0.0001`, and absolute Y at most `pi/2 - 0.0001` radians,
 for both constrained requests and enabled limits. It excludes multi-turn motion,
 gimbal singularities, swing/twist cones and anatomical joint solvers. Independent
 Euler intervals are not coupled motion. Driver relationships, mechanical linkage
-closure, IK/FK controls and timed animation require separate capabilities.
+closure, IK/FK controls and timed animation use the [motion](motion.md) and
+[production control](production_rigging.md) families. Optional `ik` settings in
+`configure_joints` replace native per-axis IK locks/limits/stiffness and stretch;
+`inspect_structure` reports them with the `limits` fields.
 
 For mirrored structures, supply mirrored endpoints and a deliberate reference
 axis for each side. Frames remain right-handed. Do not infer rotation signs from
@@ -125,14 +128,18 @@ The operation validates the complete resolved hierarchy, stages a copied armatur
 then publishes it. Failures restore original data and owned constraints, remove
 staging resources, and preserve active object, selection and Object Mode.
 
-Rest edits require neutral requested channels and exclusively owned local data.
-Reset with `armature.pose(reset=true)` before editing. Bound modifiers, external
-references, child objects, animation/drivers, library/override/shared data,
-external pose metadata/control shapes and unowned constraints are protected.
-Edit structure before binding, or use a separate structural armature. There is
-no automatic weight retargeting, dependency repair or deformation correction.
-Owned rotation limits may remain during rest editing; neutral input can still
-evaluate away from rest if the allowed interval excludes zero.
+The default dependency policy requires neutral requested channels and exclusive
+local data. Reset with `armature.pose(reset=true)` before isolated editing.
+`dependency_policy="preserve"` permits verified owned bindings, actions and
+constraints while retaining names, hierarchy, connectivity, weights and deform
+flags. Preview the affected dependencies, then supply `expected_rest_sha256` for
+commit. Captured targets become stale and corrective editing needs acknowledgement;
+revalidate motion. See [rest revision policies](production_rigging.md).
+
+External references/children, NLA, library/shared data and unverified dependencies
+remain protected. No automatic weight retargeting or deformation correction is
+performed. Owned rotation limits can remain during revision; neutral requested
+input can evaluate away from rest if the permitted interval excludes zero.
 
 Limit configuration may operate on a posed or bound armature because it leaves
 rest geometry unchanged. It can repair changed settings of an identifiable owned

@@ -130,13 +130,15 @@ unique list of at most 16 entries. They persist as adapter-owned
 and an empty tag list clear values; omitted patch fields remain unchanged.
 Copy declarations assign their own metadata rather than inheriting it implicitly.
 Arbitrary property keys/values are not accepted. Objects owned by another adapter
-domain permit role/tag-only patches here; other changes must use that domain's
-operations. This allows classifying existing bound geometry or controls without
-changing their owned data, bindings or transforms.
+domain permit collection membership, visibility and role/tag patches here.
+Owned names and parenting remain protected by that domain's operations. This
+allows organizing bound geometry and controls while preserving data and bindings.
 
 For compact verification, use `object_set.inspect` with a collection or names,
 optional prefix/role/all-tags filters and selected `fields`: `hierarchy`,
-`memberships`, `transforms`, `metadata`, `data`. Transform inspection includes the
+`memberships`, `transforms`, `metadata`, `data`, `visibility`. Visibility reports
+global viewport/render/select flags and current view-layer visibility. Transform
+inspection includes the
 world affine matrix and local channels. Data inspection includes datablock names,
 user counts and effective material slots. Compare these bounded snapshots in the
 client; there is no server history or delta store.
