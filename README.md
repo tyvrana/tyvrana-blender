@@ -3794,3 +3794,6 @@ adapter owns only native identity establishment and inspection.
 
 See [production rigging and rest revisions](docs/production_rigging.md) for typed
 control networks, constraint ownership, matching and bound rest revision policies.
+
+See [growth secondary motion](docs/growth_dynamics.md) for bounded native dynamics,
+collision inputs, durable playback and cancellation.

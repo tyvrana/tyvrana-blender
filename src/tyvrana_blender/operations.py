@@ -73,6 +73,13 @@ from .curve_models import (
     CurveResult,
 )
 from .deformation_sweep_models import DeformationSweepArguments, DeformationSweepResult
+from .dynamics_models import (
+    DynamicsBakeArguments,
+    DynamicsCache,
+    DynamicsJobArguments,
+    DynamicsJobStatus,
+    DynamicsObjectArguments,
+)
 from .errors import OperationError
 from .extension_models import (
     ExtensionInspectArguments,
@@ -390,6 +397,26 @@ type Response = OperationSuccess | OperationFailure
 
 
 class SceneBackend(Protocol):
+    def growth_dynamics_bake(
+        self, arguments: DynamicsBakeArguments
+    ) -> DynamicsJobStatus: ...
+
+    def growth_dynamics_inspect(
+        self, arguments: DynamicsObjectArguments
+    ) -> DynamicsCache: ...
+
+    def growth_dynamics_status(
+        self, arguments: DynamicsJobArguments
+    ) -> DynamicsJobStatus: ...
+
+    def growth_dynamics_cancel(
+        self, arguments: DynamicsJobArguments
+    ) -> DynamicsJobStatus: ...
+
+    def growth_dynamics_clear(
+        self, arguments: DynamicsObjectArguments
+    ) -> DynamicsCache: ...
+
     def growth_create(self, arguments: GrowthCreateArguments) -> GrowthDelta: ...
 
     def growth_configure(self, arguments: GrowthConfigureArguments) -> GrowthDelta: ...
@@ -1233,8 +1260,11 @@ _DECLARATIONS = (
             "inverse maps desired posed displacement, then verifies evaluated "
             "target tolerance at value1 before commit. No modifier "
             "application, posed-pose baking or automatic drivers; failure "
-            "restores original keys/data and pose."
+            "restores original keys/data and pose. After bound rest revision, "
+            "inspect and supply acknowledge_rest_sha256 before edits; recapture "
+            "stale targets and revalidate motion."
         ),
+        tags=("deformation", "corrective", "rest_revision"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -1251,8 +1281,10 @@ _DECLARATIONS = (
             "explicit key delta page max256, none by default. Stored values "
             "are original object-local deltas relative to each key reference, "
             "independent of current influence. Reject incompatible stored "
-            "topology; no coordinate dump."
+            "topology; no coordinate dump. Reports the rest revision signature "
+            "and whether corrective editing still requires acknowledgement."
         ),
+        tags=("deformation", "corrective", "inspection"),
         effect="read_only",
         execution="synchronous",
     ),
@@ -1289,6 +1321,7 @@ _DECLARATIONS = (
             "keys/modifiers. Edit through typed mesh operations; no automatic "
             "desired shape or arbitrary inversion."
         ),
+        tags=("deformation", "corrective", "capture"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -1406,6 +1439,72 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.growth.dynamics.bake",
+        DynamicsBakeArguments,
+        DynamicsJobStatus,
+        lambda b, a, q: b.growth_dynamics_bake(a),
+        "Start bounded native rod secondary dynamics on attached growth paths. "
+        "Native Hair Dynamics XPBD is experimental. Explicit 2..128 frames, "
+        "solver/point/time budgets; roots stay attached. Optional mesh/surface "
+        "collision. Publishes durable positions atomically; status reports "
+        "progress/result; cancel between native frame evaluations. Existing "
+        "growth templates follow the simulated path. No self-collision or "
+        "continuous-collision guarantee; inspect sampled growth/geometry QA. "
+        "replace=true replaces an owned cache. ",
+        tags=("dynamics", "collision", "cache", "secondary_motion"),
+        effect="mutating",
+        execution="job_start",
+    ),
+    _operation(
+        "blender.growth.dynamics.inspect",
+        DynamicsObjectArguments,
+        DynamicsCache,
+        lambda b, a, q: b.growth_dynamics_inspect(a),
+        "Inspect owned secondary cache identity, settings, frame range, hash, "
+        "root error, displacement and stale state. Native physics approximates "
+        "rods; broad sheets need a suitable separate deformation model. Outside "
+        "the frame range authored growth is used. ",
+        tags=("dynamics", "collision", "cache", "secondary_motion"),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.growth.dynamics.status",
+        DynamicsJobArguments,
+        DynamicsJobStatus,
+        lambda b, a, q: b.growth_dynamics_status(a),
+        "Inspect bounded secondary-motion job progress and terminal result/error. "
+        "Latest eight jobs persist until host/reload. Cancellation is cooperative "
+        "between bounded native frames. ",
+        tags=("dynamics", "collision", "cache", "secondary_motion"),
+        effect="read_only",
+        execution="job_status",
+    ),
+    _operation(
+        "blender.growth.dynamics.cancel",
+        DynamicsJobArguments,
+        DynamicsJobStatus,
+        lambda b, a, q: b.growth_dynamics_cancel(a),
+        "Cancel a secondary-motion job between native frame evaluations, discard "
+        "staging resources and restore the original frame. Retain the previous "
+        "cache on failure/cancellation. ",
+        tags=("dynamics", "collision", "cache", "secondary_motion"),
+        effect="transient",
+        execution="job_status",
+    ),
+    _operation(
+        "blender.growth.dynamics.clear",
+        DynamicsObjectArguments,
+        DynamicsCache,
+        lambda b, a, q: b.growth_dynamics_clear(a),
+        "Remove an owned secondary-motion cache and restore authored surface- "
+        "bound growth. Preserve shared or externally modified resources; inspect "
+        "first. ",
+        tags=("dynamics", "collision", "cache", "secondary_motion"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
         "blender.growth.create",
         GrowthCreateArguments,
         GrowthDelta,
@@ -1426,6 +1525,7 @@ _DECLARATIONS = (
             "nodes, 2000000 equivalent template vertices. No dynamics or arbitrary "
             "node/property escape hatch."
         ),
+        tags=("growth", "attachment", "templates"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -1445,6 +1545,7 @@ _DECLARATIONS = (
             "Same creation budgets apply. Returns compact counts/delta; no full "
             "geometry."
         ),
+        tags=("growth", "attachment", "templates"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -1465,6 +1566,7 @@ _DECLARATIONS = (
             "Tangent-flow compares configured rest flow in world space; frame normals "
             "come from actual native evaluation."
         ),
+        tags=("growth", "attachment", "qa"),
         effect="read_only",
         execution="synchronous",
     ),
@@ -1481,6 +1583,7 @@ _DECLARATIONS = (
             "and ambiguous ownership. Invalidated source geometry may still be "
             "cleaned up."
         ),
+        tags=("growth", "ownership"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -1498,6 +1601,7 @@ _DECLARATIONS = (
             "growth.inspect; optional template vertex sampling temporarily realizes "
             "bounded output. Does not simulate dynamics."
         ),
+        tags=("growth", "attachment", "qa", "sampled"),
         effect="transient",
         execution="synchronous",
     ),
@@ -1780,6 +1884,7 @@ _DECLARATIONS = (
         "retargeting. Shared data, NLA and unverified external dependencies "
         "are rejected. Endpoints use typed points in armature/world space; "
         "x_reference constructs local axes. sample_limit=0 omits bone rows.",
+        tags=("rigging", "rest_revision", "dependencies"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -1801,6 +1906,7 @@ _DECLARATIONS = (
         "Atomic rollback; exclusive local "
         "armature with no animation/unowned constraints. May configure "
         "already bound structures without changing rest data.",
+        tags=("rigging", "limits", "ik"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -1820,6 +1926,7 @@ _DECLARATIONS = (
         "scale. Whole-armature validity includes unsampled bones; errors "
         "are bounded per sampled bone. Use measurement.inspect bone "
         "points for lengths/reach/angles in the existing unit system.",
+        tags=("rigging", "structure", "limits"),
         effect="read_only",
         execution="synchronous",
     ),
@@ -1917,6 +2024,7 @@ _DECLARATIONS = (
         "rename/save/reopen; returned names are canonical. Use "
         "project.bind for saved resource IDs. Generic transforms remain "
         "object.set_transform.",
+        tags=("organization", "ownership", "visibility", "batched"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -1932,6 +2040,7 @@ _DECLARATIONS = (
         "counts/truncation. Native object names identify objects; keys "
         "from authoring are request-local. No mesh payload, history or "
         "arbitrary properties.",
+        tags=("organization", "ownership", "visibility"),
         effect="read_only",
         execution="synchronous",
     ),
@@ -2112,6 +2221,7 @@ _DECLARATIONS = (
         "Inspect filtered rest/posed bones and bounded mesh-binding "
         "summaries. Bone coordinates are world-space; pose channels remain "
         "local to the rest hierarchy.",
+        tags=("rigging", "bindings", "rest_revision"),
         effect="read_only",
         execution="synchronous",
     ),
@@ -2968,6 +3078,7 @@ _DECLARATIONS = (
         "separate. "
         "Unknown/evicted job: render_job_not_found; disconnected host has no "
         "queryable jobs. Cancelling this request only stops waiting.",
+        tags=("render", "job", "progress"),
         effect="read_only",
         execution="job_status",
     ),
@@ -2982,6 +3093,7 @@ _DECLARATIONS = (
         "Repeated or terminal cancel is idempotent and preserves terminal "
         "state. Completion already committed wins; otherwise cancellation "
         "discards output. Unknown job: render_job_not_found.",
+        tags=("render", "job", "cancellation"),
         effect="transient",
         execution="job_status",
     ),
@@ -2997,6 +3109,7 @@ _DECLARATIONS = (
         "or host/reload/file-open shutdown. Metadata retains success after eviction, "
         "with result_available=false. Unfinished/failed/cancelled/evicted "
         "output: render_result_unavailable. Explicit saved output persists.",
+        tags=("render", "artifact", "production"),
         effect="read_only",
         execution="job_status",
         output_artifacts="required",
@@ -3503,7 +3616,7 @@ def execute(backend: SceneBackend, request: OperationRequest) -> Response:
             ProtocolError(
                 code="adapter_busy",
                 message=(
-                    "A native bake owns temporary scene resources; "
+                    "A native bake/dynamics job owns temporary scene resources; "
                     "inspect its status first"
                 ),
             ),

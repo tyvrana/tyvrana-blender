@@ -16,6 +16,7 @@ from tyvrana_protocol import (
     CancelRequest,
     JsonValue,
     OperationRequest,
+    OperationSuccess,
     ResourceInspectionRequest,
     ResourceInspectionResult,
 )
@@ -97,6 +98,13 @@ from .curve_models import (
 )
 from .deformation_sweep_models import DeformationSweepArguments, DeformationSweepResult
 from .dispatch import CommandQueue
+from .dynamics_models import (
+    DynamicsBakeArguments,
+    DynamicsCache,
+    DynamicsJobArguments,
+    DynamicsJobStatus,
+    DynamicsObjectArguments,
+)
 from .errors import OperationError
 from .extension_models import (
     ExtensionReloadArguments,
@@ -240,7 +248,7 @@ from .motion_models import (
     TimelineInspectArguments,
     TimelineState,
 )
-from .operations import execute, registration
+from .operations import Response, execute, registration
 from .organization_models import (
     CollectionConfigureArguments,
     CollectionCreateArguments,
@@ -786,6 +794,41 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def growth_dynamics_bake(
+        self, arguments: DynamicsBakeArguments
+    ) -> DynamicsJobStatus:
+        from . import growth_dynamics
+
+        return growth_dynamics.start(arguments)
+
+    def growth_dynamics_inspect(
+        self, arguments: DynamicsObjectArguments
+    ) -> DynamicsCache:
+        from . import growth_dynamics
+
+        return growth_dynamics.inspect(arguments)
+
+    def growth_dynamics_status(
+        self, arguments: DynamicsJobArguments
+    ) -> DynamicsJobStatus:
+        from . import growth_dynamics
+
+        return growth_dynamics.status(arguments.job_id)
+
+    def growth_dynamics_cancel(
+        self, arguments: DynamicsJobArguments
+    ) -> DynamicsJobStatus:
+        from . import growth_dynamics
+
+        return growth_dynamics.cancel(arguments.job_id)
+
+    def growth_dynamics_clear(
+        self, arguments: DynamicsObjectArguments
+    ) -> DynamicsCache:
+        from . import growth_dynamics
+
+        return growth_dynamics.clear(arguments)
+
     def growth_create(self, arguments: GrowthCreateArguments) -> GrowthDelta:
         from . import growth
 
@@ -1599,8 +1642,14 @@ class BlenderBackend:
         return mesh.edit(uv.mesh_object(arguments.object_name), arguments)
 
     def operation_allowed(self, operation: str) -> bool:
-        from . import bake_jobs
+        from . import bake_jobs, growth_dynamics
 
+        if growth_dynamics.busy():
+            return operation in {
+                "blender.growth.dynamics.status",
+                "blender.growth.dynamics.cancel",
+                "blender.extension.inspect",
+            }
         return not bake_jobs.busy() or operation in {
             "blender.bake.status",
             "blender.extension.inspect",
@@ -2608,6 +2657,10 @@ class BlenderBackend:
                 "invalid_context", "Object deletion requires Object Mode"
             )
         obj = find_object(arguments.name)
+        if "_tyvrana_growth_dynamics_owner" in obj:
+            raise OperationError(
+                "growth_invalid", "Use growth.dynamics.clear for owned caches"
+            )
         if "tyvrana_growth" in obj:
             raise OperationError(
                 "growth_invalid", "Use growth.remove for owned systems/root carriers"
@@ -2637,10 +2690,25 @@ class Runtime:
             ),
         )
         self.queue = CommandQueue(
-            lambda request: execute(BlenderBackend(self.worker.spool), request),
+            self.execute_operation,
             discard=self.worker.discard,
         )
         self.status = "connecting"
+
+    def execute_operation(self, request: OperationRequest) -> Response:
+        from . import growth_dynamics
+        from .operations import REGISTRY
+
+        result = execute(BlenderBackend(self.worker.spool), request)
+        if (
+            isinstance(result, OperationSuccess)
+            and REGISTRY[request.operation].contract.effect == "mutating"
+        ):
+            growth_dynamics.invalidate(
+                request.operation,
+                request.arguments if isinstance(request.arguments, dict) else None,
+            )
+        return result
 
     def tick(self) -> None:
         main_thread()
@@ -2716,6 +2784,9 @@ def preferences_config() -> ConnectionConfig:
 def stop() -> None:
     global _runtime
     main_thread()
+    from . import growth_dynamics
+
+    growth_dynamics.shutdown()
     if _runtime is not None:
         _runtime.stop()
         _runtime = None
@@ -2741,6 +2812,9 @@ def pump() -> float | None:
             restart()
         if _runtime is not None:
             _runtime.tick()
+            from . import growth_dynamics
+
+            growth_dynamics.tick()
             _status = _runtime.status
     except Exception:
         logger.exception("Adapter stopped after an unexpected runtime failure")

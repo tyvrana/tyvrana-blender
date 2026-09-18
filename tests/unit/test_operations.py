@@ -72,6 +72,13 @@ from tyvrana_blender.deformation_sweep_models import (
     DeformationSweepArguments,
     DeformationSweepResult,
 )
+from tyvrana_blender.dynamics_models import (
+    DynamicsBakeArguments,
+    DynamicsCache,
+    DynamicsJobArguments,
+    DynamicsJobStatus,
+    DynamicsObjectArguments,
+)
 from tyvrana_blender.errors import OperationError
 from tyvrana_blender.extension_models import (
     ExtensionReloadArguments,
@@ -352,6 +359,31 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def growth_dynamics_bake(
+        self, arguments: DynamicsBakeArguments
+    ) -> DynamicsJobStatus:
+        raise AssertionError("Not used")
+
+    def growth_dynamics_inspect(
+        self, arguments: DynamicsObjectArguments
+    ) -> DynamicsCache:
+        raise AssertionError("Not used")
+
+    def growth_dynamics_status(
+        self, arguments: DynamicsJobArguments
+    ) -> DynamicsJobStatus:
+        raise AssertionError("Not used")
+
+    def growth_dynamics_cancel(
+        self, arguments: DynamicsJobArguments
+    ) -> DynamicsJobStatus:
+        raise AssertionError("Not used")
+
+    def growth_dynamics_clear(
+        self, arguments: DynamicsObjectArguments
+    ) -> DynamicsCache:
+        raise AssertionError("Not used")
+
     def growth_create(self, arguments: GrowthCreateArguments) -> GrowthDelta:
         raise AssertionError("Growth behavior uses isolated native fixtures")
 

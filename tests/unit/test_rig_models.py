@@ -38,7 +38,9 @@ def test_declarative_hierarchy_accepts_forward_references() -> None:
     data["bones"].reverse()
     result = ArmatureCreateArguments.model_validate(data)
     assert result.bones[0].parent == "Root"
-    assert OPERATIONS == tuple(sorted(set(OPERATIONS))) and OPERATIONS == tuple(sorted(OPERATIONS))
+    assert OPERATIONS == tuple(sorted(set(OPERATIONS))) and OPERATIONS == tuple(
+        sorted(OPERATIONS)
+    )
 
 
 @pytest.mark.parametrize(

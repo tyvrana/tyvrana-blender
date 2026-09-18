@@ -153,6 +153,13 @@ def inspect_qa(obj: Any, data: Any, args: GrowthInspectArguments) -> GrowthQA:
 
 
 def sample(args: GrowthSampleArguments) -> GrowthSampleResult:
+    from . import growth_dynamics
+
+    if args.poses and growth_dynamics.KEY in bpy.data.objects.get(args.object_name, {}):
+        growth.fail(
+            "Cached dynamics require their baked animation frames; "
+            "clear for pose sweeps"
+        )
     if len(args.frames or args.poses) * args.qa_samples > 4096:
         growth.fail("Sweep exceeds4096 root samples; reduce samples/poses")
     rig.idle()

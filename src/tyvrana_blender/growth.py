@@ -628,6 +628,10 @@ def create(args: GrowthCreateArguments) -> GrowthDelta:
 
 
 def configure(args: GrowthConfigureArguments) -> GrowthDelta:
+    from . import growth_dynamics
+
+    if growth_dynamics.KEY in bpy.data.objects.get(args.object_name, {}):
+        fail("Clear dynamics through growth.dynamics.clear before growth revision")
     obj, meta, carrier, group = owned(args.object_name)
     if group.users != 1:
         fail("Owned growth graph has external users; remove those references first")
@@ -749,6 +753,15 @@ def summary(
 
     spec = GrowthCreateArguments.model_validate(meta["spec"])
     warnings = validity(obj, meta)
+    from . import growth_dynamics
+    from .dynamics_models import DynamicsObjectArguments
+
+    if growth_dynamics.KEY in obj:
+        warnings.extend(
+            growth_dynamics.inspect(
+                DynamicsObjectArguments(object_name=obj.name)
+            ).issues
+        )
     count = len(carrier.data.vertices)
     counts: dict[int, int] = {}
     for item in carrier.data.attributes["growth_family"].data:
@@ -831,6 +844,10 @@ def inspect(args: GrowthInspectArguments) -> GrowthInspectResult:
 
 def remove(args: GrowthRemoveArguments) -> GrowthRemoveResult:
     obj, _, carrier, group = owned(args.object_name)
+    from . import growth_dynamics
+
+    if growth_dynamics.KEY in obj:
+        fail("Clear dynamics through growth.dynamics.clear before removal")
     # Owned resources must not silently delete external references or shared data.
     users = bpy.data.user_map()
     allowed = {obj, carrier, group, bpy.context.scene, *bpy.data.collections}

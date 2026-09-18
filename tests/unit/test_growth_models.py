@@ -32,6 +32,11 @@ def test_compact_defaults_and_registry() -> None:
         "blender.growth.inspect",
         "blender.growth.remove",
         "blender.growth.sample",
+        "blender.growth.dynamics.bake",
+        "blender.growth.dynamics.status",
+        "blender.growth.dynamics.cancel",
+        "blender.growth.dynamics.inspect",
+        "blender.growth.dynamics.clear",
     }
     contracts = {name: spec.contract for name, spec in REGISTRY.items()}
     assert contracts["blender.growth.inspect"].effect == "read_only"

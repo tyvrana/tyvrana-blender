@@ -581,7 +581,11 @@ def match(args: PoseMatchArguments) -> PoseMatchResult:
     def depth(item: Any) -> int:
         ref, _, owner, _ = item
         obj, _ = endpoint(ref)
-        count = 0
+        count = 1 if ref.bone else 0
+        ancestor = obj.parent if ref.bone else None
+        while ancestor:
+            count += 1
+            ancestor = ancestor.parent
         current = owner.parent if ref.bone else obj.parent
         while current:
             count += 1
@@ -615,6 +619,7 @@ def switch_space(args: SpaceSwitchArguments) -> ConstraintsResult:
     if not isinstance(spec.settings, ChildOf):
         fail("Space switching requires an owned child_of constraint")
     before = world(args.owner)
+    metadata = {k: owner[k] for k in owner.keys() if k.startswith(KEY)}
     # Preserve current influence-space transform through an explicit new inverse.
     old = owner.constraints[args.constraint]
     prior = old.inverse_matrix.copy()
@@ -653,5 +658,10 @@ def switch_space(args: SpaceSwitchArguments) -> ConstraintsResult:
         old.target = target
         old.subtarget = sub
         old.inverse_matrix = prior
+        for key in list(owner.keys()):
+            if key.startswith(KEY):
+                del owner[key]
+        for key, value in metadata.items():
+            owner[key] = value
         bpy.context.view_layer.update()
         raise
