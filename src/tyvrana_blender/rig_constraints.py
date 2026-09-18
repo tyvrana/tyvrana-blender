@@ -163,7 +163,9 @@ def definition(
         if target is not None:
             obj = owner.get(pointer(name, side))
             if obj is None:
-                fail("Constraint target was removed; restore its reference first")
+                fail(
+                    "Constraint target was removed; use constraint.remove to discard it"
+                )
             settings = settings.model_copy(
                 update={side: target.model_copy(update={"object_name": obj.name})}
             )
@@ -513,18 +515,46 @@ def remove(args: ConstraintsRemoveArguments) -> ConstraintsResult:
     prepared = []
     for ref in args.constraints:
         obj, owner = endpoint(ref.owner, edit=True)
-        spec = definition(owner, ref.owner, ref.name)
+        entry = raw(owner).get(ref.name)
+        if entry is None:
+            fail("Constraint is not adapter-owned; preserve external constraints")
+        spec = ConstraintSpec.model_validate(entry["spec"])
+        c = owner.constraints.get(ref.name)
+        if (
+            c is None
+            or c.type != TYPES[spec.settings.kind]
+            or snapshot(c) != entry["native"]
+        ):
+            fail(
+                "Owned constraint settings changed externally; preserve external edits"
+            )
+        targets = {}
+        for side in ("target", "pole"):
+            target = getattr(spec.settings, side, None)
+            if target is None:
+                continue
+            native_side = "pole_target" if side == "pole" else "target"
+            sub = "pole_subtarget" if side == "pole" else "subtarget"
+            expected = owner.get(pointer(ref.name, side))
+            if getattr(c, native_side) != expected or getattr(c, sub) != (
+                target.bone or ""
+            ):
+                fail("Owned constraint target changed externally")
+            # A deleted target leaves matching null references. Removal is safe;
+            # rollback restores that invalid native relationship without resolving it.
+            targets[native_side], targets[sub] = expected, getattr(c, sub)
         if obj.animation_data:
             fail("Remove constraints before adding animation or detach it explicitly")
-        c = owner.constraints[ref.name]
         prepared.append(
             (
                 ref,
                 owner,
-                spec,
+                c.type,
+                c.influence,
                 snapshot(c),
                 list(owner.constraints).index(c),
                 {k: owner[k] for k in owner.keys() if k.startswith(KEY)},
+                targets,
             )
         )
     try:
@@ -539,10 +569,11 @@ def remove(args: ConstraintsRemoveArguments) -> ConstraintsResult:
                     del owner[key]
         bpy.context.view_layer.update()
     except BaseException:
-        for ref, owner, spec, state, index, meta in prepared:
+        for ref, owner, kind, influence, state, index, meta, targets in prepared:
             if owner.constraints.get(ref.name) is None:
-                c = apply(owner, spec)
-                for prop, value in state.items():
+                c = owner.constraints.new(kind)
+                c.name, c.influence = ref.name, influence
+                for prop, value in (state | targets).items():
                     setattr(
                         c, prop, Matrix(value) if prop == "inverse_matrix" else value
                     )

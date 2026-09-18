@@ -110,6 +110,38 @@ class ConstraintTests(TopologyTests):
             "constraint.remove", constraints=[dict(owner=ref("Driven"), name="Contact")]
         )
 
+    def test_missing_target_can_be_removed_without_adopting_external_edits(
+        self,
+    ) -> None:
+        self.objects()
+        self.call(
+            "constraint.configure",
+            constraints=[
+                dict(
+                    name="Follow",
+                    owner=ref("Driven"),
+                    settings=dict(kind="copy_location", target=ref("Source")),
+                )
+            ],
+        )
+        self.call("object.delete", name="Source")
+        self.assertFalse(
+            self.call("constraint.inspect", owners=[ref("Driven")])["constraints"][0][
+                "valid"
+            ]
+        )
+        native = bpy.data.objects["Driven"].constraints["Follow"]
+        native.use_x = False
+        self.error(
+            "constraint.remove", constraints=[dict(owner=ref("Driven"), name="Follow")]
+        )
+        self.assertIn("Follow", bpy.data.objects["Driven"].constraints)
+        native.use_x = True
+        self.call(
+            "constraint.remove", constraints=[dict(owner=ref("Driven"), name="Follow")]
+        )
+        self.assertEqual(len(bpy.data.objects["Driven"].constraints), 0)
+
     def test_child_spaces_and_matching(self) -> None:
         self.objects()
         endpoint = api.RigEndpoint(object_name="Driven")
@@ -318,6 +350,7 @@ if __name__ == "__main__":
                 for n in [
                     "test_copy_limits_contact_and_ownership",
                     "test_child_spaces_and_matching",
+                    "test_missing_target_can_be_removed_without_adopting_external_edits",
                     "test_ik_target_pole_and_rollback",
                     "test_control_rig_matching_both_directions",
                 ]

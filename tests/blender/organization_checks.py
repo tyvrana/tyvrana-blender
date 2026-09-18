@@ -451,10 +451,15 @@ class OrganizationTests(unittest.TestCase):
         )
         self.assertEqual(obj[org.ROLE], "domain_structure")
         self.assertEqual(list(obj[org.TAGS]), ["prototype"])
+        call(
+            "object_set.configure",
+            objects=[dict(name="Surface", collections=[None], hide_render=True)],
+        )
+        self.assertEqual(list(obj.users_collection), [bpy.context.scene.collection])
+        self.assertTrue(obj.hide_render)
         for patch_fields in (
             {"rename": "Changed"},
             {"parent": None},
-            {"collections": [None]},
         ):
             reject(
                 "object_set.configure", objects=[dict(name="Surface", **patch_fields)]

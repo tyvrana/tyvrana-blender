@@ -201,3 +201,23 @@ async def test_production_rigging_mcp(profile: dict[str, str], tmp_path: Path) -
             )
             (tmp_path / "rigging-metrics.json").write_text(json.dumps(metrics))
             print("PRODUCTION_RIGGING_METRICS", json.dumps(metrics))
+            for name in ("LooseTarget", "Follower"):
+                await call("object.create_primitive", primitive="cube", name=name)
+            await call(
+                "constraint.configure",
+                constraints=[
+                    dict(
+                        name="Follow",
+                        owner=ref("Follower"),
+                        settings=dict(kind="copy_location", target=ref("LooseTarget")),
+                    )
+                ],
+            )
+            await call("object.delete", name="LooseTarget")
+            await call(
+                "constraint.remove",
+                constraints=[dict(owner=ref("Follower"), name="Follow")],
+            )
+            assert not (await call("constraint.inspect", owners=[ref("Follower")]))[
+                "constraints"
+            ]

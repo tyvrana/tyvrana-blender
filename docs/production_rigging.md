@@ -5,7 +5,9 @@ copy-rotation, copy-location, location-limit, damped-track, child-of, floor and 
 constraints. Endpoints identify objects or pose bones. Full replacements preserve
 stack position; failed batches restore the previous native settings. Inspect before
 editing externally modified constraints. `constraint.inspect` returns bounded
-validity and evaluated transforms; `constraint.remove` removes owned entries.
+validity and evaluated transforms; `constraint.remove` removes owned entries,
+including relationships whose original targets were deleted. Other externally
+modified settings remain protected.
 
 IK supports explicit targets/poles, chain length (1–16), solver iterations,
 orientation and stretch. `armature.configure_joints` also sets native IK axis
