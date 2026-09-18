@@ -281,8 +281,6 @@ def cycle_guard(data: dict[str, CouplingSpec]) -> None:
                     channels.fail(
                         "Ancestor has unverified external driver dependencies"
                     )
-                if any(c.type != "LIMIT_ROTATION" for c in parent.constraints):
-                    channels.fail("Ancestor has unsupported constraint dependencies")
                 parent = parent.parent
     for source, target in resolved:
         for item in [source, target]:
@@ -303,21 +301,9 @@ def cycle_guard(data: dict[str, CouplingSpec]) -> None:
                             "with unverified "
                             "dependencies; preserve it and use independent controls"
                         )
-            if isinstance(item.spec, TransformChannel):
-                constraints = item.container.constraints
-                if any(
-                    c.type != "LIMIT_ROTATION"
-                    or any(
-                        getattr(c, p.identifier, None)
-                        for p in c.bl_rna.properties
-                        if p.type == "POINTER" and p.identifier == "target"
-                    )
-                    for c in constraints
-                ):
-                    channels.fail(
-                        "Transform source/target has unsupported external constraints; "
-                        "dependency semantics are unverified"
-                    )
+    from . import rig_constraints
+
+    rig_constraints.graph_guard([], coupling_catalog=data)
 
 
 def configure(args: CouplingConfigureArguments) -> MotionNames:

@@ -3791,3 +3791,6 @@ Resource inspection checks existence and a scoped structural fingerprint. It doe
 not validate full geometry, shader values, rigs, animation, behavior or appearance.
 Core owns durable project meaning, checkpoints, freshness and continuation; the
 adapter owns only native identity establishment and inspection.
+
+See [production rigging and rest revisions](docs/production_rigging.md) for typed
+control networks, constraint ownership, matching and bound rest revision policies.

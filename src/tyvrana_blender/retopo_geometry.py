@@ -60,7 +60,20 @@ def matrix(obj: Any) -> Any:
 def dependencies(obj: Any) -> list[Any]:
     """Read current-frame dependencies without imposing destructive animation guards."""
     result = [obj.parent] if obj.parent else []
-    for item in [*obj.modifiers, *obj.constraints]:
+    constraints = list(obj.constraints)
+    if obj.type == "ARMATURE":
+        from . import rig_constraints
+        from .constraint_models import RigEndpoint
+
+        refs = [
+            RigEndpoint(object_name=obj.name, bone=p.name)
+            for p in obj.pose.bones
+            if p.constraints
+        ]
+        if refs:
+            rig_constraints.graph_guard([], extra_refs=refs)
+        constraints.extend(c for p in obj.pose.bones for c in p.constraints)
+    for item in [*obj.modifiers, *constraints]:
         if item.type == "NODES":
             from . import curves, growth, instances
 
@@ -76,7 +89,8 @@ def dependencies(obj: Any) -> list[Any]:
                 continue
             value = getattr(item, prop.identifier)
             if isinstance(value, bpy.types.Object):
-                result.append(value)
+                if value != obj:
+                    result.append(value)
             elif isinstance(value, bpy.types.Collection):
                 if len(value.all_objects) > 256:
                     raise OperationError(

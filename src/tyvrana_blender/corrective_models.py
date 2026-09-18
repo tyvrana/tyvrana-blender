@@ -82,6 +82,7 @@ class ShapeKeyEdit(Arguments):
 
 
 class ShapeKeysEditArguments(Arguments):
+    acknowledge_rest_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
     object_name: Name
     keys: list[ShapeKeyEdit] = Field(min_length=1, max_length=16)
     expected_topology_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
@@ -126,6 +127,8 @@ class ShapeKeySummary(Model):
 
 
 class ShapeKeysSummary(Model):
+    rest_revision_sha256: str | None = None
+    rest_revision_unacknowledged: bool = False
     object_name: str
     topology_sha256: str
     vertex_count: int

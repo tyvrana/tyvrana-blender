@@ -107,6 +107,9 @@ class ArmatureCreateArguments(Arguments):
 
 class ArmatureRestArguments(Arguments):
     object_name: Name
+    dependency_policy: Literal["reject", "preserve"] = "reject"
+    preview: bool = False
+    expected_rest_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
     space: Literal["armature", "world"] = "armature"
     bones: list[RestBone] = Field(
         default_factory=list,
@@ -282,7 +285,19 @@ class BindingSummary(Model):
     binding_seconds: float | None = None
 
 
+class RestRevisionImpact(Model):
+    preview: bool
+    previous_rest_sha256: str
+    binding_objects: list[str] = Field(max_length=64)
+    actions: list[str] = Field(max_length=64)
+    corrective_objects: list[str] = Field(max_length=64)
+    captured_targets: list[str] = Field(max_length=64)
+    constraint_count: int
+    requires_motion_revalidation: bool
+
+
 class ArmatureSummary(Model):
+    rest_revision: RestRevisionImpact | None = None
     object_name: str
     bone_count: int
     root_count: int

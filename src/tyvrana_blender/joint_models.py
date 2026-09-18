@@ -45,6 +45,19 @@ class JointLimits(Model):
         return self
 
 
+class IKAxis(Model):
+    locked: bool = False
+    limits: AxisLimit | None = None
+    stiffness: FiniteFloat = Field(default=0, ge=0, le=0.99)
+
+
+class IKJoint(Model):
+    x: IKAxis = Field(default_factory=IKAxis)
+    y: IKAxis = Field(default_factory=IKAxis)
+    z: IKAxis = Field(default_factory=IKAxis)
+    stretch: FiniteFloat = Field(default=0, ge=0, le=1)
+
+
 class JointPatch(Model):
     name: Name
     limits: JointLimits | None = Field(
@@ -53,6 +66,10 @@ class JointPatch(Model):
             "joint constraint. Null axes are unconstrained; [0,0] locks "
             "an axis."
         )
+    )
+
+    ik: IKJoint | None = Field(
+        default=None, description="Optional complete native IK settings replacement."
     )
 
 
@@ -147,6 +164,7 @@ class StructuralSegment(Model):
     frame: JointFrame | None = None
     limits: JointLimits | None = None
     pose: StructuralPose | None = None
+    ik: IKJoint | None = None
     joint_constraint: str | None
     constraint_count: int
     valid: bool

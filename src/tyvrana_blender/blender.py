@@ -59,6 +59,21 @@ from .camera_models import (
     validate_optics,
 )
 from .compatibility import require_blender
+from .constraint_models import (
+    ConstraintsConfigureArguments,
+    ConstraintsInspectArguments,
+    ConstraintsRemoveArguments,
+    ConstraintsResult,
+    PoseMatchArguments,
+    PoseMatchResult,
+    SpaceSwitchArguments,
+)
+from .control_rig_models import (
+    ControlRigConfigureArguments,
+    ControlRigInspectArguments,
+    ControlRigResult,
+    ControlRigSwitchArguments,
+)
 from .corrective_models import (
     CaptureTargetArguments,
     CaptureTargetResult,
@@ -795,6 +810,65 @@ class BlenderBackend:
         from . import growth_qa
 
         return growth_qa.sample(arguments)
+
+    def control_rig_configure(
+        self, arguments: ControlRigConfigureArguments
+    ) -> ControlRigResult:
+        from . import control_rig
+
+        return control_rig.configure(arguments)
+
+    def control_rig_inspect(
+        self, arguments: ControlRigInspectArguments
+    ) -> ControlRigResult:
+        from . import control_rig
+
+        return control_rig.inspect(arguments)
+
+    def control_rig_switch(
+        self, arguments: ControlRigSwitchArguments
+    ) -> ControlRigResult:
+        from . import control_rig
+
+        return control_rig.switch(arguments)
+
+    def control_rig_remove(
+        self, arguments: ControlRigInspectArguments
+    ) -> ControlRigResult:
+        from . import control_rig
+
+        return control_rig.remove(arguments)
+
+    def constraint_configure(
+        self, arguments: ConstraintsConfigureArguments
+    ) -> ConstraintsResult:
+        from . import rig_constraints
+
+        return rig_constraints.configure(arguments)
+
+    def constraint_inspect(
+        self, arguments: ConstraintsInspectArguments
+    ) -> ConstraintsResult:
+        from . import rig_constraints
+
+        return rig_constraints.inspect(arguments)
+
+    def constraint_remove(
+        self, arguments: ConstraintsRemoveArguments
+    ) -> ConstraintsResult:
+        from . import rig_constraints
+
+        return rig_constraints.remove(arguments)
+
+    def pose_match(self, arguments: PoseMatchArguments) -> PoseMatchResult:
+        from . import rig_constraints
+
+        return rig_constraints.match(arguments)
+
+    def space_switch(self, arguments: SpaceSwitchArguments) -> ConstraintsResult:
+        from . import rig_constraints
+
+        return rig_constraints.switch_space(arguments)
 
     def loft_create(self, arguments: LoftCreateArguments) -> LoftResult:
         from . import loft

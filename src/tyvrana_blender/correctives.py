@@ -32,6 +32,7 @@ from .corrective_models import (
     TargetDeviation,
 )
 
+REST_KEY = "_tyvrana_corrective_rest_revision"
 TOPOLOGY_KEY = "_tyvrana_shape_topology"
 CAPTURE_KEY = "_tyvrana_correction_target"
 CAPTURE_SOURCE = "_tyvrana_correction_source"
@@ -134,6 +135,8 @@ def inspect(args: ShapeKeysInspectArguments) -> ShapeKeysSummary:
                 details.append(SparseDelta(vertex=index, delta=list(delta)))
             total += 1
     return ShapeKeysSummary(
+        rest_revision_sha256=obj.data.get(REST_KEY),
+        rest_revision_unacknowledged=REST_KEY in obj.data,
         object_name=obj.name,
         topology_sha256=geo.topology(obj.data),
         vertex_count=len(obj.data.vertices),
@@ -169,7 +172,7 @@ def capture_stack(obj: Any) -> None:
                 "Corrective capture requires an enabled linear Armature "
                 "(preserve_volume=false)"
             )
-        rig.armature(mod.object.name, edit=True)
+        rig.armature(mod.object.name)
 
 
 def capture_target(args: CaptureTargetArguments) -> CaptureTargetResult:
@@ -219,7 +222,6 @@ def capture_target(args: CaptureTargetArguments) -> CaptureTargetResult:
 def captured_deltas(
     obj: Any, definition: CapturedCorrection
 ) -> tuple[dict[int, Any], Any]:
-    capture_stack(obj)
     target = geo.context(definition.target)
     if target.get(CAPTURE_SOURCE) != obj or CAPTURE_KEY not in target:
         geo.fail(
@@ -229,6 +231,9 @@ def captured_deltas(
         metadata = json.loads(target[CAPTURE_KEY])
     except (ValueError, TypeError):
         geo.fail("Correction target provenance is invalid")
+    if metadata.get("stale_reason"):
+        geo.fail(str(metadata["stale_reason"]))
+    capture_stack(obj)
     points, signature = geo.evaluated(obj)
     if metadata.get("topology") != signature or geo.topology(target.data) != signature:
         geo.fail("Correction target ordered topology differs from captured source")
@@ -274,6 +279,12 @@ def captured_deltas(
 def edit(args: ShapeKeysEditArguments) -> ShapeKeysEditResult:
     obj = geo.context(args.object_name, edit=True)
     keys_guard(obj)
+    if REST_KEY in obj.data and args.acknowledge_rest_sha256 != obj.data[REST_KEY]:
+        geo.fail(
+            "Armature rest changed; inspect shape_keys and retry with "
+            "acknowledge_rest_sha256, then revalidate motion"
+        )
+
     signature = geo.topology(obj.data)
     if args.expected_topology_sha256 and args.expected_topology_sha256 != signature:
         geo.fail("Expected ordered topology differs; inspect the current snapshot")
@@ -441,6 +452,8 @@ def edit(args: ShapeKeysEditArguments) -> ShapeKeysEditResult:
                 key.name = definition.rename
             changed.append(key.name)
         obj.data[TOPOLOGY_KEY] = signature
+        if REST_KEY in obj.data:
+            del obj.data[REST_KEY]
         obj.data.update()
     return ShapeKeysEditResult(
         object_name=obj.name,

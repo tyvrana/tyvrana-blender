@@ -274,6 +274,9 @@ class ObjectPatch(Model):
             "this bounded set. Null entries mean scene root."
         ),
     )
+    hide_viewport: bool | None = None
+    hide_render: bool | None = None
+    hide_select: bool | None = None
     role: Tag | None = Field(
         default=None, description="Omit to preserve; null clears the role."
     )
@@ -286,7 +289,14 @@ class ObjectPatch(Model):
         fields = self.model_fields_set - {"name"}
         if not fields:
             raise ValueError("Supply at least one change")
-        for f in ("rename", "collections", "tags"):
+        for f in (
+            "rename",
+            "collections",
+            "tags",
+            "hide_viewport",
+            "hide_render",
+            "hide_select",
+        ):
             if f in fields and getattr(self, f) is None:
                 raise ValueError(f"Omit unchanged {f}; null is not valid")
         if self.collections is not None:
@@ -306,7 +316,7 @@ class ObjectSetConfigureArguments(Model):
 
 
 type InspectField = Literal[
-    "hierarchy", "memberships", "transforms", "metadata", "data"
+    "hierarchy", "memberships", "transforms", "metadata", "data", "visibility"
 ]
 
 
@@ -322,7 +332,7 @@ class ObjectSetInspectArguments(InspectArguments):
     fields: list[InspectField] = Field(
         default_factory=default_fields,
         min_length=1,
-        max_length=5,
+        max_length=6,
     )
 
     @model_validator(mode="after")
@@ -370,7 +380,15 @@ class DataInfo(Model):
     materials_truncated: bool
 
 
+class VisibilityInfo(Model):
+    hide_viewport: bool
+    hide_render: bool
+    hide_select: bool
+    visible_in_view_layer: bool
+
+
 class SetObjectSummary(Model):
+    visibility: VisibilityInfo | None = None
     name: str
     type: str
     hierarchy: HierarchyInfo | None = None

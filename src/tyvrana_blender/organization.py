@@ -39,6 +39,7 @@ from .organization_models import (
     PrimitiveMember,
     SetObjectSummary,
     TransformInfo,
+    VisibilityInfo,
 )
 
 ROLE = "tyvrana_organization_role"
@@ -585,6 +586,13 @@ def metadata_info(obj: Any) -> MetadataInfo:
 
 def object_summary(obj: Any, fields: list[str]) -> SetObjectSummary:
     data: dict[str, Any] = {"name": str(obj.name), "type": str(obj.type)}
+    if "visibility" in fields:
+        data["visibility"] = VisibilityInfo(
+            hide_viewport=obj.hide_viewport,
+            hide_render=obj.hide_render,
+            hide_select=obj.hide_select,
+            visible_in_view_layer=obj.visible_get(),
+        )
     if "hierarchy" in fields:
         children = sorted(str(c.name) for c in obj.children)
         data["hierarchy"] = HierarchyInfo(
@@ -671,12 +679,21 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
     for p in args.objects:
         obj = items[p.name]
         object_editable(obj)
-        metadata_only = p.model_fields_set <= {"name", "role", "tags"}
+        metadata_only = p.model_fields_set <= {
+            "name",
+            "role",
+            "tags",
+            "collections",
+            "hide_viewport",
+            "hide_render",
+            "hide_select",
+        }
         if not metadata_only and any(
-            str(k).startswith("tyvrana_") and k not in {ROLE, TAGS} for k in obj.keys()
+            str(k).startswith(("tyvrana_", "_tyvrana_")) and k not in {ROLE, TAGS}
+            for k in obj.keys()
         ):
             fail(
-                f'Object "{obj.name}" has domain-owned metadata; only role/tag '
+                f'Object "{obj.name}" is owned; only membership, visibility, role/tag '
                 f"patches are allowed here; use its typed operations for other changes"
             )
         if p.rename is not None:
@@ -706,6 +723,7 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
             list(obj.users_collection),
             obj.get(ROLE),
             list(obj.get(TAGS, [])),
+            (obj.hide_viewport, obj.hide_render, obj.hide_select),
         )
     if len(set(names)) != len(names):
         fail("Renamed objects must have unique names")
@@ -730,6 +748,9 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
                         c.objects.unlink(obj)
             if p.rename is not None:
                 obj.name = p.rename
+            for attr in ("hide_viewport", "hide_render", "hide_select"):
+                if getattr(p, attr) is not None:
+                    setattr(obj, attr, getattr(p, attr))
             if "role" in p.model_fields_set or "tags" in p.model_fields_set:
                 metadata(
                     obj,
@@ -752,7 +773,10 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
                 )
         return ObjectSetResult(
             objects=[
-                object_summary(items[p.name], ["hierarchy", "memberships", "metadata"])
+                object_summary(
+                    items[p.name],
+                    ["hierarchy", "memberships", "metadata", "visibility"],
+                )
                 for p in args.objects
             ]
         )
@@ -768,6 +792,7 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
             members,
             role,
             tags,
+            visibility,
         ) in snapshots.items():
             obj.name = name
             obj.parent = parent
@@ -780,6 +805,7 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
                 if c not in members:
                     c.objects.unlink(obj)
             metadata(obj, role, tags)
+            obj.hide_viewport, obj.hide_render, obj.hide_select = visibility
         bpy.context.view_layer.update()
         raise
 

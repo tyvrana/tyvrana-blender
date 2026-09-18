@@ -13,6 +13,7 @@ from .inspection import page
 from .joint_models import (
     MAX_XZ,
     MAX_Y,
+    IKJoint,
     JointConfigureArguments,
     JointEvaluation,
     JointFrame,
@@ -29,6 +30,7 @@ from .rig_models import (
     ArmatureRestArguments,
     ArmatureSummary,
     RestBone,
+    RestRevisionImpact,
 )
 
 KEY = "tyvrana_joint_limits"
@@ -67,8 +69,14 @@ def validate_constraints(obj: Any) -> None:
     for p in obj.pose.bones:
         limits = model_limits(p)
         c = constraint(p)
-        if len(p.constraints) != int(c is not None):
-            fail(f'Bone "{p.name}" has unsupported external constraints')
+        from . import rig_constraints
+        from .constraint_models import RigEndpoint
+
+        for other in p.constraints:
+            if other != c:
+                rig_constraints.definition(
+                    p, RigEndpoint(object_name=obj.name, bone=p.name), other.name
+                )
         if c is None:
             continue
         if (
@@ -97,7 +105,9 @@ def validate_constraints(obj: Any) -> None:
                 fail(f'Joint "{p.name}" range changed; reconfigure limits')
 
 
-def editable(obj: Any, *, constraints: bool = True) -> None:
+def editable(
+    obj: Any, *, constraints: bool = True, preserve_dependencies: bool = False
+) -> None:
     from .blender import data_mutation_context, main_thread
     from .organization import object_editable
 
@@ -109,9 +119,9 @@ def editable(obj: Any, *, constraints: bool = True) -> None:
         or obj.data.override_library
         or not obj.data.is_editable
         or obj.data.users != 1
-        or obj.animation_data
+        or (obj.animation_data and not preserve_dependencies)
         or obj.data.animation_data
-        or obj.constraints
+        or (obj.constraints and not preserve_dependencies)
     ):
         fail(
             "Structural mutation requires exclusive local data without "
@@ -271,6 +281,34 @@ def evaluation(obj: Any, evaluated: Any, name: str) -> JointEvaluation:
     )
 
 
+def ik_definition(p: Any) -> IKJoint:
+    values = {"stretch": p.ik_stretch}
+    for axis in "xyz":
+        values[axis] = dict(
+            locked=getattr(p, "lock_ik_" + axis),
+            limits=dict(
+                minimum=getattr(p, "ik_min_" + axis),
+                maximum=getattr(p, "ik_max_" + axis),
+            )
+            if getattr(p, "use_ik_limit_" + axis)
+            else None,
+            stiffness=getattr(p, "ik_stiffness_" + axis),
+        )
+    return IKJoint.model_validate(values)
+
+
+def set_ik(p: Any, settings: IKJoint) -> None:
+    p.ik_stretch = settings.stretch
+    for axis in "xyz":
+        values = getattr(settings, axis)
+        setattr(p, "lock_ik_" + axis, values.locked)
+        setattr(p, "ik_stiffness_" + axis, values.stiffness)
+        setattr(p, "use_ik_limit_" + axis, values.limits is not None)
+        if values.limits:
+            setattr(p, "ik_min_" + axis, values.limits.minimum)
+            setattr(p, "ik_max_" + axis, values.limits.maximum)
+
+
 def configure(args: JointConfigureArguments) -> ArmatureSummary:
     from . import rig
 
@@ -289,8 +327,14 @@ def configure(args: JointConfigureArguments) -> ArmatureSummary:
         fail("Constrained structures require unit pose scale; reset the pose first")
     for p in obj.pose.bones:
         c = constraint(p)
-        if len(p.constraints) != int(c is not None):
-            fail(f'Bone "{p.name}" has unsupported external constraints')
+        from . import rig_constraints
+        from .constraint_models import RigEndpoint
+
+        for other in p.constraints:
+            if other != c:
+                rig_constraints.definition(
+                    p, RigEndpoint(object_name=obj.name, bone=p.name), other.name
+                )
         if p.name in chosen:
             if any(p.location) or any(abs(v - 1) > 1e-6 for v in p.scale):
                 fail(
@@ -309,18 +353,21 @@ def configure(args: JointConfigureArguments) -> ArmatureSummary:
             principal(p.matrix_basis.to_euler("XYZ"))
     # Retain full owned constraint state for repair and rollback, not just metadata.
     before = {
-        p.name: (p.rotation_mode, p.get(KEY), native_limit_state(p))
+        p.name: (p.rotation_mode, p.get(KEY), native_limit_state(p), ik_definition(p))
         for p in obj.pose.bones
         if p.name in chosen
     }
     try:
         for item in args.joints:
             set_limits(obj.pose.bones[item.name], item.limits)
+            if item.ik is not None:
+                set_ik(obj.pose.bones[item.name], item.ik)
         bpy.context.view_layer.update()
         validate_constraints(obj)
         return rig.inspect(obj, [j.name for j in args.joints], args.sample_limit)
     except Exception:
-        for name, (mode, raw, state) in before.items():
+        for name, (mode, raw, state, ik) in before.items():
+            set_ik(obj.pose.bones[name], ik)
             restore_limit_state(obj.pose.bones[name], raw, state)
             obj.pose.bones[name].rotation_mode = mode
         bpy.context.view_layer.update()
@@ -388,32 +435,83 @@ def editing(obj: Any) -> Iterator[None]:
         bpy.context.view_layer.objects.active = active
 
 
-def rest_guard(obj: Any) -> None:
-    editable(obj)
+def rest_guard(obj: Any, preserve: bool = False) -> list[Any]:
+    from . import actions, rig, rig_constraints
+    from .constraint_models import RigEndpoint
+
+    editable(obj, preserve_dependencies=preserve)
     if obj.data.pose_position != "POSE":
-        fail("Rest editing requires Pose position with neutral requested channels")
-    for p in obj.pose.bones:
-        if (
-            max(
-                abs(v - (1 if i == j else 0))
-                for i, row in enumerate(p.matrix_basis)
-                for j, v in enumerate(row)
-            )
-            > 1e-6
-        ):
-            fail("Reset the requested pose before editing rest structure")
-        if p.custom_shape or any(k != KEY for k in p.keys()):
-            fail("Rest edits preserve external pose metadata and control shapes")
+        fail("Rest editing requires Pose position")
+    if not preserve:
+        for p in obj.pose.bones:
+            if (
+                max(
+                    abs(v - (1 if i == j else 0))
+                    for i, row in enumerate(p.matrix_basis)
+                    for j, v in enumerate(row)
+                )
+                > 1e-6
+            ):
+                fail("Reset requested pose before isolated rest editing")
+            if p.custom_shape or any(k != KEY for k in p.keys()):
+                fail("Rest edits preserve external pose metadata and control shapes")
+    bound = []
+    for item in bpy.context.scene.objects:
+        matching = [
+            m for m in item.modifiers if m.type == "ARMATURE" and m.object == obj
+        ]
+        if matching:
+            if (
+                not preserve
+                or len(matching) != 1
+                or rig.KEY not in item
+                or rig.binding_modifier(item) != matching[0]
+            ):
+                fail(
+                    "Bound rest revision requires dependency_policy=preserve "
+                    "and owned bindings"
+                )
+            from .organization import object_editable
+
+            object_editable(item)
+            bound.append(item)
+    if len(bound) > 64:
+        fail("Rest revision exceeds 64 bound meshes")
+    animation = obj.animation_data
+    if preserve and animation:
+        if animation.nla_tracks:
+            fail("Rest revision preserves unsupported NLA; detach it first")
+        if animation.action and actions.KEY not in animation.action:
+            fail("Rest revision requires an owned action or no active action")
+        from . import couplings
+
+        for curve in animation.drivers:
+            if not couplings.internal_driver_dependency(obj, curve):
+                fail("Rest revision has an unverified external driver dependency")
+    if preserve:
+        for c in obj.constraints:
+            rig_constraints.definition(obj, RigEndpoint(object_name=obj.name), c.name)
     users = bpy.data.user_map(subset={obj, obj.data})
-    allowed = {obj, bpy.context.scene, *obj.users_collection}
+    allowed = {obj, bpy.context.scene, *obj.users_collection, *bound}
+    if preserve and animation and animation.action:
+        allowed.add(animation.action)
     if (users.get(obj, set()) | users.get(obj.data, set())) - allowed:
         fail(
-            "Rest edits require an unbound structure without external "
-            "references; edit before binding or use a separate structural "
-            "armature"
+            "Rest revision has external references beyond owned bindings; "
+            "inspect and detach them before revision: "
+            + ", ".join(
+                sorted(
+                    x.name
+                    for x in (users.get(obj, set()) | users.get(obj.data, set()))
+                    - allowed
+                )
+            )[:300]
         )
     if obj.children:
-        fail("Rest edits preserve dependent object children")
+        fail(
+            "Rest revision preserves dependent object children; detach them explicitly"
+        )
+    return bound
 
 
 def current_definition(obj: Any, bone: Any) -> RestBone:
@@ -436,7 +534,79 @@ def edit_rest(args: ArmatureRestArguments) -> ArmatureSummary:
     from . import rig
 
     obj = rig.armature(args.object_name)
-    rest_guard(obj)
+    preserve = args.dependency_policy == "preserve"
+    bound = rest_guard(obj, preserve)
+    previous_signature = rig.rest_signature(obj)
+    if args.expected_rest_sha256 and args.expected_rest_sha256 != previous_signature:
+        fail("Rest structure changed; inspect current rest_sha256 and retry")
+    if (
+        preserve
+        and not args.preview
+        and args.expected_rest_sha256 != previous_signature
+    ):
+        fail(
+            "Preserving dependencies requires the current expected_rest_sha256; "
+            "preview first"
+        )
+    if preserve:
+        if args.renames or any(s.name not in obj.data.bones for s in args.bones):
+            fail(
+                "Dependent revision preserves bone names/count; "
+                "revise existing frames only"
+            )
+        if any(
+            (s.parent, s.connected, s.deform)
+            != (
+                obj.data.bones[s.name].parent.name
+                if obj.data.bones[s.name].parent
+                else None,
+                obj.data.bones[s.name].use_connect,
+                obj.data.bones[s.name].use_deform,
+            )
+            for s in args.bones
+        ):
+            fail(
+                "Dependent revision preserves hierarchy, connectivity and deform flags"
+            )
+    import json
+
+    from . import correctives
+
+    captured = []
+    if len(bpy.context.scene.objects) > 4096:
+        fail("Rest dependency inspection exceeds 4096 objects")
+    for target in bpy.context.scene.objects:
+        if (
+            target.get(correctives.CAPTURE_SOURCE) in bound
+            and correctives.CAPTURE_KEY in target
+        ):
+            raw = target[correctives.CAPTURE_KEY]
+            if not isinstance(raw, str) or len(raw) > 65536:
+                fail(
+                    "Captured target metadata is invalid; inspect before rest revision"
+                )
+            metadata = json.loads(raw)
+            metadata["stale_reason"] = (
+                "Armature rest revised; recapture target in intended pose"
+            )
+            captured.append((target, json.dumps(metadata)))
+    if len(captured) > 64:
+        fail("Rest revision exceeds 64 captured targets")
+    impact = RestRevisionImpact(
+        preview=args.preview,
+        previous_rest_sha256=previous_signature,
+        binding_objects=[o.name for o in bound],
+        actions=[obj.animation_data.action.name]
+        if obj.animation_data and obj.animation_data.action
+        else [],
+        corrective_objects=[o.name for o in bound if o.data.shape_keys],
+        captured_targets=[o.name for o, _ in captured],
+        constraint_count=sum(len(p.constraints) for p in obj.pose.bones)
+        + len(obj.constraints),
+        requires_motion_revalidation=bool(
+            bound or obj.animation_data or any(p.constraints for p in obj.pose.bones)
+        ),
+    )
     if args.space == "world":
         positive_uniform(obj.matrix_world)
     renames = {r.name: r.rename for r in args.renames}
@@ -465,6 +635,10 @@ def edit_rest(args: ArmatureRestArguments) -> ArmatureSummary:
         plan = ArmatureCreateArguments(name=obj.name, bones=list(definitions.values()))
     except ValueError as exc:
         fail(f"Final rest structure is invalid: {str(exc)[:450]}")
+    if args.preview:
+        return rig.inspect(obj, limit=args.sample_limit).model_copy(
+            update={"rest_revision": impact}
+        )
     old_data = obj.data
     data = old_data.copy()
     staged = None
@@ -519,7 +693,16 @@ def edit_rest(args: ArmatureRestArguments) -> ArmatureSummary:
         name = old_data.name
         bpy.data.armatures.remove(old_data)
         data.name = name
-    return result
+    if preserve:
+        from . import correctives
+
+        current_signature = rig.rest_signature(obj)
+        for mesh in bound:
+            if mesh.data.shape_keys:
+                mesh.data[correctives.REST_KEY] = current_signature
+        for target, metadata in captured:
+            target[correctives.CAPTURE_KEY] = metadata
+    return result.model_copy(update={"rest_revision": impact})
 
 
 def structure_issues(obj: Any, bone: Any) -> list[str]:
@@ -539,8 +722,14 @@ def structure_issues(obj: Any, bone: Any) -> list[str]:
     try:
         limits = model_limits(p)
         c = constraint(p)
-        if len(p.constraints) != int(c is not None):
-            issues.append("external_constraints")
+        from . import rig_constraints
+        from .constraint_models import RigEndpoint
+
+        for other in p.constraints:
+            if other != c:
+                rig_constraints.definition(
+                    p, RigEndpoint(object_name=obj.name, bone=p.name), other.name
+                )
         if limits:
             if any(abs(v) > 1e-6 for v in p.location):
                 issues.append("translated_joint_center")
@@ -657,6 +846,9 @@ def inspect_structure(args: StructureInspectArguments) -> StructureSummary:
                 frame=frame,
                 pose=pose,
                 limits=limits,
+                ik=ik_definition(obj.pose.bones[b.name])
+                if "limits" in args.fields
+                else None,
                 joint_constraint=str(c.name) if c else None,
                 constraint_count=len(obj.pose.bones[b.name].constraints),
                 valid=not issues[b.name],

@@ -32,6 +32,21 @@ from tyvrana_blender.camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from tyvrana_blender.constraint_models import (
+    ConstraintsConfigureArguments,
+    ConstraintsInspectArguments,
+    ConstraintsRemoveArguments,
+    ConstraintsResult,
+    PoseMatchArguments,
+    PoseMatchResult,
+    SpaceSwitchArguments,
+)
+from tyvrana_blender.control_rig_models import (
+    ControlRigConfigureArguments,
+    ControlRigInspectArguments,
+    ControlRigResult,
+    ControlRigSwitchArguments,
+)
 from tyvrana_blender.corrective_models import (
     CaptureTargetArguments,
     CaptureTargetResult,
@@ -351,6 +366,47 @@ class Backend:
 
     def growth_sample(self, arguments: GrowthSampleArguments) -> GrowthSampleResult:
         raise AssertionError("Growth behavior uses isolated native fixtures")
+
+    def control_rig_configure(
+        self, arguments: ControlRigConfigureArguments
+    ) -> ControlRigResult:
+        raise NotImplementedError
+
+    def control_rig_inspect(
+        self, arguments: ControlRigInspectArguments
+    ) -> ControlRigResult:
+        raise NotImplementedError
+
+    def control_rig_switch(
+        self, arguments: ControlRigSwitchArguments
+    ) -> ControlRigResult:
+        raise NotImplementedError
+
+    def control_rig_remove(
+        self, arguments: ControlRigInspectArguments
+    ) -> ControlRigResult:
+        raise NotImplementedError
+
+    def constraint_configure(
+        self, arguments: ConstraintsConfigureArguments
+    ) -> ConstraintsResult:
+        raise NotImplementedError
+
+    def constraint_inspect(
+        self, arguments: ConstraintsInspectArguments
+    ) -> ConstraintsResult:
+        raise NotImplementedError
+
+    def constraint_remove(
+        self, arguments: ConstraintsRemoveArguments
+    ) -> ConstraintsResult:
+        raise NotImplementedError
+
+    def pose_match(self, arguments: PoseMatchArguments) -> PoseMatchResult:
+        raise NotImplementedError
+
+    def space_switch(self, arguments: SpaceSwitchArguments) -> ConstraintsResult:
+        raise NotImplementedError
 
     def loft_create(self, arguments: LoftCreateArguments) -> LoftResult:
         raise NotImplementedError

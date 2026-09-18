@@ -36,6 +36,21 @@ from .camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from .constraint_models import (
+    ConstraintsConfigureArguments,
+    ConstraintsInspectArguments,
+    ConstraintsRemoveArguments,
+    ConstraintsResult,
+    PoseMatchArguments,
+    PoseMatchResult,
+    SpaceSwitchArguments,
+)
+from .control_rig_models import (
+    ControlRigConfigureArguments,
+    ControlRigInspectArguments,
+    ControlRigResult,
+    ControlRigSwitchArguments,
+)
 from .corrective_models import (
     CaptureTargetArguments,
     CaptureTargetResult,
@@ -386,6 +401,38 @@ class SceneBackend(Protocol):
     def growth_remove(self, arguments: GrowthRemoveArguments) -> GrowthRemoveResult: ...
 
     def growth_sample(self, arguments: GrowthSampleArguments) -> GrowthSampleResult: ...
+
+    def control_rig_configure(
+        self, arguments: ControlRigConfigureArguments
+    ) -> ControlRigResult: ...
+
+    def control_rig_inspect(
+        self, arguments: ControlRigInspectArguments
+    ) -> ControlRigResult: ...
+
+    def control_rig_switch(
+        self, arguments: ControlRigSwitchArguments
+    ) -> ControlRigResult: ...
+
+    def control_rig_remove(
+        self, arguments: ControlRigInspectArguments
+    ) -> ControlRigResult: ...
+
+    def constraint_configure(
+        self, arguments: ConstraintsConfigureArguments
+    ) -> ConstraintsResult: ...
+
+    def constraint_inspect(
+        self, arguments: ConstraintsInspectArguments
+    ) -> ConstraintsResult: ...
+
+    def constraint_remove(
+        self, arguments: ConstraintsRemoveArguments
+    ) -> ConstraintsResult: ...
+
+    def pose_match(self, arguments: PoseMatchArguments) -> PoseMatchResult: ...
+
+    def space_switch(self, arguments: SpaceSwitchArguments) -> ConstraintsResult: ...
 
     def loft_create(self, arguments: LoftCreateArguments) -> LoftResult: ...
 
@@ -1455,6 +1502,138 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.control_rig.configure",
+        ControlRigConfigureArguments,
+        ControlRigResult,
+        lambda b, a, q: b.control_rig_configure(a),
+        (
+            "Construct an owned two-segment FK/IK network over six existing "
+            "matching-rest bones and independent target/pole controls. Two "
+            "copy-transform branches drive deform bones; native two-bone IK "
+            "drives the IK branch. Starts in FK. No anatomical preset or "
+            "generated topology. "
+        ),
+        tags=("rigging", "ik_fk", "matching", "controls"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.control_rig.inspect",
+        ControlRigInspectArguments,
+        ControlRigResult,
+        lambda b, a, q: b.control_rig_inspect(a),
+        (
+            "Inspect a named control network, definition, mode, constraint "
+            "integrity and measured output/control error. "
+        ),
+        tags=("rigging", "ik_fk", "matching", "controls"),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.control_rig.switch",
+        ControlRigSwitchArguments,
+        ControlRigResult,
+        lambda b, a, q: b.control_rig_switch(a),
+        (
+            "Match and switch an owned two-segment FK/IK network with bounded "
+            "native pole matching. Measure full world-matrix error; rollback "
+            "when tolerance cannot be met. Controls must be unlocked and "
+            "unanimated; keyframe authoring is separate. "
+        ),
+        tags=("rigging", "ik_fk", "matching", "controls"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.control_rig.remove",
+        ControlRigInspectArguments,
+        ControlRigResult,
+        lambda b, a, q: b.control_rig_remove(a),
+        (
+            "Remove a validated owned control network and its constraints; "
+            "retain native bones and target/pole objects. Refuse externally "
+            "modified or animated resources. "
+        ),
+        tags=("rigging", "ik_fk", "matching", "controls"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.constraint.configure",
+        ConstraintsConfigureArguments,
+        ConstraintsResult,
+        lambda b, a, q: b.constraint_configure(a),
+        (
+            "Create or replace owned typed native copy "
+            "transforms/rotation/location, translation limits, damped "
+            "tracking, IK/poles, child-of spaces and floor contact constraints "
+            "in bounded batches. Explicit endpoints/spaces; dependency cycle "
+            "checks and rollback. Configure before owner animation. No "
+            "property bags or expressions."
+        ),
+        tags=("rigging", "constraints", "controls"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.constraint.inspect",
+        ConstraintsInspectArguments,
+        ConstraintsResult,
+        lambda b, a, q: b.constraint_inspect(a),
+        (
+            "Inspect up to 64 owned native constraints, integrity, current "
+            "influence and evaluated world transforms. Optional typed "
+            "definitions; external modifications remain visible failures."
+        ),
+        tags=("rigging", "constraints", "controls"),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.constraint.remove",
+        ConstraintsRemoveArguments,
+        ConstraintsResult,
+        lambda b, a, q: b.constraint_remove(a),
+        (
+            "Remove exact owned constraints after whole-batch validation; "
+            "preserve external constraints and active animation."
+        ),
+        tags=("rigging", "constraints", "controls"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.armature.match",
+        PoseMatchArguments,
+        PoseMatchResult,
+        lambda b, a, q: b.pose_match(a),
+        (
+            "Match up to 64 unconstrained object or FK bone world transforms "
+            "to evaluated source endpoints. Sources sampled before mutation; "
+            "explicit tolerance, preservation on failure. No keyframes or "
+            "automatic IK solution."
+        ),
+        tags=("rigging", "constraints", "controls"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.constraint.switch_space",
+        SpaceSwitchArguments,
+        ConstraintsResult,
+        lambda b, a, q: b.space_switch(a),
+        (
+            "Switch an owned child-of constraint target to an explicit "
+            "object/bone space, preserving evaluated transform by updating its "
+            "inverse. Validate measured error and restore on failure. No "
+            "implicit keyframe authoring."
+        ),
+        tags=("rigging", "constraints", "controls"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
         "blender.loft.create",
         LoftCreateArguments,
         LoftResult,
@@ -1592,19 +1771,15 @@ _DECLARATIONS = (
         ArmatureRestArguments,
         ArmatureSummary,
         lambda b, a, q: b.armature_configure_rest(a),
-        "Edit articulation/deformation rest data on an unbound neutral armature "
-        "using up to 128 full "
-        "bone definitions/additions and unused-name renames. Rest "
-        "endpoints use armature/world vectors or shared typed point "
-        "sources; x_reference constructs an orthonormal frame "
-        "(Y=head-tail, projected X, Z=X cross Y), otherwise roll radians. "
-        "Validate complete hierarchy/connected heads and stage copied "
-        "data with rollback. Reject posed channels, shared/library data, "
-        "external users/bindings/control metadata and unowned "
-        "constraints. Owned LOCAL XYZ limits are preserved for omitted "
-        "bones and replaced by supplied definitions. No automatic weight "
-        "retargeting. sample_limit=0 returns counts/hashes without bone "
-        "rows.",
+        "Revise rest frames with staged rollback; preview reports bindings, "
+        "actions and corrective targets. Default reject policy requires an "
+        "unbound neutral rig. preserve policy accepts owned bindings/actions, "
+        "retains bone identities/hierarchy/weights and requires current "
+        "expected_rest_sha256 on commit. It marks captured targets stale and "
+        "shape keys unacknowledged; revalidate motion afterward. No weight "
+        "retargeting. Shared data, NLA and unverified external dependencies "
+        "are rejected. Endpoints use typed points in armature/world space; "
+        "x_reference constructs local axes. sample_limit=0 omits bone rows.",
         effect="mutating",
         execution="synchronous",
     ),
@@ -1621,8 +1796,9 @@ _DECLARATIONS = (
         "evaluated motion while requested channels remain; pose results "
         "report both. Canonical principal branch avoids multi-turn/gimbal "
         "ambiguity (|X,Z|<=pi-0.0001, |Y|<=pi/2-0.0001). Zero pose "
-        "translation/unit scale required for joints. No "
-        "coupling/IK/driver system. Atomic rollback; exclusive local "
+        "translation/unit scale required for joints. Optional ik replaces "
+        "native per-axis locks/limits/stiffness and stretch for IK solving. "
+        "Atomic rollback; exclusive local "
         "armature with no animation/unowned constraints. May configure "
         "already bound structures without changing rest data.",
         effect="mutating",
@@ -1731,9 +1907,9 @@ _DECLARATIONS = (
         lambda b, a, q: b.object_set_configure(a),
         "Atomically update 1..64 named objects: rename, exact "
         "collection memberships (link/unlink/move), plain parent "
-        "changes with world transform preserved, role/tags. Omitted "
-        "fields preserve values; null parent/role clears. Role/tag-only patches "
-        "are allowed on domain-owned objects; other edits require their typed "
+        "changes with world transform preserved, visibility and role/tags. Omitted "
+        "fields preserve values; null parent/role clears. Owned objects permit "
+        "memberships, visibility and role/tags; rename/parent require their typed "
         "operations. Reject cycles, external-scene objects and unsupported or "
         "unrepresentable parenting (animation/constraints/bone "
         "parents/nonidentity deltas/shear on clear). Native "
@@ -1751,7 +1927,7 @@ _DECLARATIONS = (
         lambda b, a, q: b.object_set_inspect(a),
         "Inspect objects in a collection/subtree or named set, filtered "
         "by names/prefix/role/all tags. Select hierarchy, memberships, "
-        "world/local transforms, fixed metadata and data/material "
+        "world/local transforms, visibility, fixed metadata and data/material "
         "ownership. Pages default 32, max 128; nested lists cap 16 with "
         "counts/truncation. Native object names identify objects; keys "
         "from authoring are request-local. No mesh payload, history or "
