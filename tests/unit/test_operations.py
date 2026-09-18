@@ -117,6 +117,12 @@ from tyvrana_blender.light_models import (
     LightSummary,
     light_state,
 )
+from tyvrana_blender.loft_models import (
+    LoftConfigureArguments,
+    LoftCreateArguments,
+    LoftInspectArguments,
+    LoftResult,
+)
 from tyvrana_blender.material_author_models import (
     AssignBatchArguments,
     AssignBatchResult,
@@ -345,6 +351,15 @@ class Backend:
 
     def growth_sample(self, arguments: GrowthSampleArguments) -> GrowthSampleResult:
         raise AssertionError("Growth behavior uses isolated native fixtures")
+
+    def loft_create(self, arguments: LoftCreateArguments) -> LoftResult:
+        raise NotImplementedError
+
+    def loft_configure(self, arguments: LoftConfigureArguments) -> LoftResult:
+        raise NotImplementedError
+
+    def loft_inspect(self, arguments: LoftInspectArguments) -> LoftResult:
+        raise NotImplementedError
 
     def curve_create(self, arguments: CurveCreateArguments) -> CurveResult:
         raise NotImplementedError

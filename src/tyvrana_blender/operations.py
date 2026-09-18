@@ -116,6 +116,12 @@ from .light_models import (
     LightInspectResult,
     LightSummary,
 )
+from .loft_models import (
+    LoftConfigureArguments,
+    LoftCreateArguments,
+    LoftInspectArguments,
+    LoftResult,
+)
 from .material_author_models import (
     AssignBatchArguments,
     AssignBatchResult,
@@ -380,6 +386,12 @@ class SceneBackend(Protocol):
     def growth_remove(self, arguments: GrowthRemoveArguments) -> GrowthRemoveResult: ...
 
     def growth_sample(self, arguments: GrowthSampleArguments) -> GrowthSampleResult: ...
+
+    def loft_create(self, arguments: LoftCreateArguments) -> LoftResult: ...
+
+    def loft_configure(self, arguments: LoftConfigureArguments) -> LoftResult: ...
+
+    def loft_inspect(self, arguments: LoftInspectArguments) -> LoftResult: ...
 
     def curve_create(self, arguments: CurveCreateArguments) -> CurveResult: ...
 
@@ -884,7 +896,7 @@ _DECLARATIONS = (
         lambda b, a, q: b.coupling_configure(a),
         (
             "Create/update 1..64 named owned native drivers, max 256/scene. "
-            "Typed source→linear/remap→target only: object/pose-bone "
+            "Typed weighted sources→linear/remap/piecewise→target: object/pose-bone "
             "transforms, relative shape values, existing constraint "
             "influence, owned scalar controls. Transform sources use "
             "evaluated LOCAL_SPACE including constraints; destinations use "
@@ -893,13 +905,16 @@ _DECLARATIONS = (
             "namespaces, Python callbacks or polling. Native simple "
             "expressions work with script auto-run disabled. Linear "
             "scale/offset and explicit output clamp; remap may invert output,"
-            " clamps by default. Finite range targets require output bounds. "
+            " clamps by default. Up to eight weighted source channels are added "
+            "before mapping; piecewise knots use constant or linear extrapolation. "
+            "Finite range targets require output bounds. "
             "Obvious channel/parent cycles, unsupported external "
             "dependencies, linked data, key/driver conflicts rejected before "
             "publication; batch rollback. Non-native curve length/volume "
             "metrics are not persistent sources. Unknown external drivers are"
             " preserved."
         ),
+        tags=("rigging", "mapping", "coupled", "batched"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -916,6 +931,7 @@ _DECLARATIONS = (
             "object pointers survive rename/reopen; missing/edited paths are "
             "invalid, never silently rebound."
         ),
+        tags=("rigging", "mapping", "coupled"),
         effect="read_only",
         execution="synchronous",
     ),
@@ -930,6 +946,7 @@ _DECLARATIONS = (
             "values. Externally modified native drivers are protected; no "
             "orphan purge."
         ),
+        tags=("rigging", "mapping", "coupled", "batched"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -1436,6 +1453,53 @@ _DECLARATIONS = (
         ),
         effect="transient",
         execution="synchronous",
+    ),
+    _operation(
+        "blender.loft.create",
+        LoftCreateArguments,
+        LoftResult,
+        lambda b, a, q: b.loft_create(a),
+        (
+            "Create up to 64 editable asymmetric section lofts with transported "
+            "frames, variable four-sided radii, twist, linear/Catmull-Rom "
+            "centerlines and deterministic quad topology. Native meshes support "
+            "downstream modifiers, binding and mesh refinement; use "
+            "curve.create for ordinary native curve sweeps. At most 1024 "
+            "sections/131072 vertices per batch; rollback on failure."
+        ),
+        tags=("structural", "organic", "sections", "batched"),
+        execution="synchronous",
+        effect="mutating",
+    ),
+    _operation(
+        "blender.loft.configure",
+        LoftConfigureArguments,
+        LoftResult,
+        lambda b, a, q: b.loft_configure(a),
+        (
+            "Revise owned loft section positions/radii/twist in one atomic "
+            "batch while preserving objects, UUIDs, ordered topology, groups "
+            "and modifiers. Keep section count, sides, subdivisions and caps "
+            "unchanged. Reject shared data, shape keys and externally edited "
+            "base meshes; use mesh tools for downstream freeform refinement."
+        ),
+        tags=("structural", "organic", "sections", "batched"),
+        execution="synchronous",
+        effect="mutating",
+    ),
+    _operation(
+        "blender.loft.inspect",
+        LoftInspectArguments,
+        LoftResult,
+        lambda b, a, q: b.loft_inspect(a),
+        (
+            "Inspect compact owned loft identities, bounds, vertex/face/section "
+            "counts and base-mesh integrity. Optional full section specs "
+            "limited to 1024 sections; no generated vertex dump."
+        ),
+        tags=("structural", "organic", "sections", "batched"),
+        execution="synchronous",
+        effect="read_only",
     ),
     _operation(
         "blender.curve.create",

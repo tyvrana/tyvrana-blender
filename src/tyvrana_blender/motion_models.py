@@ -82,7 +82,34 @@ class RemapMapping(Model):
         return self
 
 
-type Mapping = Annotated[LinearMapping | RemapMapping, Field(discriminator="kind")]
+class MappingKnot(Model):
+    input: Scalar
+    output: Scalar
+
+
+class PiecewiseMapping(Model):
+    kind: Literal["piecewise"]
+    knots: list[MappingKnot] = Field(min_length=2, max_length=8)
+    extrapolation: Literal["constant", "linear"] = "constant"
+
+    @model_validator(mode="after")
+    def ordered(self) -> Self:
+        if any(
+            b.input - a.input < 1e-8
+            for a, b in zip(self.knots, self.knots[1:], strict=False)
+        ):
+            raise ValueError("Piecewise inputs must increase by at least 1e-8")
+        return self
+
+
+type Mapping = Annotated[
+    LinearMapping | RemapMapping | PiecewiseMapping, Field(discriminator="kind")
+]
+
+
+class WeightedSource(Model):
+    channel: Channel
+    weight: Scalar = 1
 
 
 class CouplingSpec(Model):
@@ -101,6 +128,11 @@ class CouplingSpec(Model):
         )
     )
     mapping: Mapping
+    additional_sources: list[WeightedSource] = Field(
+        default_factory=list,
+        max_length=7,
+        description="Weighted values added to the primary source before mapping.",
+    )
 
 
 class CouplingConfigureArguments(Model):
@@ -146,6 +178,11 @@ class CouplingSummary(Model):
     source: Channel
     target: Channel
     mapping: Mapping
+    additional_sources: list[WeightedSource] = Field(
+        default_factory=list,
+        max_length=7,
+        description="Weighted values added to the primary source before mapping.",
+    )
     valid: bool
     issues: list[str] = Field(default_factory=list, max_length=8)
     source_value: float | None = None

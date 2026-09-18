@@ -2760,6 +2760,21 @@ Captures show the current displayed shading state; progressive render convergenc
 is not certified. Quad views are rejected. Isolated OpenGL validation does not
 establish support for every GPU/backend; capture failures remain explicit.
 
+## Section lofts and multi-source mechanics
+
+`loft.create`, `loft.configure` and `loft.inspect` provide batched editable variable,
+asymmetric section meshes. See [section lofts](docs/section_lofts.md) for geometry,
+ownership and revision limits.
+
+`coupling.configure` supports up to seven `additional_sources` whose weighted values
+are added to the primary source before mapping. `mapping.kind: "piecewise"` accepts
+two to eight increasing input/output knots and constant or linear extrapolation.
+All relationships use internally generated native simple drivers; expressions and
+property paths are never accepted from clients. Existing cycle, ownership, keyed
+channel and bounded-target guards apply to every source. Inspection reports the
+combined source, mapping/evaluated errors and upstream dependencies; `motion.sample`
+measures the same relationships over explicit frames and restores state.
+
 ## Geometry and sampled motion QA
 
 `blender.geometry.inspect` evaluates bounded object/pair queries at the current

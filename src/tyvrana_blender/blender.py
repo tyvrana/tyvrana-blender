@@ -145,6 +145,12 @@ from .light_models import (
     LightSummary,
     light_state,
 )
+from .loft_models import (
+    LoftConfigureArguments,
+    LoftCreateArguments,
+    LoftInspectArguments,
+    LoftResult,
+)
 from .material_author_models import (
     AssignBatchArguments,
     AssignBatchResult,
@@ -789,6 +795,21 @@ class BlenderBackend:
         from . import growth_qa
 
         return growth_qa.sample(arguments)
+
+    def loft_create(self, arguments: LoftCreateArguments) -> LoftResult:
+        from . import loft
+
+        return loft.create(arguments)
+
+    def loft_configure(self, arguments: LoftConfigureArguments) -> LoftResult:
+        from . import loft
+
+        return loft.configure(arguments)
+
+    def loft_inspect(self, arguments: LoftInspectArguments) -> LoftResult:
+        from . import loft
+
+        return loft.inspect(arguments)
 
     def curve_create(self, arguments: CurveCreateArguments) -> CurveResult:
         from . import curves
