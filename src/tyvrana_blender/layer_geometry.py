@@ -72,6 +72,7 @@ class Surface:
     authored: str
     bm: Any
     curve: Any
+    triangle_faces: list[int]
     tree: Any = None
     normals: Any = None
 
@@ -193,6 +194,7 @@ class SurfaceCache:
                 authored_signature(obj),
                 bm,
                 curve,
+                [t.polygon_index for t in data.loop_triangles],
             )
             self.surfaces[name] = result
             self.vertices += count

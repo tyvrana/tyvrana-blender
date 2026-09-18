@@ -4,6 +4,7 @@ import importlib
 import json
 import shutil
 import sys
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ def main() -> None:
     models = importlib.import_module(package + ".models")
     renderer = importlib.import_module(package + ".render")
     artifacts = importlib.import_module(package + ".artifacts")
+    output = importlib.import_module(package + ".render_output")
     errors = importlib.import_module(package + ".errors")
     report: dict[str, Any] = {}
     spool = artifacts.ArtifactSpool()
@@ -63,13 +65,65 @@ def main() -> None:
                     "TYVRANA_RENDER_EVENT " + json.dumps({"event": event}), flush=True
                 )
             else:
-                report["render_seconds"] = seconds
+                report["render_seconds"] = report.get("render_seconds", 0) + seconds
 
-        _, descriptor = renderer.render_image(args, spool, observe=observe)
-        shutil.copyfile(
-            spool.root / (descriptor.artifact_id + ".png"),
-            directory / (directory.name + ".png"),
-        )
+        frames = args.frames or [scene.frame_current]
+        results = []
+        files = []
+        total_bytes = 0
+        for index, frame in enumerate(frames):
+            scene.frame_set(frame)
+            result, descriptor = renderer.render_image(
+                args.model_copy(update={"frames": None}), spool, observe=observe
+            )
+            filename = f"frame-{frame:07d}" + (
+                ".png" if args.format == "png" else ".exr"
+            )
+            destination = directory / (
+                filename if args.frames else directory.name + output.suffix(args)
+            )
+            total_bytes += descriptor.byte_size
+            if total_bytes > args.budget.max_artifact_bytes:
+                raise errors.OperationError(
+                    "artifact_too_large",
+                    "Sequence exceeds max_artifact_bytes; reduce frames or output size",
+                )
+            shutil.copyfile(
+                artifacts.artifact_path(spool.root, descriptor), destination
+            )
+            spool.release((descriptor,))
+            files.append(destination)
+            results.append(
+                dict(
+                    frame=frame,
+                    filename=filename,
+                    byte_size=descriptor.byte_size,
+                    sha256=descriptor.sha256,
+                )
+            )
+            report["output"] = result.model_dump(mode="json")
+            print(
+                "TYVRANA_RENDER_EVENT "
+                + json.dumps(dict(event="frame_complete", completed_frames=index + 1)),
+                flush=True,
+            )
+        if args.frames:
+            with zipfile.ZipFile(
+                directory / (directory.name + ".zip"),
+                "w",
+                compression=zipfile.ZIP_STORED,
+            ) as archive:
+                for path in files:
+                    archive.write(path, path.name)
+                archive.writestr(
+                    "manifest.json",
+                    json.dumps(
+                        dict(output=report["output"], frames=results), sort_keys=True
+                    ),
+                )
+            for path in files:
+                path.unlink()
+        report["completed_frames"] = len(frames)
     except Exception as exc:
         if isinstance(exc, errors.OperationError):
             report["error"] = {

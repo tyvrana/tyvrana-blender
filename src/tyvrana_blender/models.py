@@ -126,7 +126,7 @@ class DeleteResult(Model):
 
 class CyclesRenderOptions(Model):
     device: Literal["cpu", "gpu"] = "cpu"
-    samples: int = Field(default=16, ge=1, le=512)
+    samples: int = Field(default=16, ge=1, le=4096)
     denoise: bool = False
 
 
@@ -182,10 +182,68 @@ class RenderOutput(Model):
     overwrite: bool = False
 
 
+class RenderBudget(Model):
+    max_pixels: int = Field(default=4194304, ge=4096, le=67108864)
+    max_total_pixels: int = Field(default=16777216, ge=4096, le=268435456)
+    max_buffer_bytes: int = Field(default=536870912, ge=65536, le=2147483648)
+    max_artifact_bytes: int = Field(default=67108864, ge=1024, le=134217728)
+    max_seconds: float = Field(default=600, ge=1, le=7200)
+
+
+class RenderColorOptions(Model):
+    view_transform: ObjectName | None = None
+    look: ObjectName | None = None
+    exposure: FiniteFloat | None = Field(default=None, ge=-32, le=32)
+    gamma: FiniteFloat | None = Field(default=None, ge=0.1, le=5)
+
+
+class RenderAOV(Model):
+    name: ObjectName
+    type: Literal["COLOR", "VALUE"] = "COLOR"
+
+
+RenderPass = Literal[
+    "z",
+    "normal",
+    "position",
+    "vector",
+    "uv",
+    "mist",
+    "object_index",
+    "material_index",
+    "shadow",
+    "ambient_occlusion",
+    "emit",
+    "environment",
+    "diffuse_direct",
+    "diffuse_indirect",
+    "diffuse_color",
+    "glossy_direct",
+    "glossy_indirect",
+    "glossy_color",
+    "transmission_direct",
+    "transmission_indirect",
+    "transmission_color",
+]
+
+
 class RenderArguments(Model):
-    width: int = Field(default=512, ge=64, le=1024)
-    height: int = Field(default=512, ge=64, le=1024)
-    format: Literal["png"] = "png"
+    width: int = Field(default=512, ge=64, le=16384)
+    height: int = Field(default=512, ge=64, le=16384)
+    format: Literal["png", "exr", "exr_multilayer"] = "png"
+    bit_depth: Literal[8, 16, 32] = 8
+    color_mode: Literal["RGB", "RGBA"] = "RGBA"
+    color: RenderColorOptions | None = None
+    passes: list[RenderPass] = Field(default_factory=list, max_length=16)
+    aovs: list[RenderAOV] = Field(default_factory=list, max_length=8)
+    frames: list[Annotated[int, Field(ge=-1048574, le=1048574)]] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Explicit frame sequence produces one ZIP with frames "
+        "and metadata.",
+    )
+    budget: RenderBudget = Field(default_factory=RenderBudget)
     cycles: CyclesRenderOptions | None = None
     wireframe: WireframeRenderOptions | None = None
     uv_checker: UVCheckerRenderOptions | None = None
@@ -205,6 +263,45 @@ class RenderArguments(Model):
 
     @model_validator(mode="after")
     def diagnostic_options(self) -> Self:
+        pixels = self.width * self.height
+        if (
+            pixels > self.budget.max_pixels
+            or pixels * len(self.frames or [0]) > self.budget.max_total_pixels
+        ):
+            raise ValueError(
+                "Render exceeds pixel budget; reduce dimensions/frames or "
+                "explicitly raise budget"
+            )
+        # Conservative four-float channels per pass/AOV, before engine-specific memory.
+        if (
+            pixels * 16 * (1 + len(self.passes) + len(self.aovs))
+            > self.budget.max_buffer_bytes
+        ):
+            raise ValueError(
+                "Estimated output buffers exceed max_buffer_bytes; "
+                "reduce passes/resolution"
+            )
+        if (
+            self.format == "png"
+            and self.bit_depth not in (8, 16)
+            or self.format != "png"
+            and self.bit_depth not in (16, 32)
+        ):
+            raise ValueError(
+                "PNG requires bit_depth 8/16; EXR requires explicit bit_depth 16/32"
+            )
+        if (self.passes or self.aovs) and self.format != "exr_multilayer":
+            raise ValueError("Selected passes/AOVs require exr_multilayer")
+        if len(set(self.passes)) != len(self.passes) or len(
+            {a.name for a in self.aovs}
+        ) != len(self.aovs):
+            raise ValueError("Passes and AOV names must be unique")
+        if self.frames and len(set(self.frames)) != len(self.frames):
+            raise ValueError("Sequence frames must be unique")
+        if self.frames and self.show_result:
+            raise ValueError(
+                "show_result is for stills; retrieve sequence frames as artifacts"
+            )
         if self.surface is not None and (
             self.wireframe is not None or self.uv_checker is not None
         ):
@@ -218,7 +315,20 @@ class RenderArguments(Model):
         return self
 
 
+class RenderColorMetadata(Model):
+    display_device: str
+    view_transform: str
+    look: str
+    exposure: float
+    gamma: float
+    output_encoding: Literal["display_referred", "scene_linear"]
+
+
 class RenderResult(Model):
     width: int
     height: int
-    format: Literal["png"] = "png"
+    format: Literal["png", "exr", "exr_multilayer"] = "png"
+    bit_depth: Literal[8, 16, 32] = 8
+    color_mode: Literal["RGB", "RGBA"] = "RGBA"
+    color_management: RenderColorMetadata | None = None
+    output_channels: list[str] = Field(default_factory=list, max_length=256)

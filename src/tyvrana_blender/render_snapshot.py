@@ -8,7 +8,7 @@ from typing import Any
 import bpy  # type: ignore[import-not-found]
 import numpy as np  # type: ignore[import-not-found]
 
-from . import bake_jobs
+from . import bake_jobs, render_output
 from .artifacts import ArtifactSpool
 from .errors import OperationError
 from .models import RenderArguments
@@ -40,10 +40,16 @@ def prepare(
     destination = None
     if arguments.output is not None:
         path = Path(bpy.path.abspath(arguments.output.filepath))
-        if not path.is_absolute() or path.suffix.lower() != ".png" or path.is_symlink():
+        if (
+            not path.is_absolute()
+            or path.suffix.lower() != render_output.suffix(arguments)
+            or path.is_symlink()
+        ):
             raise OperationError(
                 "file_destination_invalid",
-                "Use an absolute or Blender-relative PNG path without symlinks",
+                "Use an absolute or Blender-relative path with the output suffix "
+                + render_output.suffix(arguments)
+                + " and no symlink",
             )
         path = path.resolve()
         if not path.parent.is_dir() or (path.exists() and not path.is_file()):
@@ -133,6 +139,10 @@ def prepare(
         submitted_at="",
         width=arguments.width,
         height=arguments.height,
+        format=arguments.format,
+        bit_depth=arguments.bit_depth,
+        color_mode=arguments.color_mode,
+        frame_count=len(arguments.frames or [0]),
         engine=engine,
         frame=scene.frame_current,
         samples_requested=(
@@ -145,8 +155,11 @@ def prepare(
 
 def display_result(spool: ArtifactSpool, identifier: str) -> None:
     editor = result_editor()
+    directory = spool.root / "jobs" / identifier
+    config = json.loads((directory / "config.json").read_text())
+    arguments = RenderArguments.model_validate(config["arguments"])
     image = bpy.data.images.load(
-        str(spool.root / "jobs" / identifier / (identifier + ".png")),
+        str(directory / (identifier + render_output.suffix(arguments))),
         check_existing=False,
     )
     try:

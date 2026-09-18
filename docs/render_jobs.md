@@ -14,7 +14,7 @@ A short diagnostic render can take one call:
 ```
 
 Submission waits at most `wait_seconds` (default 5, range 0–5). If the render
-succeeds within that interval, the response includes its PNG artifact and MCP
+succeeds within that interval, the response includes its output artifact and MCP
 image. Otherwise it returns current job metadata. Always inspect `state`.
 Process startup and scene snapshotting add overhead even for tiny renders.
 
@@ -42,7 +42,7 @@ status wait or disconnecting a client does not cancel the render.
 | --- | --- |
 | `queued` | Admitted; preparing the scene snapshot or starting the child. |
 | `running` | The child entered native rendering. |
-| `succeeded` | Validated PNG produced; optional output published. |
+| `succeeded` | Validated output produced; optional output published. |
 | `failed` | Preparation, native rendering, encoding, storage or output failed. |
 | `cancel_requested` | Cancellation accepted; child exit/preparation cleanup pending. |
 | `cancelled` | Work stopped and temporary job output removed. |
@@ -59,7 +59,7 @@ Metadata includes job ID, revision, UTC timestamps, elapsed time, engine, frame,
 requested dimensions, requested Cycles samples when applicable, native render
 duration on success, output availability/size/SHA-256 and a bounded error. Queued
 metadata may not yet know the engine/frame. Native duration excludes process
-startup and PNG encoding. Adaptive sampling or a scene time limit can finish
+startup and output encoding. Adaptive sampling or a scene time limit can finish
 before the requested maximum samples. No sample count, percentage or ETA is
 reported: these are not dependable cross-engine observations. No UI text is read.
 
@@ -77,9 +77,8 @@ One canonical request configures both short and long rendering. Current camera,
 frame, scene color management, transparency, lighting and supported engine are
 retained. Built-in Cycles, Eevee and Workbench are supported; custom engines and
 Python-dependent autoexecution are not. Optional Cycles controls select device,
-1–512 samples and denoising. Existing wireframe, UV checker and surface diagnostic
-options remain available. Width/height are 64–1024, default 512; output is PNG
-RGBA8. Resolution percentage becomes 100; borders, cropping, multiview and
+1–4096 samples and denoising. Existing wireframe, UV checker and surface diagnostic
+options remain available. Output formats and resource admission are described below. Resolution percentage becomes 100; borders, cropping, multiview and
 sequencer output are disabled. Compositor processing remains; File Output nodes
 are muted to prevent unintended external writes.
 
@@ -118,13 +117,15 @@ changing project or extension generation.
 
 The newest 16 metadata records and four successful result files are retained.
 An active job is never evicted. Older result eviction preserves its success
-record with `result_available: false`. Results are at most 16 MiB each; transfer
-copies have a separate four-file/64 MiB spool limit. Each explicit retrieval uses
-a fresh correlated binary transfer with byte-size and SHA-256 validation. Core
-releases its outbound artifact automatically after building the inline MCP result;
-clients must not issue a release per output. The bounded adapter source remains
-available for retries, even after interrupted delivery. Status does not duplicate
-binary transport. Core's inline image size limit still applies.
+record with `result_available: false`. Results are at most 128 MiB each; transfer
+copies have a separate four-file spool limit. Each explicit retrieval uses
+a fresh correlated binary transfer with byte-size and SHA-256 validation. Core automatically releases small inline image outputs. Larger images, EXR and
+ZIP outputs are retained, with `retained_artifact_ids` returned to the client.
+`artifact_delivery: "reference"` retains any output without inline image data.
+`tyvrana_export_artifact` atomically saves a retained output on the Core host,
+verifies its integrity and releases it by default. Explicit release is available
+when no export is needed. The adapter source remains available for retries after
+interrupted transfer. Status never duplicates binary transport.
 
 Client/core disconnection does not delete jobs in a surviving adapter worker;
 reconnect and inspect by ID or use the latest-job fallback. File open, extension
@@ -134,13 +135,13 @@ host/generation cannot recover the old job. Parent EOF causes the worker to reap
 its render child and delete its spool. An OS kill of the entire process tree can
 prevent cleanup code; no crash-persistent job database is promised.
 
-To keep a PNG after host shutdown, supply:
+To keep an output after host shutdown, supply:
 
 ```json
 {"width":512,"height":512,"output":{"filepath":"/absolute/output/still.png","overwrite":false}}
 ```
 
-The parent directory must exist; absolute and Blender-relative PNG paths are
+The parent directory must exist; absolute and Blender-relative output paths are
 accepted, symlinks rejected. Validated output is staged in the destination
 filesystem and atomically published. `overwrite` defaults false. The returned
 `saved_filepath`, size and SHA identify this explicit persistent output, not an
@@ -148,3 +149,39 @@ artifact transport path. It is not automatically added to the `.blend` as an ima
 resource or semantic output relationship. Temporary artifacts and job metadata are
 not saved with the project. Submission is conservatively classified `mutating`
 because optional persistent output and interactive preview have lasting effects.
+
+## Production formats and budgets
+
+`format` is `png`, `exr` or `exr_multilayer`. PNG accepts `bit_depth` 8 (default)
+or 16; EXR requires explicit 16 (half) or 32 (float). `color_mode` is RGB or RGBA.
+EXR uses ZIP compression and preserves scene-linear HDR values. Multilayer outputs
+support up to 16 selected native `passes` and eight named COLOR/VALUE `aovs`.
+Author custom material values with `shader.node.create` / `output_aov` and normal
+typed shader links. Pass availability depends on the selected engine; missing
+requested output channels fail validation rather than silently succeeding.
+Results include native channel names/types and color-management metadata. Optional
+`color` overrides view transform, look, exposure and gamma using native validation.
+PNG is display-referred; EXR is scene-linear regardless of display metadata.
+
+| Budget | Default | Maximum |
+| --- | ---: | ---: |
+| Per-image pixels | 4,194,304 | 67,108,864 |
+| Total sequence pixels | 16,777,216 | 268,435,456 |
+| Estimated output buffers | 512 MiB | 2 GiB |
+| Final artifact bytes | 64 MiB | 128 MiB |
+| Child execution seconds | 600 | 7200 |
+
+Each dimension is 64–16384. Requests exceeding default admission must explicitly
+supply a larger allowed `budget`. Buffer admission uses a conservative 16 bytes per
+pixel per combined/pass/AOV output; it is not a bound on all engine allocations.
+The time budget covers child execution, not host snapshot preparation. Output
+budget failures discard temporary results. Cancellation uses the same existing job
+lifecycle for every format.
+
+`frames` is an optional unique list of up to 64 explicit integers. A sequence runs
+in one isolated child and returns an `application/zip` artifact containing frame
+files and a JSON manifest with frame numbers, filenames and integrity hashes.
+`frame_count` and `completed_frames` report progress; completed-frame events can be
+consumed through revision waits. No percentage/ETA is inferred for an active frame.
+`show_result` is restricted to stills. Persistent `output.filepath` must end in
+`.png`, `.exr` or `.zip`, matching the request.

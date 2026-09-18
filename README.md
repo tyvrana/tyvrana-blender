@@ -15,7 +15,7 @@ The extension provides objects, cameras, lights, materials, generated and import
 packed images, shader graphs, semantic mesh modeling, whole-mesh UV controls,
 modifier stacks, Multires sculpting, regional masks and Face Sets, native sculpt
 filters, explicit voxel-remesh blockout, surface-conforming retopology, evaluated
-surface picking, native curves with profiles and evaluated attachments, and PNG
+surface picking, native curves with profiles and evaluated attachments, and bounded production
 scene renders delivered as MCP images.
 
 ## Install and connect
@@ -287,6 +287,9 @@ Names are advertised in sorted order:
 | `blender.file.inspect` | No arguments | Native filepath, saved/dirty flags and disk state |
 | `blender.file.new` | Required `discard_current: true` | Empty unsaved factory document; same host and UI layout |
 | `blender.viewport.inspect` | Optional session-local `viewport_id` | Interactive 3D view, selection and framing state |
+| `blender.viewport.configure` | Explicit viewport, canonical or direction/up orientation, projection/target/distance | Resulting view state |
+| `blender.viewport.capture` | Explicit viewport, optional bounded views and pixel budget | Actual viewport PNG/contact sheet and capture metadata |
+| `blender.geometry.inspect` | Objects/pairs, exemptions, frames and work budgets | Sampled clearance, contact and deformation diagnostics |
 | `blender.viewport.frame` | Explicit `viewport_id`; 1..64 `object_names`, first active | Select and frame a meaningful checkpoint in the intended view |
 | `blender.file.open` | Absolute `.blend` filepath; required `discard_current: true`; optional `load_ui` | Replace current project while retaining MCP response and registration |
 | `blender.file.save` | Optional absolute `.blend` filepath; explicit overwrite permission | Save the current project and update registration metadata |
@@ -304,10 +307,10 @@ Names are advertised in sorted order:
 | `blender.camera.create` | Optional name, projection, initial transform, optics, clipping, shifts, activation | Created camera summary |
 | `blender.camera.configure` | Required `name`; optional projection, optics, clipping, shifts | Updated camera summary |
 | `blender.camera.set_active` | Required `name` | Selected camera summary |
-| `blender.render.image` | Dimensions, Cycles/diagnostic options, bounded initial wait, optional persistent output | Job metadata; optional completed PNG artifact |
+| `blender.render.image` | Dimensions, Cycles/diagnostic options, bounded initial wait, optional persistent output | Job metadata; optional completed image/sequence artifact |
 | `blender.render.status` | Optional job ID/revision; event wait up to 20 seconds | Compact state/timing/error; no image bytes |
 | `blender.render.cancel` | Job ID | Idempotent cancellation acknowledgement/state |
-| `blender.render.result` | Job ID | Successful retained PNG through binary artifact transport |
+| `blender.render.result` | Job ID | Successful retained output through binary artifact transport |
 | `blender.uv.inspect` | Object name | UV map summaries and active roles |
 | `blender.uv.create_map` | Object name; optional map name and activation flags | Updated UV inspection |
 | `blender.uv.set_active` | Object/map names; editing and render activation flags | Updated UV inspection |
@@ -1251,7 +1254,7 @@ the production file and is not sufficient for texel-level QA; use `bake.inspect`
 and close rendered surfaces for that. Filesystem destinations are native resource
 persistence, not shared-path artifact transport. Bytes are never embedded in JSON.
 Parent directories must exist; symlink destinations are rejected. Production PNG
-files have a 128 MiB limit; diagnostic render artifacts retain their 16 MiB limit.
+files have a 128 MiB limit; render artifacts have an explicit budget up to 128 MiB.
 Oversize exports fail before publishing a file, with `artifact_too_large`.
 Current output is intentionally PNG data, not a general image encoder.
 
@@ -2744,6 +2747,26 @@ window. Selection is shared by views using that layer. Inspection returns at mos
 32 views and the first 64 selected names with a total count. These are editor-state
 checks, not physical desktop-visibility certification.
 
+`blender.viewport.configure` sets front/rear/left/right/top/bottom/oblique or a
+custom direction/up vector, projection, target and distance on an explicit view.
+`blender.viewport.capture` reads its actual composited window framebuffer after a
+native redraw, including displayed geometry and overlays. It does not render a
+replacement scene or launch another host. Optional one-to-six view settings produce
+one PNG contact sheet and restore the original view, even on failure. Metadata
+contains viewport identity, quaternion, projection, dimensions, UTC capture time
+and top-left sheet rectangles. The pixel budget defaults to 16 million, up to
+32 million explicitly. Use reference artifact delivery for compact checkpoints.
+Captures show the current displayed shading state; progressive render convergence
+is not certified. Quad views are rejected. Isolated OpenGL validation does not
+establish support for every GPU/backend; capture failures remain explicit.
+
+## Geometry and sampled motion QA
+
+`blender.geometry.inspect` evaluates bounded object/pair queries at the current
+time or explicit frames and restores the original frame. It reports triangle-based
+clearance/contact, optional self-contact and same-topology deformation diagnostics.
+See [geometry QA](docs/geometry_qa.md) for exact semantics and budgets.
+
 ## Project persistence
 
 `blender.file.new` requires `discard_current: true` and discards the current
@@ -2939,7 +2962,7 @@ with native Blender checks for stored precision and render behavior.
 
 ## Rendered images
 
-`blender.render.image` submits an observable, cancellable still-render job using
+`blender.render.image` submits an observable, cancellable still or sequence render job using
 an isolated snapshot of the active scene. A default bounded five-second wait
 returns an inline image for short renders; longer work returns a job identity.
 Use `render.status` with revision-based event waits up to 20 seconds, then
@@ -2951,11 +2974,14 @@ ordinary request deadline.
 {"width":512,"height":512,"format":"png","wait_seconds":0}
 ```
 
-Dimensions default to512 and range64–1024; output is PNG RGBA8. The current camera,
-frame and engine are used unless supported temporary overrides are supplied.
-`show_result: true` displays a packed `Tyvrana Render` preview in an interactive
-host; background hosts reject this option. The host's native Render Result is not
-replaced. Optional `output` atomically persists an explicit PNG destination.
+Dimensions default to 512, with each side from 64 to 16384 subject to explicit
+pixel, buffer, total-frame, artifact-size and time budgets. PNG supports 8/16 bits;
+EXR supports scene-linear half/full float and selected multilayer passes/AOVs.
+An explicit bounded `frames` list produces a ZIP containing outputs and a manifest.
+The active camera/frame/engine are used unless supported overrides are supplied.
+`show_result: true` displays a packed still preview in an interactive host;
+background hosts and sequences reject this option. Optional `output` atomically
+persists an explicit destination with the corresponding extension.
 
 See [render jobs](docs/render_jobs.md) for states, errors, cancellation, ownership,
 limits, file/bake/reload conflicts, snapshot fidelity and host-loss semantics.
@@ -2985,7 +3011,7 @@ saved scene configuration:
 ```
 
 Its fields default to CPU, 16 samples and no denoising. `device` accepts `cpu` or
-`gpu`, `samples` is an integer from 1 through 512, and `denoise` is a boolean.
+`gpu`, `samples` is an integer from 1 through 4096, and `denoise` is a boolean.
 GPU rendering uses the user's existing device configuration; it does not install
 or configure GPU backends. Denoising uses the existing native denoiser settings.
 Omit `cycles` to preserve the current engine and sampling choices; explicit null
@@ -3002,8 +3028,10 @@ Successful submission/status returns `RenderJobStatus`, including `job_id`, stat
 revision, timestamps, dimensions, engine/frame, native duration and output
 availability. Only completed short submissions and explicit `render.result`
 retrieval return artifacts. Core uses the existing correlated binary transfer,
-verifies hashes, emits MCP ImageContent and automatically releases received output
-artifacts. Do not release each outbound image explicitly. The adapter retains four
+verifies hashes and either emits a small inline image or retains the output for
+`tyvrana_export_artifact`. Set `artifact_delivery: "reference"` to retain any output
+without inline image bytes. Export releases by default; inline images are released
+automatically. The adapter retains four
 source results for retries and sixteen job records, until eviction or runtime reset.
 Status replies are compact and never contain binary image bytes.
 

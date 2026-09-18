@@ -72,6 +72,7 @@ from .file_models import (
     FileSaveArguments,
     FileState,
 )
+from .geometry_qa_models import GeometryInspectArguments, GeometryInspectResult
 from .growth_models import (
     GrowthConfigureArguments,
     GrowthCreateArguments,
@@ -336,6 +337,9 @@ from .uv_models import (
     UVUnwrapArguments,
 )
 from .viewport_models import (
+    ViewportCaptureArguments,
+    ViewportCaptureResult,
+    ViewportConfigureArguments,
     ViewportFrameArguments,
     ViewportInspectArguments,
     ViewportInspection,
@@ -506,6 +510,10 @@ class SceneBackend(Protocol):
 
     def motion_sample(self, arguments: MotionSampleArguments) -> MotionSampleResult: ...
 
+    def geometry_inspect(
+        self, arguments: GeometryInspectArguments
+    ) -> GeometryInspectResult: ...
+
     def volume_inspect(
         self, arguments: VolumeInspectArguments
     ) -> VolumeInspectResult: ...
@@ -581,6 +589,14 @@ class SceneBackend(Protocol):
 
     def file_inspect(self) -> FileState: ...
     def file_new(self, arguments: FileNewArguments) -> FileState: ...
+
+    def viewport_configure(
+        self, arguments: ViewportConfigureArguments
+    ) -> ViewportState: ...
+
+    def viewport_capture(
+        self, arguments: ViewportCaptureArguments
+    ) -> tuple[ViewportCaptureResult, ArtifactDescriptor]: ...
 
     def viewport_inspect(
         self, arguments: ViewportInspectArguments
@@ -783,6 +799,7 @@ def _operation[A: BaseModel, R: BaseModel](
     effect: Literal["read_only", "mutating", "transient", "lifecycle"],
     execution: Literal["synchronous", "job_start", "job_status", "lifecycle"],
     requires_interactive: bool = False,
+    tags: tuple[str, ...] = (),
     input_artifacts: Literal["none", "required"] = "none",
     output_artifacts: Literal["none", "optional", "required"] = "none",
 ) -> OperationSpec:
@@ -793,6 +810,8 @@ def _operation[A: BaseModel, R: BaseModel](
     contract = OperationContract(
         name=name,
         description=description,
+        category=name.split(".")[1],
+        tags=tags,
         arguments_schema=validator.json_schema(),
         result_schema=result_validator.json_schema(mode="serialization"),
         effect=effect,
@@ -1000,6 +1019,29 @@ _DECLARATIONS = (
             " guarantee, hidden polling, physical simulation or arbitrary "
             "code; non-native metrics remain read-only diagnostics."
         ),
+        effect="transient",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.geometry.inspect",
+        GeometryInspectArguments,
+        GeometryInspectResult,
+        lambda b, a, q: b.geometry_inspect(a),
+        (
+            "Bounded world-space triangle surface clearance/contact, component "
+            "containment, nonadjacent self-contact, degeneration and reference-local "
+            "normal/area diagnostics. Batch objects/pairs over explicit scene frames; "
+            "restore frame/subframe. Face-pair exemptions exclude intended contacts. "
+            "Branch-and-bound triangle distances; fail if work budget exceeded. "
+            "Normal reversal is not inversion proof; signed volume reversal is global "
+            "orientation only. Sampled motion, never continuous collision "
+            "certification. "
+            "Realize instances first; closed-surface containment assumes no"
+            " self intersections. "
+            "At most 128 summaries, 256 details, 1M vertex samples, 250k "
+            "triangles/sample."
+        ),
+        tags=("collision", "clearance", "self_intersection", "deformation", "sampled"),
         effect="transient",
         execution="synchronous",
     ),
@@ -2047,6 +2089,38 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.viewport.configure",
+        ViewportConfigureArguments,
+        ViewportState,
+        lambda b, a, q: b.viewport_configure(a),
+        "Set an explicit interactive non-quad viewport to canonical or custom world "
+        "direction/up, target, distance and orthographic/perspective projection. "
+        "Coordinates describe a view, not a scene camera. Returns actual quaternion "
+        "and view state. Use viewport.frame to fit objects.",
+        tags=("orientation", "checkpoint"),
+        effect="mutating",
+        execution="synchronous",
+        requires_interactive=True,
+    ),
+    _operation(
+        "blender.viewport.capture",
+        ViewportCaptureArguments,
+        ViewportCaptureResult,
+        lambda b, a, q: b.viewport_capture(a),
+        "Capture the actual specified interactive 3D editor framebuffer as a PNG "
+        "artifact. Includes viewport overlays; excludes editor headers. No background "
+        "render. Optional "
+        "1..6 canonical/custom views form one contact sheet (row-major, top-left "
+        "metadata coordinates). Native redraw precedes capture; view state restores "
+        "on success/failure. Reports each view, dimensions and UTC time. Explicit "
+        "pixel budget up to 32M; artifact transport, no binary JSON.",
+        tags=("screenshot", "multiview", "checkpoint", "artifact"),
+        effect="transient",
+        execution="synchronous",
+        requires_interactive=True,
+        output_artifacts="required",
+    ),
+    _operation(
         "blender.viewport.inspect",
         ViewportInspectArguments,
         ViewportInspection,
@@ -2617,17 +2691,24 @@ _DECLARATIONS = (
         RenderArguments,
         RenderJobStatus,
         lambda b, a, q: b.render(a, q.request_id),
-        "Submit one isolated still-render job promptly; queued includes scene "
+        "Submit an isolated still or bounded frame-sequence render job; queued "
+        "includes "
+        "scene "
         "snapshot preparation. One active job, no queue; mutations, bake, file "
         "and reload are blocked while active. Current scene camera/frame/engine "
-        "or temporary Cycles/diagnostic settings; PNG RGBA8, 64..1024 px. "
+        "or temporary Cycles/diagnostic settings. PNG 8/16, EXR half/full float or "
+        "multilayer passes/AOVs; dimensions 64..16384 within explicit pixel/buffer/"
+        "artifact/time budgets. Sequences (max64 frames) return ZIP+manifest. "
         "Optional wait_seconds 0..5 (default 5) returns inline image on success "
-        "or a job ID to resume via render.status. Render time has no request "
-        "deadline. Jobs/results survive client disconnect, not host/reload/file-open; "
-        "retain 16 job records/4 result files. Optional output persists PNG "
+        "or job ID for render.status. Job time is bounded by budget.max_seconds. "
+        "Jobs/results survive disconnect, not host/reload/file-open; "
+        "retain 16 job records/4 result files. Optional output persists an artifact "
         "atomically to an explicit destination; temporary output is not saved "
         "in the project. Live image snapshot buffers cap at 512 MiB/128 images. "
-        "show_result needs an interactive host.",
+        "show_result needs an interactive host and a still. Frame progress and "
+        "color/channel metadata are inspectable. Additional passes need multilayer; "
+        "AOV outputs are authored with shader nodes.",
+        tags=("render", "production", "exr", "sequence", "artifact"),
         effect="mutating",
         execution="job_start",
         output_artifacts="optional",
@@ -2669,9 +2750,9 @@ _DECLARATIONS = (
         RenderJobArguments,
         RenderJobStatus,
         lambda b, a, q: b.render_result(a),
-        "Retrieve a succeeded render as binary PNG artifact/inline MCP image. "
-        "Only this operation and completed short submits deliver image bytes. "
-        "Core auto-releases transfer artifacts; no explicit release needed. "
+        "Retrieve succeeded PNG/EXR/sequence ZIP through binary artifact transfer. "
+        "Only this operation and completed short submits deliver output bytes. "
+        "Core releases inline images; export/release retained_artifact_ids. "
         "Retained source permits retries until evicted by four newer results "
         "or host/reload/file-open shutdown. Metadata retains success after eviction, "
         "with result_available=false. Unfinished/failed/cancelled/evicted "

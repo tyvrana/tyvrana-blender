@@ -37,6 +37,7 @@ from tyvrana_protocol import (
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
+from .artifacts import artifact_path
 from .incoming import InputError, InputStore
 from .operations import REGISTRY, Response
 from .render_jobs import OPERATIONS as RENDER_OPERATIONS
@@ -168,7 +169,7 @@ class NetworkClient:
     def release(self, response: OperationSuccess | OperationFailure) -> None:
         if isinstance(response, OperationSuccess):
             for descriptor in response.artifacts:
-                (self.spool / (descriptor.artifact_id + ".png")).unlink(missing_ok=True)
+                artifact_path(self.spool, descriptor).unlink(missing_ok=True)
 
     async def deliver(
         self, socket: ClientConnection, response: OperationSuccess | OperationFailure
@@ -203,9 +204,7 @@ class NetworkClient:
                         offset = 0
                         # The path is private IPC within this extension, derived from
                         # a validated opaque ID; it never enters a protocol message.
-                        with (self.spool / (descriptor.artifact_id + ".png")).open(
-                            "rb"
-                        ) as stream:
+                        with artifact_path(self.spool, descriptor).open("rb") as stream:
                             while chunk := stream.read(MAX_ARTIFACT_CHUNK_SIZE):
                                 if response.request_id not in self.pending:
                                     return

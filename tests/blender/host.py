@@ -11,6 +11,7 @@ import bpy  # type: ignore[import-not-found]
 
 adapter = importlib.import_module("bl_ext.user_default.tyvrana_blender.blender")
 control = Path(os.environ["TYVRANA_TEST_CONTROL"])
+bpy.context.preferences.view.show_splash = False
 preferences = bpy.context.preferences.addons[adapter.__package__].preferences
 if "TYVRANA_TEST_PORT" in os.environ:
     preferences.port = int(os.environ["TYVRANA_TEST_PORT"])

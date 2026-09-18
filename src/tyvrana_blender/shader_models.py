@@ -11,7 +11,7 @@ from .models import InspectArguments, Model, ObjectName, PageInfo
 from .numeric import Float32, Vector32
 
 type NodeType = Literal[
-    "image_texture", "texture_coordinate", "mapping", "normal_map", "bump"
+    "image_texture", "texture_coordinate", "mapping", "normal_map", "bump", "output_aov"
 ]
 type Interpolation = Literal["linear", "closest", "cubic", "smart"]
 type Projection = Literal["flat", "box", "sphere", "tube"]
@@ -23,6 +23,7 @@ type SocketDefault = (
 )
 
 NODE_TYPES = {
+    "output_aov": "ShaderNodeOutputAOV",
     "image_texture": "ShaderNodeTexImage",
     "texture_coordinate": "ShaderNodeTexCoord",
     "mapping": "ShaderNodeMapping",
@@ -30,6 +31,7 @@ NODE_TYPES = {
     "bump": "ShaderNodeBump",
 }
 NODE_FIELDS = {
+    "output_aov": {"aov_name", "aov_color", "aov_value"},
     "image_texture": {"image_name", "interpolation", "projection", "extension"},
     "texture_coordinate": {"from_instancer"},
     "mapping": {"vector_type", "location", "rotation", "scale"},
@@ -37,12 +39,20 @@ NODE_FIELDS = {
     "bump": {"strength", "distance", "invert"},
 }
 NODE_SOCKETS = {
+    "aov_color": "Color",
+    "aov_value": "Value",
     "location": "Location",
     "rotation": "Rotation",
     "scale": "Scale",
     "strength": "Strength",
     "distance": "Distance",
 }
+
+
+class AOVSettings(Model):
+    aov_name: str
+    aov_color: list[float]
+    aov_value: float
 
 
 class ImageTextureSettings(Model):
@@ -132,7 +142,8 @@ class TangentSettings(Model):
 
 
 type NodeSettings = (
-    ImageTextureSettings
+    AOVSettings
+    | ImageTextureSettings
     | TextureCoordinateSettings
     | MappingSettings
     | NormalMapSettings
@@ -198,6 +209,9 @@ class ShaderInspectArguments(InspectArguments):
 
 
 class NodePatch(Model):
+    aov_name: ObjectName | None = None
+    aov_value: Float32 | None = None
+    aov_color: Annotated[list[Float32], Field(min_length=4, max_length=4)] | None = None
     image_name: ObjectName | None = None
     interpolation: Interpolation | None = None
     projection: Projection | None = None

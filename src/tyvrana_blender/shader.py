@@ -11,6 +11,7 @@ from .models import PageInfo
 from .shader_models import (
     NODE_SOCKETS,
     NODE_TYPES,
+    AOVSettings,
     BumpSettings,
     ConnectArguments,
     DisconnectArguments,
@@ -90,6 +91,12 @@ def settings(node: Any) -> NodeSettings | None:
         return list(socket(node.inputs, identifier).default_value)
 
     match node.bl_idname:
+        case "ShaderNodeOutputAOV":
+            return AOVSettings(
+                aov_name=node.aov_name,
+                aov_color=vector("Color"),
+                aov_value=scalar("Value"),
+            )
         case "ShaderNodeBsdfPrincipled":
             return PrincipledSettings(
                 subsurface_method=node.subsurface_method.lower(),
@@ -327,7 +334,7 @@ def configure_node(
         if owner.is_property_readonly(attribute):
             raise OperationError("invalid_context", "Node property is not editable")
         original = getattr(owner, attribute)
-        if key in {"location", "rotation", "scale"}:
+        if key in {"location", "rotation", "scale", "aov_color"}:
             original = list(original)
         writes.append((owner, attribute, original, value))
     try:

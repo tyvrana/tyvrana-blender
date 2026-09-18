@@ -5,6 +5,8 @@ from pydantic import ValidationError
 
 from tyvrana_blender.operations import REGISTRY
 from tyvrana_blender.viewport_models import (
+    ViewportCaptureArguments,
+    ViewportConfigureArguments,
     ViewportFrameArguments,
     ViewportInspectArguments,
 )
@@ -31,3 +33,30 @@ def test_discovery_and_frame_effects_are_explicit() -> None:
     assert REGISTRY["blender.viewport.inspect"].contract.effect == "read_only"
     frame = REGISTRY["blender.viewport.frame"].contract
     assert frame.effect == "mutating" and frame.requires_interactive
+
+
+@pytest.mark.parametrize(
+    "orientation",
+    [
+        {"direction": [0, 0, 0]},
+        {"direction": [0, 0, 1], "up": [0, 0, 1]},
+        "camera",
+        {"direction": [1, 0, 0], "script": "pass"},
+    ],
+)
+def test_invalid_view_directions(orientation: object) -> None:
+    with pytest.raises(ValidationError):
+        ViewportConfigureArguments.model_validate(
+            {"viewport_id": "1:2", "orientation": orientation}
+        )
+
+
+def test_capture_bounds_and_artifact_contract() -> None:
+    with pytest.raises(ValidationError):
+        ViewportCaptureArguments.model_validate(
+            {"viewport_id": "1:2", "views": [{"orientation": "front"}] * 7}
+        )
+    contract = REGISTRY["blender.viewport.capture"].contract
+    assert contract.output_artifacts == "required"
+    assert contract.effect == "transient"
+    assert "multiview" in contract.tags

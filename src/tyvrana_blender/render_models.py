@@ -65,6 +65,8 @@ class RenderJobStatus(RenderResult):
     frame: int | None = None
     samples_requested: int | None = None
     result_available: bool = False
+    frame_count: int = 1
+    completed_frames: int = 0
     byte_size: int | None = None
     sha256: str | None = None
     saved_filepath: str | None = None

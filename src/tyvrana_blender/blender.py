@@ -94,6 +94,7 @@ from .file_models import (
     FileSaveArguments,
     FileState,
 )
+from .geometry_qa_models import GeometryInspectArguments, GeometryInspectResult
 from .growth_models import (
     GrowthConfigureArguments,
     GrowthCreateArguments,
@@ -348,6 +349,9 @@ from .uv_models import (
     UVUnwrapArguments,
 )
 from .viewport_models import (
+    ViewportCaptureArguments,
+    ViewportCaptureResult,
+    ViewportConfigureArguments,
     ViewportFrameArguments,
     ViewportInspectArguments,
     ViewportInspection,
@@ -1009,6 +1013,26 @@ class BlenderBackend:
 
         return files.save(arguments)
 
+    def viewport_configure(
+        self, arguments: ViewportConfigureArguments
+    ) -> ViewportState:
+        main_thread()
+        from . import viewport
+
+        return viewport.configure(arguments)
+
+    def viewport_capture(
+        self, arguments: ViewportCaptureArguments
+    ) -> tuple[ViewportCaptureResult, ArtifactDescriptor]:
+        main_thread()
+        from . import viewport
+
+        if self.spool is None:
+            raise OperationError(
+                "artifact_unavailable", "Artifact spool is unavailable"
+            )
+        return viewport.capture(arguments, self.spool)
+
     def viewport_inspect(
         self, arguments: ViewportInspectArguments
     ) -> ViewportInspection:
@@ -1298,6 +1322,14 @@ class BlenderBackend:
         from . import motion
 
         return motion.sample(arguments)
+
+    def geometry_inspect(
+        self, arguments: GeometryInspectArguments
+    ) -> GeometryInspectResult:
+        main_thread()
+        from . import geometry_qa
+
+        return geometry_qa.inspect(arguments)
 
     def volume_inspect(self, arguments: VolumeInspectArguments) -> VolumeInspectResult:
         from . import volumes

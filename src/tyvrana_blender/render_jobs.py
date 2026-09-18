@@ -22,9 +22,10 @@ from tyvrana_protocol import (
     OperationRequest,
 )
 
+from . import render_output
 from .artifacts import ArtifactSpool
 from .errors import OperationError
-from .models import RenderArguments
+from .models import RenderArguments, RenderResult
 from .operations import Response, SceneBackend, execute
 from .render_models import (
     TERMINAL,
@@ -121,6 +122,10 @@ class RenderJobs:
                 submitted_at=utc(),
                 width=arguments.width,
                 height=arguments.height,
+                format=arguments.format,
+                bit_depth=arguments.bit_depth,
+                color_mode=arguments.color_mode,
+                frame_count=len(arguments.frames or [0]),
             ),
             arguments,
             directory,
@@ -180,9 +185,20 @@ class RenderJobs:
         # bounded retained source is independent and remains retryable.
         spool = ArtifactSpool(self.spool)
         try:
-            with spool.reserve() as (identifier, path):
-                shutil.copyfile(job.directory / (job.status.job_id + ".png"), path)
-                descriptor = spool.describe(identifier)
+            with spool.reserve(render_output.media_type(job.arguments)) as (
+                identifier,
+                path,
+            ):
+                shutil.copyfile(
+                    job.directory
+                    / (job.status.job_id + render_output.suffix(job.arguments)),
+                    path,
+                )
+                descriptor = spool.describe(
+                    identifier,
+                    render_output.media_type(job.arguments),
+                    maximum=job.arguments.budget.max_artifact_bytes,
+                )
                 return self.observe(job), descriptor
         except Exception as exc:
             raise OperationError(
@@ -281,12 +297,18 @@ class RenderJobs:
                 "Output destination changed or is unavailable",
             )
         fd, temporary = tempfile.mkstemp(
-            prefix=".tyvrana-render-", suffix=".png", dir=target.parent
+            prefix=".tyvrana-render-",
+            suffix=render_output.suffix(job.arguments),
+            dir=target.parent,
         )
         os.close(fd)
         path = Path(temporary)
         try:
-            shutil.copyfile(job.directory / (job.status.job_id + ".png"), path)
+            shutil.copyfile(
+                job.directory
+                / (job.status.job_id + render_output.suffix(job.arguments)),
+                path,
+            )
             assert job.arguments.output is not None
             if job.arguments.output.overwrite:
                 os.replace(path, target)
@@ -343,17 +365,24 @@ class RenderJobs:
                 job.stopping = asyncio.create_task(self.stop_process(job.process))
             assert job.process.stdout is not None
             tail = bytearray()
-            async for line in job.process.stdout:
-                tail.extend(line)
-                del tail[:-8192]
-                if line.startswith(MARKER.encode()):
-                    event = json.loads(line[len(MARKER) :])
-                    if (
-                        event["event"] == "running"
-                        and job.status.state != "cancel_requested"
-                    ):
-                        self.change(job, state="running", started_at=utc())
-            returncode = await job.process.wait()
+            async with asyncio.timeout(job.arguments.budget.max_seconds):
+                async for line in job.process.stdout:
+                    tail.extend(line)
+                    del tail[:-8192]
+                    if line.startswith(MARKER.encode()):
+                        event = json.loads(line[len(MARKER) :])
+                        if (
+                            event["event"] == "running"
+                            and job.status.state != "cancel_requested"
+                        ):
+                            self.change(
+                                job,
+                                state="running",
+                                started_at=job.status.started_at or utc(),
+                            )
+                        elif event["event"] == "frame_complete":
+                            self.change(job, completed_frames=event["completed_frames"])
+                returncode = await job.process.wait()
             if job.stopping is not None:
                 await job.stopping
             if self.is_cancelled(job):
@@ -375,7 +404,11 @@ class RenderJobs:
                 )
             # Validate bytes again in the transfer-owning process.
             spool = ArtifactSpool(job.directory)
-            descriptor = spool.describe(identifier)
+            descriptor = spool.describe(
+                identifier,
+                render_output.media_type(job.arguments),
+                maximum=job.arguments.budget.max_artifact_bytes,
+            )
             if job.arguments.show_result:
                 job.shown = asyncio.get_running_loop().create_future()
                 await self.send(
@@ -395,9 +428,10 @@ class RenderJobs:
                 self.persist(job, config["destination"])
             retained = [j for j in self.jobs.values() if j.status.result_available]
             for older in retained[: max(0, len(retained) - MAX_RESULTS + 1)]:
-                (older.directory / (older.status.job_id + ".png")).unlink(
-                    missing_ok=True
-                )
+                (
+                    older.directory
+                    / (older.status.job_id + render_output.suffix(older.arguments))
+                ).unlink(missing_ok=True)
                 self.change(older, result_available=False)
             self.change(
                 job,
@@ -406,6 +440,13 @@ class RenderJobs:
                 byte_size=descriptor.byte_size,
                 sha256=descriptor.sha256,
                 render_seconds=report["render_seconds"],
+                completed_frames=report.get("completed_frames", 1),
+                color_management=RenderResult.model_validate(
+                    report["output"]
+                ).color_management
+                if "output" in report
+                else None,
+                output_channels=report.get("output", {}).get("output_channels", []),
             )
         except asyncio.CancelledError:
             if job.process is not None:
@@ -414,6 +455,12 @@ class RenderJobs:
         except Exception as exc:
             if job.process is not None and job.process.returncode is None:
                 await self.stop_process(job.process)
+            if isinstance(exc, TimeoutError):
+                exc = OperationError(
+                    "render_budget_exceeded",
+                    "Render exceeded budget.max_seconds; reduce workload or "
+                    "explicitly raise budget",
+                )
             error = exc.error if isinstance(exc, OperationError) else None
             if error is None:
                 log.exception("Render job failed")
@@ -437,7 +484,10 @@ class RenderJobs:
                 job, completed_at=utc(), elapsed_seconds=time.monotonic() - job.created
             )
             for path in job.directory.iterdir():
-                if path.name != identifier + ".png" or job.status.state != "succeeded":
+                if (
+                    path.name != identifier + render_output.suffix(job.arguments)
+                    or job.status.state != "succeeded"
+                ):
                     if path.is_dir():
                         shutil.rmtree(path)
                     else:

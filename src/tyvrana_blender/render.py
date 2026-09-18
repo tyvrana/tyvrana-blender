@@ -10,6 +10,7 @@ from typing import Any
 import bpy  # type: ignore[import-not-found]
 from tyvrana_protocol import ArtifactDescriptor
 
+from . import render_output
 from .artifacts import ArtifactSpool, ArtifactTooLarge, SpoolFull
 from .errors import OperationError
 from .models import RenderArguments, RenderResult
@@ -78,8 +79,7 @@ def render_image(
         raise OperationError("invalid_context", "Blender is already rendering")
     editor = result_editor() if arguments.show_result else None
     render = scene.render
-    image = render.image_settings
-    overrides = [
+    overrides: list[tuple[Any, str, Any]] = [
         (render, "resolution_x", arguments.width),
         (render, "resolution_y", arguments.height),
         (render, "resolution_percentage", 100),
@@ -87,10 +87,7 @@ def render_image(
         (render, "use_crop_to_border", False),
         (render, "use_multiview", False),
         (render, "use_sequencer", False),
-        (image, "media_type", "IMAGE"),
-        (image, "file_format", "PNG"),
-        (image, "color_mode", "RGBA"),
-        (image, "color_depth", "8"),
+        (render, "use_single_layer", True),
     ]
     if arguments.uv_checker is not None or (
         arguments.surface is not None and arguments.cycles is None
@@ -119,7 +116,11 @@ def render_image(
     )
     saved = [(obj, key, getattr(obj, key)) for obj, key, _ in overrides]
     try:
-        with spool.reserve() as (artifact_id, path):
+        output_media = render_output.media_type(arguments, sequence=False)
+        with (
+            spool.reserve(output_media) as (artifact_id, path),
+            render_output.output_settings(scene, bpy.context.view_layer, arguments),
+        ):
             try:
                 for obj, key, value in overrides:
                     setattr(obj, key, value)
@@ -130,7 +131,11 @@ def render_image(
                     if observe is not None:
                         observe("running", 0)
                     started = time.monotonic()
-                    outcome = bpy.ops.render.render("EXEC_DEFAULT", write_still=False)
+                    outcome = bpy.ops.render.render(
+                        "EXEC_DEFAULT",
+                        write_still=False,
+                        layer=bpy.context.view_layer.name,
+                    )
                     if observe is not None:
                         observe("completed", time.monotonic() - started)
                 result = bpy.data.images.get("Render Result")
@@ -139,27 +144,60 @@ def render_image(
                         "render_failed", "Blender did not complete the render"
                     )
                 result.save_render(filepath=str(path), scene=scene)
-                with path.open("rb") as stream:
-                    header = stream.read(24)
-                if (
-                    header[:8] != b"\x89PNG\r\n\x1a\n"
-                    or header[12:16] != b"IHDR"
-                    or len(header) != 24
-                    or struct.unpack("!II", header[16:24])
-                    != (arguments.width, arguments.height)
-                ):
-                    raise OperationError(
-                        "render_failed", "Blender produced unexpected PNG dimensions"
-                    )
+                channels = []
+                if arguments.format == "png":
+                    with path.open("rb") as stream:
+                        header = stream.read(29)
+                    if (
+                        header[:8] != b"\x89PNG\r\n\x1a\n"
+                        or len(header) != 29
+                        or struct.unpack("!II", header[16:24])
+                        != (arguments.width, arguments.height)
+                        or header[24] != arguments.bit_depth
+                    ):
+                        raise OperationError(
+                            "render_failed", "Unexpected PNG dimensions/depth"
+                        )
+                else:
+                    width, height, types = render_output.exr_header(path)
+                    if (width, height) != (arguments.width, arguments.height):
+                        raise OperationError(
+                            "render_failed", "Unexpected EXR dimensions"
+                        )
+                    channels = sorted(types)
+                    # Depth/index passes remain float even in half-float color EXR.
+                    requested = [
+                        render_output.PASS_NAMES[p] for p in arguments.passes
+                    ] + [a.name for a in arguments.aovs]
+                    missing = [
+                        n
+                        for n in requested
+                        if not any("." + n + "." in c for c in channels)
+                    ]
+                    if missing:
+                        raise OperationError(
+                            "render_pass_unavailable",
+                            "Engine omitted requested output passes: "
+                            + ", ".join(missing),
+                        )
+                metadata = render_output.color_metadata(scene, arguments)
             finally:
                 # Restore format before its dependent settings (mode/depth).
                 for obj, key, value in saved:
                     setattr(obj, key, value)
-            descriptor = spool.describe(artifact_id)
+            descriptor = spool.describe(
+                artifact_id, output_media, maximum=arguments.budget.max_artifact_bytes
+            )
             if editor is not None:
                 show_result(editor, result)
             return RenderResult(
-                width=arguments.width, height=arguments.height
+                width=arguments.width,
+                height=arguments.height,
+                format=arguments.format,
+                bit_depth=arguments.bit_depth,
+                color_mode=arguments.color_mode,
+                color_management=metadata,
+                output_channels=channels,
             ), descriptor
     except OperationError:
         raise
@@ -167,7 +205,7 @@ def render_image(
         raise OperationError("adapter_busy", "Too many renders await transfer") from exc
     except ArtifactTooLarge as exc:
         raise OperationError(
-            "artifact_too_large", "Rendered PNG exceeds the byte limit"
+            "artifact_too_large", "Render artifact exceeds max_artifact_bytes"
         ) from exc
     except Exception as exc:
         logger.exception("Blender render failed")

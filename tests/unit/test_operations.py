@@ -69,6 +69,10 @@ from tyvrana_blender.file_models import (
     FileSaveArguments,
     FileState,
 )
+from tyvrana_blender.geometry_qa_models import (
+    GeometryInspectArguments,
+    GeometryInspectResult,
+)
 from tyvrana_blender.growth_models import (
     GrowthConfigureArguments,
     GrowthCreateArguments,
@@ -294,6 +298,9 @@ from tyvrana_blender.uv_models import (
     UVUnwrapArguments,
 )
 from tyvrana_blender.viewport_models import (
+    ViewportCaptureArguments,
+    ViewportCaptureResult,
+    ViewportConfigureArguments,
     ViewportFrameArguments,
     ViewportInspectArguments,
     ViewportInspection,
@@ -673,6 +680,21 @@ class Backend:
         self, arguments: ViewportInspectArguments
     ) -> ViewportInspection:
         return ViewportInspection(viewports=[])
+
+    def geometry_inspect(
+        self, arguments: GeometryInspectArguments
+    ) -> GeometryInspectResult:
+        raise NotImplementedError
+
+    def viewport_configure(
+        self, arguments: ViewportConfigureArguments
+    ) -> ViewportState:
+        raise NotImplementedError
+
+    def viewport_capture(
+        self, arguments: ViewportCaptureArguments
+    ) -> tuple[ViewportCaptureResult, ArtifactDescriptor]:
+        raise NotImplementedError
 
     def viewport_frame(self, arguments: ViewportFrameArguments) -> ViewportState:
         raise NotImplementedError
