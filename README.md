@@ -120,6 +120,20 @@ such changes require a stopped-process installation. This is a specific limitati
 not the normal development update path. An older installed adapter without the
 reload operation likewise has no endpoint through which to bootstrap it.
 
+Blender's wheel manager identifies installed dependencies by distribution name and
+version. Reinstalling an extension does not replace changed wheel contents with the
+same identity. For that dependency transition, with all Blender hosts stopped,
+remove and reinstall the extension in separate CLI processes:
+
+```sh
+blender --command extension remove --no-prefs user_default.tyvrana_blender
+blender --command extension install-file --repo user_default --enable --no-prefs dist/tyvrana_blender-0.1.0.zip
+```
+
+Use the repository identifier for your installation. `--no-prefs` preserves saved
+preferences; the native extension manager handles dependency removal/installation.
+Verify successful registration and the current source/build identity afterward.
+
 For that one-time transition, save through `blender.file.save`, verify
 `blender.file.inspect`, shut down the host without UI automation and install the
 archive with Blender's extension command (`--no-prefs` preserves an already enabled
