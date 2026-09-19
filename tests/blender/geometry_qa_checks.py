@@ -98,6 +98,24 @@ class GeometryTests(TopologyTests):
         self.assertEqual(result["right_representatives_inside_left"], 1)
         self.assertEqual(result["left_representatives_inside_right"], 0)
 
+    def test_leaf_bounds_prune_disjoint_self_triangles(self) -> None:
+        vertices: list[list[float]] = []
+        faces = []
+        for i in range(12):
+            start = len(vertices)
+            vertices.extend([[i * 2, 0, 0], [i * 2 + 1, 0, 0], [i * 2, 1, 0]])
+            faces.append([start, start + 1, start + 2])
+        self.call("mesh.create", name="Separated", vertices=vertices, faces=faces)
+        report = self.call(
+            "geometry.inspect",
+            objects=[dict(object_name="Separated", self_intersection=True)],
+            containment=False,
+        )
+        self.assertEqual(
+            report["samples"][0]["objects"][0]["self_contact_triangle_pairs"], 0
+        )
+        self.assertEqual(report["triangle_tests"], 0)
+
     def test_triangle_crossing_edge_minimum_and_small_scale(self) -> None:
         for scale in (1, 0.0001, 1000):
             a = [Vector(p) * scale for p in [(0, 0, 0), (2, 0, 0), (0, 2, 0)]]

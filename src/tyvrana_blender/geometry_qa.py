@@ -237,6 +237,20 @@ def proximity(
                     left is right and i >= j or set(a.indices[i]) & set(b.indices[j])
                 ):
                     continue
+                # Leaf bounds group up to eight triangles. Most nonadjacent
+                # triangles in a dense self-query have disjoint individual
+                # bounds: reject those before expensive exact triangle math.
+                threshold = (
+                    args.tolerance**2
+                    if same
+                    else max(minimum**2, args.tolerance**2)
+                )
+                lower = sum(
+                    max(0, a.lo[i][k] - b.hi[j][k], b.lo[j][k] - a.hi[i][k]) ** 2
+                    for k in range(3)
+                )
+                if lower > threshold:
+                    continue
                 budget.test()
                 if any(a.faces[i] in x and b.faces[j] in y for x, y in exemptions):
                     exempt += 1

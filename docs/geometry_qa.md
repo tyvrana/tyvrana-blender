@@ -79,3 +79,10 @@ be missed; a zero risky-interval count is not continuous clearance certification
 The worst frame identifies minimum clearance, or minimum local Jacobian for reference
 queries without clearance. A single batched request restores the original time on
 success and failure.
+
+
+Self-contact traversal prunes both hierarchy nodes and individual triangle
+bounds before exact distance tests. This matters for dense, mostly clear meshes:
+a leaf containing several neighboring triangles does not imply every triangle
+pair requires exact testing. `triangle_tests` counts the remaining exact work.
+Pruning preserves the same distance tolerance and closest-contact semantics.
