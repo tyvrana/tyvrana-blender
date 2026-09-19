@@ -36,7 +36,7 @@ def test_native_layer_correction(profile: dict[str, str], tmp_path: Path) -> Non
 async def test_layer_correction_motion_and_persistence(
     profile: dict[str, str], tmp_path: Path
 ) -> None:
-    calls = []
+    calls: list[dict[str, Any]] = []
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=False):

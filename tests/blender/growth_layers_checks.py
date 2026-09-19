@@ -6,21 +6,29 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import bpy
+import bpy  # type: ignore[import-not-found]
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tests.blender.growth_checks import GrowthTests, growth, models
 from tests.blender.realized_growth_reference import template_points
 
-layers = importlib.import_module(growth.__package__ + ".growth_layers")
-lm = importlib.import_module(growth.__package__ + ".growth_layers_models")
-elements = importlib.import_module(growth.__package__ + ".geometry_elements")
-qa = importlib.import_module(growth.__package__ + ".geometry_qa")
-qm = importlib.import_module(growth.__package__ + ".geometry_qa_models")
+layers = importlib.import_module(
+    "bl_ext.user_default.tyvrana_blender" + ".growth_layers"
+)
+lm = importlib.import_module(
+    "bl_ext.user_default.tyvrana_blender" + ".growth_layers_models"
+)
+elements = importlib.import_module(
+    "bl_ext.user_default.tyvrana_blender" + ".geometry_elements"
+)
+qa = importlib.import_module("bl_ext.user_default.tyvrana_blender" + ".geometry_qa")
+qm = importlib.import_module(
+    "bl_ext.user_default.tyvrana_blender" + ".geometry_qa_models"
+)
 
 
 class LayerTests(GrowthTests):
-    def fixture(self):
+    def fixture(self) -> None:
         self.template()
         mesh = bpy.data.objects["Template"].data
         # Narrow pinned root; broad parallel strips intersect away from their roots.
@@ -72,7 +80,7 @@ class LayerTests(GrowthTests):
             max_seconds=20,
         )
 
-    def test_correction_native_equivalence_replacement_and_clear(self):
+    def test_correction_native_equivalence_replacement_and_clear(self) -> None:
         self.fixture()
         query = qm.GeometryInspectArguments(
             instances=[dict(object_name="Field")],
@@ -140,7 +148,7 @@ class LayerTests(GrowthTests):
             qa.inspect(query).samples[0].instances[0].contact_element_pairs, 0
         )
 
-    def test_fixed_attachment_body_conflict_and_work_budget(self):
+    def test_fixed_attachment_body_conflict_and_work_budget(self) -> None:
         self.fixture()
         data = bpy.data.meshes.new("Pinned obstacle")
         data.from_pydata(

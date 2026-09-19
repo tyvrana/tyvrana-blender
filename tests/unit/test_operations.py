@@ -72,6 +72,7 @@ from tyvrana_blender.deformation_sweep_models import (
     DeformationSweepArguments,
     DeformationSweepResult,
 )
+from tyvrana_blender.delivery_models import FileAuditArguments, FileAuditResult
 from tyvrana_blender.dynamics_models import (
     DynamicsBakeArguments,
     DynamicsCache,
@@ -94,6 +95,11 @@ from tyvrana_blender.file_models import (
 from tyvrana_blender.geometry_qa_models import (
     GeometryInspectArguments,
     GeometryInspectResult,
+)
+from tyvrana_blender.growth_layers_models import (
+    LayerCache,
+    LayerCorrectArguments,
+    LayerObjectArguments,
 )
 from tyvrana_blender.growth_models import (
     GrowthConfigureArguments,
@@ -359,6 +365,18 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def file_audit(self, arguments: FileAuditArguments) -> FileAuditResult:
+        raise AssertionError("Delivery audit uses isolated native fixtures")
+
+    def growth_layers_correct(self, arguments: LayerCorrectArguments) -> LayerCache:
+        raise AssertionError("Layer correction uses isolated native fixtures")
+
+    def growth_layers_inspect(self, arguments: LayerObjectArguments) -> LayerCache:
+        raise AssertionError("Layer correction uses isolated native fixtures")
+
+    def growth_layers_clear(self, arguments: LayerObjectArguments) -> LayerCache:
+        raise AssertionError("Layer correction uses isolated native fixtures")
+
     def growth_dynamics_bake(
         self, arguments: DynamicsBakeArguments
     ) -> DynamicsJobStatus:

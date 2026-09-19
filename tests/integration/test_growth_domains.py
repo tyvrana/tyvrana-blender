@@ -37,7 +37,7 @@ def test_native_growth_domains(profile: dict[str, str], tmp_path: Path) -> None:
 async def test_ordered_field_revision_and_persistence(
     profile: dict[str, str], tmp_path: Path
 ) -> None:
-    calls = []
+    calls: list[dict[str, Any]] = []
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=False):
@@ -73,7 +73,7 @@ async def test_ordered_field_revision_and_persistence(
                 vertices=[[-0.03, 0, 0], [0.03, 0, 0], [0.03, 0, 1], [-0.03, 0, 1]],
                 faces=[[0, 1, 2, 3]],
             )
-            region = dict(
+            region: dict[str, Any] = dict(
                 name="Panel",
                 family="Strip",
                 guides=0,

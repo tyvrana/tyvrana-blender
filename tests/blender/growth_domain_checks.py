@@ -5,6 +5,7 @@ import importlib
 import sys
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import bpy  # type: ignore[import-not-found]
@@ -12,13 +13,15 @@ import bpy  # type: ignore[import-not-found]
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tests.blender.growth_checks import GrowthTests, errors, growth, models  # noqa:E402
 
-domains = importlib.import_module(growth.__package__ + ".growth_domain_models")
+domains = importlib.import_module(
+    "bl_ext.user_default.tyvrana_blender" + ".growth_domain_models"
+)
 
 
 class GrowthDomainTests(GrowthTests):
     def setUp(self) -> None:
         super().setUp()
-        self.region = dict(
+        self.region: dict[str, Any] = dict(
             name="Panel",
             family="Fiber",
             guides=0,

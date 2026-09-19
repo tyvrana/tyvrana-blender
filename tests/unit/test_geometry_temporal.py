@@ -78,7 +78,7 @@ def test_temporal_instance_bounds(patch: dict[str, object]) -> None:
 
 
 def test_fractional_times_are_canonical() -> None:
-    args = GeometryInspectArguments(
-        objects=[dict(object_name="A")], frames=[1, 1.25, 1.5]
+    args = GeometryInspectArguments.model_validate(
+        dict(objects=[dict(object_name="A")], frames=[1, 1.25, 1.5])
     )
     assert args.frames == [1, 1.25, 1.5]

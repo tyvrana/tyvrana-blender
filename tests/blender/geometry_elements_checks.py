@@ -12,9 +12,15 @@ from tests.blender.growth_checks import GrowthTests, growth, models  # noqa:E402
 
 native_reference = importlib.import_module("tests.blender.realized_growth_reference")
 
-elements = importlib.import_module(growth.__package__ + ".geometry_elements")
-geometry_qa = importlib.import_module(growth.__package__ + ".geometry_qa")
-qa_models = importlib.import_module(growth.__package__ + ".geometry_qa_models")
+elements = importlib.import_module(
+    "bl_ext.user_default.tyvrana_blender" + ".geometry_elements"
+)
+geometry_qa = importlib.import_module(
+    "bl_ext.user_default.tyvrana_blender" + ".geometry_qa"
+)
+qa_models = importlib.import_module(
+    "bl_ext.user_default.tyvrana_blender" + ".geometry_qa_models"
+)
 
 
 class ElementTests(GrowthTests):

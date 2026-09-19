@@ -36,7 +36,7 @@ def test_native_instance_geometry(profile: dict[str, str], tmp_path: Path) -> No
 async def test_adaptive_dense_templates(
     profile: dict[str, str], tmp_path: Path
 ) -> None:
-    metrics = []
+    metrics: list[dict[str, Any]] = []
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=False):
