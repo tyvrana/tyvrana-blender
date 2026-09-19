@@ -152,3 +152,14 @@ Native tests cover geometry, frames, transformed parents, posed bones, deforming
 surfaces, topology invalidation, sharing, cycles, external edits and injected
 failure recovery. Packaged MCP tests cover routes, structural spans, surface
 roots, a 50-curve family, shared profiles and fresh-process persistence.
+
+
+Authored guide routes may avoid a joint or obstacle over a bounded articulation
+without an automatic wrapping solver. Bind endpoints to object/bone frames, keep
+intermediate guide points in intentional clearance regions, and validate the
+actual swept profile with `geometry.inspect` through motion. `motion.sample`
+aggregates attachment error, path length and closed-surface volume. Existing
+transform/shape couplings can express a bounded tissue or compliant-component
+response; its measured volume behavior is a diagnostic, not a material simulation.
+If an authored route loses clearance, revise guides or record a wrapping gap;
+endpoint attachment alone does not prove contact safety.
