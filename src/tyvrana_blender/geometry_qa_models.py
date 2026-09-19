@@ -71,8 +71,8 @@ class GeometryQuery(Model):
 
 
 class GeometryInspectArguments(Model):
-    pairs: list[ClearancePair] = Field(default_factory=list, max_length=16)
-    objects: list[GeometryQuery] = Field(default_factory=list, max_length=16)
+    pairs: list[ClearancePair] = Field(default_factory=list, max_length=128)
+    objects: list[GeometryQuery] = Field(default_factory=list, max_length=128)
     instances: list[InstanceQuery] = Field(default_factory=list, max_length=8)
     adaptive: AdaptiveGeometryRange | None = None
     frames: list[Time] | None = Field(

@@ -502,12 +502,12 @@ class AssemblyTests(unittest.TestCase):
             )
         )
         mesh_names = [o.name for o in bpy.data.objects if o.type == "MESH"]
-        for start in range(0, len(mesh_names), 16):
+        for start in range(0, len(mesh_names), 128):
             qa = call(
                 "geometry.inspect",
                 objects=[
                     {"object_name": n, "self_intersection": True}
-                    for n in mesh_names[start : start + 16]
+                    for n in mesh_names[start : start + 128]
                 ],
                 worst_limit=0,
             )

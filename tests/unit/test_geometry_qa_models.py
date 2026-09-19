@@ -47,3 +47,28 @@ def test_qa_contract_explains_sampling_and_inversion() -> None:
     assert contract.effect == "transient"
     assert "never continuous" in contract.description
     assert "not inversion proof" in contract.description
+
+
+def test_large_static_batches_retain_aggregate_detail_and_frame_budgets() -> None:
+    objects = [{"object_name": str(i)} for i in range(128)]
+    value = GeometryInspectArguments.model_validate(
+        {"objects": objects, "worst_limit": 2}
+    )
+    assert len(value.objects) == 128
+    pairs = [{"left": "base", "right": str(i)} for i in range(128)]
+    assert (
+        len(
+            GeometryInspectArguments.model_validate(
+                {"pairs": pairs, "worst_limit": 1}
+            ).pairs
+        )
+        == 128
+    )
+    for changes in (
+        {"objects": objects + [{"object_name": "extra"}], "worst_limit": 0},
+        {"objects": objects, "worst_limit": 3},
+        {"objects": objects, "frames": [1, 2], "worst_limit": 0},
+        {"objects": objects, "pairs": pairs[:1], "worst_limit": 0},
+    ):
+        with pytest.raises(ValidationError):
+            GeometryInspectArguments.model_validate(changes)

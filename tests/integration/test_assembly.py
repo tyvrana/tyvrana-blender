@@ -128,6 +128,23 @@ async def test_assembly_mcp_reload_and_diagnostics(
                 "assembly.inspect", {"name": "StructuralModule", "limit": 64}
             )
             assert len(inventory["components"]) == 41
+            geometry = await call(
+                "geometry.inspect",
+                {
+                    "objects": [
+                        {"object_name": r["name"], "self_intersection": True}
+                        for r in inventory["components"]
+                    ],
+                    "worst_limit": 0,
+                },
+            )
+            assert len(geometry["samples"][0]["objects"]) == 41
+            assert all(
+                r["closed_consistent"]
+                and r["degenerate_triangles"] == 0
+                and r["self_contact_triangle_pairs"] == 0
+                for r in geometry["samples"][0]["objects"]
+            )
             await call(
                 "object_set.place",
                 {

@@ -104,3 +104,7 @@ Mirrored families inherit the source member count when omitted. Family revisions
 patch only supplied fields by ID; omitted layout, progression and exceptions
 survive. Explicit replacement arrays replace that array; `members` edits patch
 individual exceptions and their named shape handles.
+
+Geometry QA accepts up to 128 objects or pairs in one request within its shared
+128 query/frame, 256 finding, vertex, triangle and triangle-test budgets. Use a
+small `worst_limit` for broad inspection and request detailed failures separately.
