@@ -292,8 +292,8 @@ class GrowthQAArguments(Model):
         ge=0,
         le=4096,
         description=(
-            "Opt-in evaluated template vertex samples; realizes at most the "
-            "existing two-million-vertex budget temporarily for QA."
+            "Opt-in template vertex samples from shared prototypes/native paths; "
+            "does not realize full template output."
         ),
     )
     clearance_objects: list[Name] = Field(default_factory=list, max_length=8)

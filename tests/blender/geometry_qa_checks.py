@@ -18,6 +18,51 @@ qa = importlib.import_module(PACKAGE + "geometry_qa")
 
 
 class GeometryTests(TopologyTests):
+    def test_local_inversion_hidden_by_positive_global_volume(self) -> None:
+        points = [
+            [0, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [10, 0, 0],
+            [14, 0, 0],
+            [10, 4, 0],
+            [10, 0, 4],
+        ]
+        faces = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]]
+        self.call(
+            "mesh.create",
+            name="Local",
+            vertices=points,
+            faces=faces + [[i + 4 for i in f] for f in faces],
+        )
+        self.call("volume.snapshot", objects=[dict(source="Local", name="LocalRest")])
+        obj = bpy.data.objects["Local"]
+        obj.data.vertices[3].co.z = -1
+        obj.data.update()
+        result = self.call(
+            "geometry.inspect",
+            objects=[dict(object_name="Local", reference="LocalRest")],
+        )
+        row = result["samples"][0]["objects"][0]
+        self.assertFalse(row["signed_volume_reversed"])
+        self.assertGreater(row["signed_volume"], 0)
+        self.assertEqual(row["negative_jacobians"], 4)
+        self.assertEqual(row["jacobian_samples"], 8)
+        self.assertAlmostEqual(row["minimum_jacobian"], -1, places=5)
+        self.assertEqual(set(row["worst_jacobian_vertices"]), {0, 1, 2, 3})
+
+    def test_planar_neighborhood_does_not_claim_volume_orientation(self) -> None:
+        self.call("object.create_primitive", primitive="plane", name="Flat")
+        self.call("volume.snapshot", objects=[dict(source="Flat", name="FlatRest")])
+        report = self.call(
+            "geometry.inspect", objects=[dict(object_name="Flat", reference="FlatRest")]
+        )
+        row = report["samples"][0]["objects"][0]
+        self.assertEqual(row["jacobian_samples"], 0)
+        self.assertEqual(row["jacobian_unavailable"], 4)
+        self.assertIsNone(row["minimum_jacobian"])
+
     def cube(self, name: str, x: float = 0, scale: float = 1) -> Any:
         self.call(
             "object.create_primitive",
@@ -111,6 +156,8 @@ class GeometryTests(TopologyTests):
         query = [dict(object_name="A", reference="Rest", self_intersection=True)]
         row = self.call("geometry.inspect", objects=query)["samples"][0]["objects"][0]
         self.assertEqual(row["normal_reversed_triangles"], 0)
+        self.assertEqual(row["negative_jacobians"], 0)
+        self.assertAlmostEqual(row["minimum_jacobian"], 1, places=5)
         self.assertEqual(row["self_contact_triangle_pairs"], 0)
         for vertex in a.data.vertices:
             vertex.co.x *= -1

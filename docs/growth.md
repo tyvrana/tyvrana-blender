@@ -141,7 +141,7 @@ captured from the actual Geometry Nodes field used by template evaluation.
 Clearance samples guide segments against the source and optional `clearance_objects`
 using oriented nearest-surface BVHs. `root_exclusion` omits the near-root fraction of
 guide length. Optional `template_samples` inspects actual template vertices, including
-roots; this temporarily realizes geometry even for instance output. Signed distances
+roots; shared prototypes and native evaluated paths avoid full realization. Signed distances
 and penetrating/below-clearance counts are sampled diagnostics, not exact continuous
 collision certification, especially for open, concave or inconsistently oriented
 surfaces. No automatic biological or artistic verdict is produced.

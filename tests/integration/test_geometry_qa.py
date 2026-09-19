@@ -30,7 +30,7 @@ def test_native_geometry_qa(profile: dict[str, str], tmp_path: Path) -> None:
     log = result.stdout + result.stderr
     (tmp_path / "geometry-native.log").write_text(log)
     assert result.returncode == 0, log
-    assert "GEOMETRY_QA_NATIVE_PASSED 6" in log
+    assert "GEOMETRY_QA_NATIVE_PASSED 8" in log
 
 
 async def test_geometry_qa_mcp(profile: dict[str, str], tmp_path: Path) -> None:

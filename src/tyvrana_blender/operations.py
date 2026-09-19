@@ -1124,14 +1124,18 @@ _DECLARATIONS = (
         (
             "Bounded world-space triangle surface clearance/contact, component "
             "containment, nonadjacent self-contact, degeneration and reference-local "
-            "normal/area diagnostics. Batch objects/pairs over explicit scene frames; "
+            "normal/area and rank-aware local affine Jacobian proxies. Batch "
+            "objects/pairs/instances over fractional frames or an adaptive range; "
             "restore frame/subframe. Face-pair exemptions exclude intended contacts. "
             "Branch-and-bound triangle distances; fail if work budget exceeded. "
             "Normal reversal is not inversion proof; signed volume reversal is global "
             "orientation only. Sampled motion, never continuous collision "
             "certification. "
-            "Realize instances first; closed-surface containment assumes no"
-            " self intersections. "
+            "Instance queries reuse mesh prototypes and test bounded candidates; "
+            "owned growth templates use native evaluated paths and stable root IDs. "
+            "Coverage reports gaps/unrefined risky intervals. Planar one-rings have "
+            "no volume Jacobian; negative proxies are not volumetric-element proof. "
+            "Closed-surface containment assumes no self intersections. "
             "At most 128 summaries, 256 details, 1M vertex samples, 250k "
             "triangles/sample."
         ),
@@ -1572,7 +1576,7 @@ _DECLARATIONS = (
             "invalid_roots and explicit rebind recovery. Signed nearest-surface "
             "clearance is sampled diagnostic evidence, not exact collision proof; "
             "root_exclusion applies to guide segments. Optional template_samples "
-            "realizes bounded geometry temporarily and includes template roots. "
+            "samples shared templates lazily and includes template roots. "
             "Tangent-flow compares configured rest flow in world space; frame normals "
             "come from actual native evaluation."
         ),
@@ -1608,8 +1612,8 @@ _DECLARATIONS = (
             "frame, transforms, keys and pose state even on failure. Requires "
             "armature_object for bone poses. Maximum4096 root samples per sweep; no "
             "guide/recipe dumps. Same sampled clearance limitations as "
-            "growth.inspect; optional template vertex sampling temporarily realizes "
-            "bounded output. Does not simulate dynamics."
+            "growth.inspect; optional template vertex sampling uses shared "
+            "prototypes and native paths. Does not simulate dynamics."
         ),
         tags=("growth", "attachment", "qa", "sampled"),
         effect="transient",

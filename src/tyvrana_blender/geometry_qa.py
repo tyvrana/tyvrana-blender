@@ -15,6 +15,7 @@ from .errors import OperationError
 from .geometry_qa_models import (
     ClearancePair,
     ClearanceSummary,
+    GeometryCoverage,
     GeometryInspectArguments,
     GeometryInspectResult,
     GeometryQuery,
@@ -335,6 +336,7 @@ def inspect_object(
         if normal.length <= args.tolerance**2
     ]
     reverse = collapsed = volume_reverse = None
+    local: dict[str, Any] = {}
     if query.reference:
         reference = surfaces[query.reference]
         if surface.source.topology != reference.source.topology:
@@ -354,6 +356,11 @@ def inspect_object(
                 reverse += normal.dot(baseline) < 0
         if surface.volume is not None and reference.volume is not None:
             volume_reverse = surface.volume * reference.volume < 0
+        from .geometry_deformation import jacobians
+
+        local = jacobians(
+            surface, reference, args.collapsed_volume_ratio, args.worst_limit
+        )
     self_count = None
     contacts: list[SurfaceContact] = []
     if query.self_intersection:
@@ -373,6 +380,7 @@ def inspect_object(
         normal_reversed_triangles=reverse,
         collapsed_triangles=collapsed,
         signed_volume_reversed=volume_reverse,
+        **local,
     )
 
 
@@ -384,36 +392,62 @@ def inspect(args: GeometryInspectArguments) -> GeometryInspectResult:
     names = {n for pair in args.pairs for n in (pair.left, pair.right)}
     names.update(query.object_name for query in args.objects)
     names.update(query.reference for query in args.objects if query.reference)
-    samples = []
+    from . import geometry_instances, geometry_temporal
+
+    names.update(name for query in args.instances for name in query.obstacles)
+    instance_budget = geometry_instances.InstanceBudget(args.max_instance_vertices)
     vertices = 0
-    try:
-        frames: list[int | None] = list(args.frames) if args.frames else [None]
-        for value in frames:
-            if value is not None:
-                scene.frame_set(value)
-            with geometry.SurfaceCache(max_work=1000000 - vertices) as cache:
-                sources = {name: cache.get(name) for name in sorted(names)}
-                if sum(len(s.triangles) for s in sources.values()) > 250000:
-                    fail(
-                        "At most 250000 evaluated triangles per sample; "
-                        "isolate objects or reduce subdivision"
-                    )
-                surfaces = {name: Surface(source) for name, source in sources.items()}
-                vertices += cache.vertices
-                samples.append(
-                    GeometrySample(
-                        frame=scene.frame_current + scene.frame_subframe,
-                        pairs=[
-                            inspect_pair(p, surfaces, args, budget) for p in args.pairs
-                        ],
-                        objects=[
-                            inspect_object(q, surfaces, args, budget)
-                            for q in args.objects
-                        ],
-                    )
+    path_points = 0
+
+    def evaluate(value: float | None) -> GeometrySample:
+        nonlocal vertices, path_points
+        if value is not None:
+            whole = math.floor(value)
+            scene.frame_set(whole, subframe=value - whole)
+        with geometry.SurfaceCache(max_work=1000000 - vertices) as cache:
+            sources = {name: cache.get(name) for name in sorted(names)}
+            if sum(len(s.triangles) for s in sources.values()) > 250000:
+                fail("At most250000 evaluated triangles per sample; isolate objects")
+            surfaces = {name: Surface(source) for name, source in sources.items()}
+            vertices += cache.vertices
+            instances = [
+                geometry_instances.inspect(q, surfaces, args, budget, instance_budget)
+                for q in args.instances
+            ]
+            path_points += sum(row.path_points for row in instances)
+            if path_points > 2000000:
+                fail(
+                    "Evaluated instance path sweep exceeds2000000 points; "
+                    "reduce samples/density"
                 )
+            return GeometrySample(
+                frame=scene.frame_current + scene.frame_subframe,
+                pairs=[inspect_pair(p, surfaces, args, budget) for p in args.pairs],
+                objects=[
+                    inspect_object(q, surfaces, args, budget) for q in args.objects
+                ],
+                instances=instances,
+            )
+
+    try:
+        if args.adaptive:
+            samples, coverage = geometry_temporal.sample(args.adaptive, evaluate)
+        else:
+            times_to_sample: list[float | None] = (
+                list(args.frames) if args.frames else [None]
+            )
+            samples = [evaluate(value) for value in times_to_sample]
+            times = sorted(row.frame for row in samples)
+            coverage = GeometryCoverage(
+                mode="explicit" if args.frames else "current",
+                sample_count=len(samples),
+                maximum_gap=max(
+                    (b - a for a, b in zip(times[:-1], times[1:], strict=True)),
+                    default=0,
+                ),
+            )
     finally:
-        if args.frames:
+        if args.frames or args.adaptive:
             scene.frame_set(frame, subframe=subframe)
     extrema = [
         (pair.minimum_distance, sample.frame)
@@ -421,19 +455,38 @@ def inspect(args: GeometryInspectArguments) -> GeometryInspectResult:
         for pair in sample.pairs
         if pair.minimum_distance is not None
     ]
+    extrema.extend(
+        (row.minimum_distance, sample.frame)
+        for sample in samples
+        for row in sample.instances
+        if row.minimum_distance is not None
+    )
     minimum, worst_frame = min(extrema) if extrema else (None, None)
+    if worst_frame is None:
+        local = [
+            (obj.minimum_jacobian, sample.frame)
+            for sample in samples
+            for obj in sample.objects
+            if obj.minimum_jacobian is not None
+        ]
+        if local:
+            worst_frame = min(local)[1]
     return GeometryInspectResult(
         samples=samples,
         worst_frame=worst_frame,
         minimum_distance=minimum,
         triangle_tests=budget.tests,
-        evaluated_vertex_samples=vertices,
+        evaluated_vertex_samples=vertices + instance_budget.vertices,
+        coverage=coverage,
         processing_seconds=time.perf_counter() - start,
         restored=True,
         limitations=[
-            "Evaluated viewport polygon surfaces; instances must be "
-            "realized. Distances are world units within floating-point "
-            "tolerance.",
+            "Viewport surfaces and lazy shared mesh instances; owned growth "
+            "uses native evaluated paths. Distances are world units within "
+            "floating-point tolerance; no full template realization for QA.",
+            "Instance QA tests candidate elements against each other/obstacles; "
+            "degeneration counts cover tested elements only. Native persistent "
+            "IDs remain stable only while the generating topology is unchanged.",
             "Contact counts are triangle pairs within tolerance, not "
             "intersection volume or penetration depth. Exemptions omit both"
             " specified face sets; exempt count covers visited candidates "
@@ -448,8 +501,12 @@ def inspect(args: GeometryInspectArguments) -> GeometryInspectResult:
             "Local normal reversal is not proof of inversion; legitimate "
             "bending may reverse normals. Signed volume reversal is only a "
             "global closed-surface orientation diagnostic.",
-            "Explicit frame samples only; no continuous collision or "
-            "swept-volume certification. Native modifier evaluation memory "
-            "precedes geometry budget checks.",
+            "Local Jacobians are least-squares affine one-ring volume ratios; "
+            "rank-deficient planar neighborhoods are unavailable. Negative values "
+            "are local orientation proxies, not a volumetric-element/FEM proof.",
+            "Explicit/adaptive samples are not continuous collision or swept-volume "
+            "certification. Unsampled narrow events can be missed. Coverage reports "
+            "gaps and unresolved risky intervals; native evaluation memory precedes "
+            "geometry budget checks.",
         ],
     )

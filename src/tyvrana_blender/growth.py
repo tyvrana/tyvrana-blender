@@ -784,7 +784,7 @@ def configure(args: GrowthConfigureArguments) -> GrowthDelta:
 
 
 @contextmanager
-def evaluated_path(obj: Any, group: Any) -> Any:
+def evaluated_path(obj: Any, group: Any, *, evaluated_points: bool = False) -> Any:
     graph = growth_nodes.GrowthGraph("Growth QA")
     clone = None
     try:
@@ -802,14 +802,72 @@ def evaluated_path(obj: Any, group: Any) -> Any:
         clone.hide_set(True)
         clone.hide_render = True
         bpy.context.view_layer.update()
-        evaluated = clone.evaluated_get(bpy.context.evaluated_depsgraph_get())
-        yield evaluated.data
+        if evaluated_points:
+            # Surface deformation needs the native Hair Curves self-object context.
+            # Sample its evaluated Path from a separate temporary mesh carrier.
+            with evaluated_path_vertices(clone) as data:
+                yield data
+        else:
+            evaluated = clone.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            yield evaluated.data
     finally:
         if clone:
             clone_data = clone.data
             bpy.data.objects.remove(clone, do_unlink=True)
             if not clone_data.users:
                 bpy.data.hair_curves.remove(clone_data)
+        bpy.data.node_groups.remove(graph.group)
+
+
+@contextmanager
+def evaluated_path_vertices(source: Any) -> Any:
+    graph = growth_nodes.GrowthGraph("Evaluated curve samples")
+    carrier = clone = evaluated = None
+    try:
+        path = graph.info(source, "Native evaluated paths", "ORIGINAL").outputs[
+            "Geometry"
+        ]
+        path = graph.put(
+            path,
+            "growth_evaluated_length",
+            graph.node("GeometryNodeSplineLength").outputs["Length"],
+            "FLOAT",
+            "CURVE",
+        )
+        points = graph.node("GeometryNodeCurveToPoints")
+        points.mode = "EVALUATED"
+        graph.wire(path, points.inputs["Curve"])
+        path = points.outputs["Points"]
+        for name, socket in [("normal", "Normal"), ("tangent", "Tangent")]:
+            path = graph.put(
+                path,
+                "growth_frame_" + name,
+                points.outputs[socket],
+                "FLOAT_VECTOR",
+                "POINT",
+            )
+        vertices = graph.node("GeometryNodePointsToVertices")
+        graph.wire(path, vertices.inputs["Points"])
+        graph.wire(vertices.outputs["Mesh"], graph.output.inputs["Geometry"])
+        carrier = bpy.data.meshes.new("Evaluated curve samples")
+        clone = bpy.data.objects.new("Evaluated curve samples", carrier)
+        clone.matrix_world = source.matrix_world.copy()
+        modifier = clone.modifiers.new("Evaluated curve samples", "NODES")
+        modifier.node_group = graph.group
+        bpy.context.scene.collection.objects.link(clone)
+        clone.hide_set(True)
+        clone.hide_render = True
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated = clone.evaluated_get(depsgraph)
+        yield evaluated.to_mesh(preserve_all_data_layers=True, depsgraph=depsgraph)
+    finally:
+        if evaluated is not None:
+            evaluated.to_mesh_clear()
+        if clone:
+            bpy.data.objects.remove(clone, do_unlink=True)
+        if carrier and not carrier.users:
+            bpy.data.meshes.remove(carrier)
         bpy.data.node_groups.remove(graph.group)
 
 
