@@ -248,6 +248,9 @@ Names are advertised in sorted order:
 
 | Operation | Arguments | Result |
 | --- | --- | --- |
+| `blender.surface.create` | Batched sparse curve/patch networks, openings, features and thickness | Connected source-independent shell meshes and compact QA |
+| `blender.surface.configure` | Selected named constraints and expected revision | Preserved identity; explicit topology change policy |
+| `blender.surface.inspect` | Selected surfaces and bounded regions | Geometry integrity, revisions, topology and optional constraints |
 | `blender.loft.create` | Batched component sections, radii, twist and sampling | Created native meshes and identity |
 | `blender.loft.configure` | Same-topology section revisions | Preserved identity/data and updated geometry |
 | `blender.loft.inspect` | Selected components; optional definitions | Integrity, bounds and counts |
@@ -3846,3 +3849,64 @@ control networks, constraint ownership, matching and bound rest revision policie
 
 See [growth secondary motion](docs/growth_dynamics.md) for bounded native dynamics,
 collision inputs, durable playback and cancellation.
+
+
+## Source-independent surface networks
+
+`surface.create` builds connected polygon shells from sparse object-local nodes
+and named boundary curves. Each patch lists four curves in cyclic order; endpoint
+orientation is inferred. Its UV square follows those edges through `(0,0)`,
+`(1,0)`, `(1,1)`, `(0,1)`. Curves interpolate up to eight intermediate controls
+with linear or Catmull–Rom segments and arc-length sampling. Shared curve IDs
+produce shared vertices; branches join different edges of a central patch.
+Multiple arbitrary sections can be assembled by sharing their boundary curves.
+No source surface, generated vertex arrays or executable expressions are needed.
+
+Ellipse or sparse polygon openings retain explicit inner/support loops. Local
+bulges/depressions, ridges/grooves and raised rings use patch UV coordinates and
+signed object-local heights. They fade at boundaries to preserve stitches.
+Thickness is positive and either global or bilinear from four patch corners;
+incident patches average thickness and normals along shared boundaries. The
+adapter tessellates, orients, stitches and offsets the network, then closes its
+outer and opening rims. Holes remain through-openings in a closed material shell.
+
+`triangles` retains native constrained triangulation. `quad_dominant` pairs
+suitable triangles outside curved feature regions; opening support bands and
+shell rims are quads. It is a preference, not an all-quad guarantee. Construction
+checks connected edge/vertex manifoldness, winding, duplicate and zero-area faces,
+and nonadjacent triangle intersections. Continuity is positional (G0); analytic
+CAD tangency, production deformation topology and subdivision quality are not
+promised. Triangle/pole counts are inspectable; vertex valence is limited to 16. Intersections
+between arbitrary shells are rejected; this is not an implicit Boolean union.
+
+Each node, curve, patch, opening and feature has a unique stable ID. Selected
+existing constraints can be revised with `surface.configure` and
+`expected_revision`; no full mesh is resent. Geometry-only changes retain ordered
+connectivity and the native mesh datablock. Opening/refinement changes can require
+retessellation: default `topology_policy: "preserve"` rejects that change;
+`"rebuild"` explicitly permits it and increments `topology_revision`. Rebuilds
+reject downstream modifiers, vertex groups, custom attributes, UVs and face
+material/smoothing edits rather than discard them. Object/resource/region IDs
+persist; the existing resource fingerprint includes constraint revision and base
+geometry, so project verification cannot reuse accepted evidence unchanged.
+External base-mesh/region edits make construction QA stale and block regeneration.
+Use existing mesh operations for downstream refinement. Adding/removing patches or
+features is outside the revision contract; author the intended network first.
+
+A request creates or revises 1–4 surfaces. Per surface: 128 nodes, 96 curves,
+32 patches, 32 openings, 64 features and 128 KiB of constraints. Curves have
+4–64 samples; patch interior resolution is 4–48. Openings have 8–64 ellipse samples
+or 3–16 polygon controls, with 1–4 subdivisions. Generated budgets are 8,192 input
+samples per patch, 65,536 vertices and 131,072 faces per shell, and 64 patches /
+131,072 vertices per batch. Intersection checking has explicit candidate/exact-test
+budgets. Oversized or geometrically conflicting requests fail before commit.
+
+`surface.inspect` defaults to 12 region summaries (maximum 64); named filtering
+and constraints for one object are opt-in. It returns bounds, thickness range,
+components, patch/opening/junction counts, topology counts and freshness. Stored
+QA describes the generated base mesh, not evaluated modifiers. Face integer
+attributes `tyvrana_surface_patch` and `tyvrana_surface_region` retain region
+membership in the native file. All construction/revision batches prepare and check
+meshes first, then commit with rollback. Errors distinguish invalid contours,
+openings, junctions, features, degeneracy, self-intersection, limits, unknown
+handles, stale revisions/geometry and required topology changes.

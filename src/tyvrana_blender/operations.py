@@ -362,6 +362,12 @@ from .surface_deform_models import (
     SurfaceBindings,
     SurfaceInspectArguments,
 )
+from .surface_models import (
+    SurfaceConfigureArguments,
+    SurfaceCreateArguments,
+    SurfaceNetworkInspectArguments,
+    SurfaceResult,
+)
 from .topology_models import (
     MeshInsertLoopsArguments,
     TopologyInspectArguments,
@@ -480,6 +486,16 @@ class SceneBackend(Protocol):
     def pose_match(self, arguments: PoseMatchArguments) -> PoseMatchResult: ...
 
     def space_switch(self, arguments: SpaceSwitchArguments) -> ConstraintsResult: ...
+
+    def surface_create(self, arguments: SurfaceCreateArguments) -> SurfaceResult: ...
+
+    def surface_configure(
+        self, arguments: SurfaceConfigureArguments
+    ) -> SurfaceResult: ...
+
+    def surface_inspect(
+        self, arguments: SurfaceNetworkInspectArguments
+    ) -> SurfaceResult: ...
 
     def loft_create(self, arguments: LoftCreateArguments) -> LoftResult: ...
 
@@ -1851,6 +1867,84 @@ _DECLARATIONS = (
         tags=("rigging", "constraints", "controls"),
         effect="mutating",
         execution="synchronous",
+    ),
+    _operation(
+        "blender.surface.create",
+        SurfaceCreateArguments,
+        SurfaceResult,
+        lambda b, a, q: b.surface_create(a),
+        (
+            "Author 1..4 source-independent connected shells from sparse named "
+            "nodes/curves "
+            "and four-boundary patches. Shared curves stitch branches/junctions; "
+            "explicit UV "
+            "openings retain support loops; local bulge/depression, ridge/groove "
+            "and rim features "
+            "plus varying thickness are tessellated application-side. No source "
+            "mesh or vertex/face "
+            "arrays. Closed orientable polygon topology, positional continuity, "
+            "triangles or "
+            "quad-dominant (not all-quad/CAD tangency). Reject self-"
+            "intersection/impossible junctions "
+            "atomically. Per object: 128 nodes, 96 curves, 32 patches, 32 openings, 64"
+            " features,"
+            "65536 generated vertices/131072 faces; batch 64 patches/131072 vertices. "
+            "Stable handles and compact QA persist; revise with surface.configure."
+        ),
+        tags=(
+            "modeling",
+            "surface",
+            "shell",
+            "patch",
+            "contour",
+            "opening",
+            "junction",
+            "batched",
+        ),
+        execution="synchronous",
+        effect="mutating",
+    ),
+    _operation(
+        "blender.surface.configure",
+        SurfaceConfigureArguments,
+        SurfaceResult,
+        lambda b, a, q: b.surface_configure(a),
+        (
+            "Atomically revise 1..4 owned surface networks by existing "
+            "node/curve/patch/opening/feature "
+            "IDs and expected_revision. Change contour positions, branch "
+            "direction, opening size, "
+            "feature strength or thickness without generated geometry payloads. "
+            "Default preserves "
+            "ordered connectivity/data; topology-changing tessellation requires "
+            "explicit rebuild "
+            "and pristine unbound mesh data. Object/semantic IDs persist; report "
+            "topology_revision. "
+            "External base edits block regeneration; use mesh tools for "
+            "downstream refinement."
+        ),
+        tags=("modeling", "surface", "revision", "contour", "opening", "batched"),
+        execution="synchronous",
+        effect="mutating",
+    ),
+    _operation(
+        "blender.surface.inspect",
+        SurfaceNetworkInspectArguments,
+        SurfaceResult,
+        lambda b, a, q: b.surface_inspect(a),
+        (
+            "Inspect 1..8 managed surface identities/revisions, bounds, thickness,"
+            " patch/opening/junction "
+            "counts, topology and integrity of stored QA. Bounded named regions "
+            "(default 12/max 64); "
+            "optional constraints for one object. No generated coordinate arrays."
+            " External edits "
+            "mark QA invalid; inspect current detailed geometry with existing "
+            "mesh/geometry tools."
+        ),
+        tags=("modeling", "surface", "topology", "inspection"),
+        execution="synchronous",
+        effect="read_only",
     ),
     _operation(
         "blender.loft.create",

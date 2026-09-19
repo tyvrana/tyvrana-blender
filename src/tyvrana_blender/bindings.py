@@ -22,7 +22,8 @@ SCOPE = (
     "Structural summary only: object type/local transform/parent identity, "
     "data counts/bounds/modifier kinds, material node types/links, collection "
     "membership; managed reference observations/registration and "
-    "derived-landmark freshness. Excludes full geometry, shader values, "
+    "derived-landmark freshness; managed surface constraints/revisions/base mesh. "
+    "Excludes other full geometry, shader values, "
     "rig/animation internals "
     "and external edits outside this scope. Caps: 64 modifiers,256 nodes,512 "
     "links,4096 members; total counts are included. Existence is not content "
@@ -67,6 +68,10 @@ def _fingerprint(kind: str, resource: Any) -> str:
         construction = fingerprint(resource)
         if construction is not None:
             data["construction"] = construction
+        if "tyvrana_surface" in resource:
+            from .surfaces import fingerprint as surface_fingerprint
+
+            data["surface"] = surface_fingerprint(resource)
         data.update(
             type=resource.type,
             transform=[float(v) for row in resource.matrix_local for v in row],

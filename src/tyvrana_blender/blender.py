@@ -374,6 +374,12 @@ from .surface_deform_models import (
     SurfaceBindings,
     SurfaceInspectArguments,
 )
+from .surface_models import (
+    SurfaceConfigureArguments,
+    SurfaceCreateArguments,
+    SurfaceNetworkInspectArguments,
+    SurfaceResult,
+)
 from .topology_models import (
     MeshInsertLoopsArguments,
     TopologyInspectArguments,
@@ -941,6 +947,23 @@ class BlenderBackend:
         from . import rig_constraints
 
         return rig_constraints.switch_space(arguments)
+
+    def surface_create(self, arguments: SurfaceCreateArguments) -> SurfaceResult:
+        from . import surfaces
+
+        return surfaces.create(arguments)
+
+    def surface_configure(self, arguments: SurfaceConfigureArguments) -> SurfaceResult:
+        from . import surfaces
+
+        return surfaces.configure(arguments)
+
+    def surface_inspect(
+        self, arguments: SurfaceNetworkInspectArguments
+    ) -> SurfaceResult:
+        from . import surfaces
+
+        return surfaces.inspect(arguments)
 
     def loft_create(self, arguments: LoftCreateArguments) -> LoftResult:
         from . import loft

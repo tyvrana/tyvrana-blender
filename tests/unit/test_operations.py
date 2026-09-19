@@ -323,6 +323,12 @@ from tyvrana_blender.surface_deform_models import (
     SurfaceBindings,
     SurfaceInspectArguments,
 )
+from tyvrana_blender.surface_models import (
+    SurfaceConfigureArguments,
+    SurfaceCreateArguments,
+    SurfaceNetworkInspectArguments,
+    SurfaceResult,
+)
 from tyvrana_blender.topology_models import (
     MeshInsertLoopsArguments,
     TopologyInspectArguments,
@@ -464,6 +470,17 @@ class Backend:
         raise NotImplementedError
 
     def space_switch(self, arguments: SpaceSwitchArguments) -> ConstraintsResult:
+        raise NotImplementedError
+
+    def surface_create(self, arguments: SurfaceCreateArguments) -> SurfaceResult:
+        raise NotImplementedError
+
+    def surface_configure(self, arguments: SurfaceConfigureArguments) -> SurfaceResult:
+        raise NotImplementedError
+
+    def surface_inspect(
+        self, arguments: SurfaceNetworkInspectArguments
+    ) -> SurfaceResult:
         raise NotImplementedError
 
     def loft_create(self, arguments: LoftCreateArguments) -> LoftResult:
