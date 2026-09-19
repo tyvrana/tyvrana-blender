@@ -14,8 +14,9 @@ import bmesh  # type: ignore[import-not-found]
 import bpy  # type: ignore[import-not-found]
 from mathutils import Matrix, Vector  # type: ignore[import-not-found]
 
-from . import curves, growth_nodes, mesh_selectors
+from . import curves, growth_fields, growth_nodes, mesh_selectors
 from .errors import OperationError
+from .growth_domain_models import GrowthFieldSample, GrowthRow, GrowthRowSummary
 from .growth_models import (
     GrowthConfigureArguments,
     GrowthCreateArguments,
@@ -265,6 +266,12 @@ def resources(
             count = sum(
                 r.children or r.guides for r in spec.regions if r.family == family.name
             )
+            count += sum(
+                (row.count or 0) * (2 if row.mirror else 1)
+                for region in spec.regions
+                for row in region.rows
+                if (row.family or region.family) == family.name
+            )
             if counts is not None:
                 count = counts.get(fi, 0)
             vertices += len(proto.data.vertices) * count
@@ -330,8 +337,8 @@ def plan(
     regions = region_faces(surface, spec)
     families = {f.name: f for f in spec.families}
     family_index = {f.name: i for i, f in enumerate(spec.families)}
-    guides = []
-    roots = []
+    guides: list[dict[str, Any]] = []
+    roots: list[dict[str, Any]] = []
     changed = {e.root_id: e for e in edits}
     for ri, region in enumerate(spec.regions):
         family = families[region.family]
@@ -347,15 +354,24 @@ def plan(
         for i in triangles:
             total += sf.triangles[i].area
             totals.append(total)
+        if region.field:
+            for control in region.field.controls:
+                growth_fields.location(
+                    sf, Vector((*control.uv, 0)), regions[region.name]
+                )
+        placements: list[
+            tuple[str, int, Any, GrowthRow | None, bool, int, int, random.Random]
+        ] = []
         for kind, count in [("guide", region.guides), ("child", region.children)]:
             for n in range(count):
-                rng = random.Random(f"{spec.seed}:{slots[region.name]}:{kind}:{n}")
+                rng = random.Random(
+                    f"{spec.seed}:{slots[growth_fields.region_key(region.name)]}:{kind}:{n}"
+                )
                 ti = triangles[
                     min(len(triangles) - 1, bisect.bisect(totals, rng.random() * total))
                 ]
                 tri = sf.triangles[ti]
-                u = math.sqrt(rng.random())
-                v = rng.random()
+                u, v = math.sqrt(rng.random()), rng.random()
                 weights = [1 - u, u * (1 - v), u * v]
                 root = sum(
                     (
@@ -368,97 +384,139 @@ def plan(
                     (sf.uvs[j] * w for j, w in zip(tri.loops, weights, strict=True)),
                     Vector(),
                 )
-                resolved, normal = sf.sample(uv)
+                resolved, _ = sf.sample(uv)
                 if (resolved - root).length > 1e-5:
                     fail("Root UV is ambiguous; use non-overlapping UVs")
-                x = Vector(region.flow)
-                x -= normal * x.dot(normal)
-                if x.length < 1e-7:
-                    fail(
-                        "Region flow is parallel to a root normal; choose another "
-                        "projected flow"
-                    )
-                x.normalize()
-                y = normal.cross(x)
                 identifier = (
-                    slots[region.name] * 100000 + (20001 if kind == "child" else 1) + n
+                    slots[growth_fields.region_key(region.name)] * 100000
+                    + (20001 if kind == "child" else 1)
+                    + n
                 )
-                f = family
-                old = previous.get(identifier)
-                edit = changed.pop(identifier, None)
-                if old and old["family"] in families and old["edited"]:
-                    f = families[old["family"]]
-                if edit and edit.family:
-                    if edit.family not in families:
-                        fail("Guide edit references missing family")
-                    f = families[edit.family]
-                points = [
-                    list(root + (x * p[0] + y * p[1] + normal * p[2]) * f.length)
-                    for p in f.shape
+                placements.append(
+                    (
+                        kind,
+                        n,
+                        uv,
+                        None,
+                        False,
+                        identifier,
+                        slots[growth_fields.region_key(region.name)],
+                        rng,
+                    )
+                )
+        for authored_row in region.rows:
+            for mirrored in [False, True] if authored_row.mirror else [False]:
+                slot = slots[
+                    growth_fields.slot_key(region.name, authored_row.name, mirrored)
                 ]
-                edited = bool(edit and edit.family)
-                if old and old["edited"]:
-                    points = old["points"]
-                    edited = True
-                if edit:
-                    if edit.points is not None:
-                        points = edit.points
-                        edited = True
-                    if edit.length_scale is not None:
-                        points = [
-                            list(root + (Vector(p) - root) * edit.length_scale)
-                            for p in points
-                        ]
-                        edited = True
-                    if (Vector(points[0]) - root).length > 1e-5:
-                        fail(
-                            "Edited guide first point must equal its attached "
-                            "surface-local "
-                            "root"
-                        )
-                    if any(
-                        (Vector(a) - Vector(b)).length < 1e-7
-                        for a, b in zip(points[:-1], points[1:], strict=True)
-                    ):
-                        fail("Guide has coincident points")
-                variation = 1 + rng.uniform(-1, 1) * f.length_variation
-                record: dict[str, Any] = dict(
-                    id=identifier,
-                    region=ri,
-                    family=family_index[f.name],
-                    root=list(root),
-                    normal=list(normal),
-                    flow=list(x),
-                    uv=list(uv)[:2],
-                    triangle=ti,
-                    group=slots[region.name],
-                    offset=f.offset,
-                    radius=f.radius,
-                    tip=f.tip_radius,
-                    roll=f.roll,
-                    layer=f.layer,
-                    variation=variation,
-                    points=points,
-                    edited=edited,
+                for n, uv in enumerate(
+                    growth_fields.row_uvs(
+                        sf, regions[region.name], authored_row, mirrored
+                    )
+                ):
+                    identifier = slot * 100000 + 1 + n
+                    rng = random.Random(f"{spec.seed}:{slot}:guide:{n}")
+                    placements.append(
+                        ("guide", n, uv, authored_row, mirrored, identifier, slot, rng)
+                    )
+        new_guides = sum(item[0] == "guide" for item in placements)
+        new_roots = region.children or new_guides
+        if len(guides) + new_guides > 10000 or len(roots) + new_roots > 50000:
+            fail("System exceeds10000 guides or50000 evaluated curves", "growth_limit")
+        for kind, n, uv, row, mirrored, identifier, slot, rng in placements:
+            root, normal, ti, x, length_scale = growth_fields.frame(
+                sf, uv, regions[region.name], region, row, mirrored
+            )
+            y = normal.cross(x)
+            f = families[row.family] if row and row.family else family
+            old = previous.get(identifier)
+            edit = changed.pop(identifier, None)
+            if old and old["family"] in families and old["edited"]:
+                f = families[old["family"]]
+            if edit and edit.family:
+                if edit.family not in families:
+                    fail("Guide edit references missing family")
+                f = families[edit.family]
+            points = [
+                list(
+                    root
+                    + (x * p[0] + y * p[1] + normal * p[2]) * f.length * length_scale
                 )
-                if kind == "guide":
-                    guides.append(record)
-                    if not region.children:
-                        roots.append(record.copy())
-                else:
-                    roots.append(record)
+                for p in f.shape
+            ]
+            edited = bool(edit and edit.family)
+            if old and old["edited"]:
+                delta = root - Vector(old["points"][0])
+                points = [list(Vector(p) + delta) for p in old["points"]]
+                edited = True
+            if edit:
+                if edit.points is not None:
+                    points = edit.points
+                    edited = True
+                if edit.length_scale is not None:
+                    points = [
+                        list(root + (Vector(p) - root) * edit.length_scale)
+                        for p in points
+                    ]
+                    edited = True
+                if (Vector(points[0]) - root).length > 1e-5:
+                    fail(
+                        "Edited guide first point must equal its attached "
+                        "surface-local "
+                        "root"
+                    )
+                if any(
+                    (Vector(a) - Vector(b)).length < 1e-7
+                    for a, b in zip(points[:-1], points[1:], strict=True)
+                ):
+                    fail("Guide has coincident points")
+            variation = 1 + rng.uniform(-1, 1) * f.length_variation
+            record: dict[str, Any] = dict(
+                id=identifier,
+                region=ri,
+                family=family_index[f.name],
+                root=list(root),
+                normal=list(normal),
+                flow=list(x),
+                uv=list(uv)[:2],
+                triangle=ti,
+                group=slot,
+                row=region.rows.index(row) if row else -1,
+                sequence=n if row else -1,
+                mirrored=mirrored,
+                order=row.order if row else 0,
+                overlap=int(bool(row and row.overlap == "over_previous")),
+                offset=f.offset,
+                radius=f.radius,
+                tip=f.tip_radius,
+                roll=f.roll,
+                layer=row.layer if row and row.layer is not None else f.layer,
+                variation=variation,
+                points=points,
+                edited=edited,
+            )
+            if kind == "guide":
+                guides.append(record)
+                if not region.children:
+                    roots.append(record.copy())
+            else:
+                roots.append(record)
     if changed:
         fail("Guide edit references an unknown stable root ID")
+    if len(guides) > 10000 or len(roots) > 50000:
+        fail("System exceeds10000 guides or50000 evaluated curves", "growth_limit")
     if sum(len(r["points"]) for r in guides) > 320000:
         fail("Guide point budget exceeded")
     maxima: dict[int, int] = {}
-    for row in guides:
-        maxima[row["group"]] = max(maxima.get(row["group"], 0), len(row["points"]))
+    for record in guides:
+        maxima[record["group"]] = max(
+            maxima.get(record["group"], 0), len(record["points"])
+        )
     if sum(maxima[r["group"]] for r in roots) > 800000:
         fail("Interpolated guide point budget exceeds 800000", "growth_limit")
     counts: dict[int, int] = {}
-    for row in roots:
-        counts[row["family"]] = counts.get(row["family"], 0) + 1
+    for record in roots:
+        counts[record["family"]] = counts.get(record["family"], 0) + 1
     resources(spec, counts=counts)
     return guides, roots
 
@@ -467,6 +525,11 @@ def attributes(data: Any, rows: list[dict[str, Any]], domain: str) -> None:
     for key, kind in [
         ("id", "INT"),
         ("region", "INT"),
+        ("row", "INT"),
+        ("sequence", "INT"),
+        ("mirrored", "BOOLEAN"),
+        ("order", "INT"),
+        ("overlap", "INT"),
         ("family", "INT"),
         ("root", "FLOAT_VECTOR"),
         ("normal", "FLOAT_VECTOR"),
@@ -591,7 +654,13 @@ def create(args: GrowthCreateArguments) -> GrowthDelta:
     if bpy.data.objects.get(args.name):
         fail("Choose an unused growth object name")
     surface, mats, protos, _, _ = resources(args)
-    slots = {r.name: i for i, r in enumerate(args.regions)}
+    slots = {
+        key: i
+        for i, key in enumerate(
+            [growth_fields.region_key(r.name) for r in args.regions]
+            + growth_fields.keys(args.regions)
+        )
+    }
     guides, roots = plan(args, surface, slots, {}, [])
     owner_id = uuid4().hex
     old_rest = surface.add_rest_position_attribute
@@ -663,9 +732,11 @@ def configure(args: GrowthConfigureArguments) -> GrowthDelta:
         fail("Changed seed/region selection requires explicit rebind=true")
     slots = dict(meta["slots"])
     next_slot = max(slots.values(), default=-1) + 1
-    for r in spec.regions:
-        if rebound or r.name not in slots:
-            slots[r.name] = next_slot
+    for key in [
+        growth_fields.region_key(r.name) for r in spec.regions
+    ] + growth_fields.keys(spec.regions):
+        if rebound or key not in slots:
+            slots[key] = next_slot
             next_slot += 1
     if next_slot > 21000:
         fail("Stable root identity range exhausted; create a new system")
@@ -786,8 +857,9 @@ def summary(
             if args.qa_samples or args.template_samples:
                 qa = inspect_qa(obj, data, args)
     else:
-        lengths = {f.name: len(f.shape) for f in spec.families}
-        points = sum((r.children or r.guides) * lengths[r.family] for r in spec.regions)
+        points = sum(
+            counts.get(i, 0) * len(f.shape) for i, f in enumerate(spec.families)
+        )
     return GrowthSummary(
         object_name=obj.name,
         system_id=meta["id"],
@@ -830,6 +902,17 @@ def inspect(args: GrowthInspectArguments) -> GrowthInspectResult:
                 points=[list(p.position) for p in obj.data.curves[i].points]
                 if args.include_points
                 else None,
+                row=(
+                    spec.regions[a("growth_region").value]
+                    .rows[a("growth_row").value]
+                    .name
+                )
+                if a("growth_row").value >= 0
+                else None,
+                sequence=a("growth_sequence").value
+                if a("growth_row").value >= 0
+                else None,
+                mirrored=a("growth_mirrored").value,
             )
         )
     return GrowthInspectResult(
@@ -839,7 +922,77 @@ def inspect(args: GrowthInspectArguments) -> GrowthInspectResult:
         if args.guide_limit and end < len(obj.data.curves)
         else None,
         recipe=spec if args.include_recipe else None,
+        rows=row_summaries(obj, spec) if args.include_rows else [],
+        field_samples=field_samples(obj, spec, args),
     )
+
+
+def row_summaries(obj: Any, spec: GrowthCreateArguments) -> list[GrowthRowSummary]:
+    buckets: dict[tuple[int, int, bool], list[Any]] = {}
+    attrs = obj.data.attributes
+    for i, curve in enumerate(obj.data.curves):
+        ri = attrs["growth_row"].data[i].value
+        if ri < 0:
+            continue
+        key = (
+            attrs["growth_region"].data[i].value,
+            ri,
+            bool(attrs["growth_mirrored"].data[i].value),
+        )
+        buckets.setdefault(key, []).append(curve.points[0].position.copy())
+    result = []
+    for (region_index, row_index, mirrored), points in buckets.items():
+        region = spec.regions[region_index]
+        row = region.rows[row_index]
+        family = next(
+            f for f in spec.families if f.name == (row.family or region.family)
+        )
+        spacings = [
+            (b - a).length for a, b in zip(points[:-1], points[1:], strict=True)
+        ]
+        result.append(
+            GrowthRowSummary(
+                region=region.name,
+                row=row.name,
+                mirrored=mirrored,
+                count=len(points),
+                layer=row.layer if row.layer is not None else family.layer,
+                order=row.order,
+                overlap=row.overlap,
+                minimum_spacing=min(spacings, default=None),
+                maximum_spacing=max(spacings, default=None),
+            )
+        )
+    return result
+
+
+def field_samples(
+    obj: Any, spec: GrowthCreateArguments, args: GrowthInspectArguments
+) -> list[GrowthFieldSample]:
+    if not args.field_samples:
+        return []
+    sf = Surface(obj.data.surface, obj.data.surface.data, spec.uv_map)
+    faces = region_faces(obj.data.surface, spec)
+    regions = {r.name: r for r in spec.regions}
+    result = []
+    for query in args.field_samples:
+        if query.region not in regions:
+            fail("Field sample references an unknown region")
+        p, n, ti, flow, scale = growth_fields.frame(
+            sf, Vector((*query.uv, 0)), faces[query.region], regions[query.region]
+        )
+        result.append(
+            GrowthFieldSample(
+                region=query.region,
+                uv=query.uv,
+                position=list(p),
+                normal=list(n),
+                direction=list(flow),
+                length_scale=scale,
+                face=sf.triangles[ti].polygon_index,
+            )
+        )
+    return result
 
 
 def remove(args: GrowthRemoveArguments) -> GrowthRemoveResult:

@@ -5,6 +5,13 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, model_validator
 
 from .deformation_sweep_models import EvaluationPose
+from .growth_domain_models import (
+    GrowthField,
+    GrowthFieldQuery,
+    GrowthFieldSample,
+    GrowthRow,
+    GrowthRowSummary,
+)
 from .mesh_models import (
     AllSelector,
     BoxSelector,
@@ -78,7 +85,7 @@ class GrowthRegion(Model):
         default_factory=lambda: AllSelector(domain="face", mode="all")
     )
     family: Name
-    guides: int = Field(default=32, ge=1, le=10000)
+    guides: int = Field(default=32, ge=0, le=10000)
     children: int = Field(
         default=0,
         ge=0,
@@ -95,11 +102,31 @@ class GrowthRegion(Model):
             "singular projection is rejected."
         ),
     )
+    field: GrowthField | None = Field(
+        default=None,
+        description=(
+            "UV inverse-distance direction/length field, replacing constant flow."
+        ),
+    )
+    rows: list[GrowthRow] = Field(
+        default_factory=list,
+        max_length=16,
+        description=(
+            "Ordered UV root paths within this face domain; requires guides=children=0."
+        ),
+    )
 
     @model_validator(mode="after")
     def face_region(self) -> Self:
         if self.selector.domain != "face" or sum(x * x for x in self.flow) < 1e-12:
             raise ValueError("Region requires a face selector and nonzero flow")
+        if self.rows:
+            if self.guides or self.children:
+                raise ValueError("Ordered rows require guides=children=0")
+            if len({r.name for r in self.rows}) != len(self.rows):
+                raise ValueError("Row names must be unique within a region")
+        elif not self.guides:
+            raise ValueError("A region requires guides or ordered rows")
         return self
 
 
@@ -121,13 +148,24 @@ class GrowthCreateArguments(Model):
             raise ValueError("Family and region names must be unique")
         if any(x.family not in names for x in self.regions):
             raise ValueError("Each region references a declared family")
-        guides = sum(x.guides for x in self.regions)
-        total = sum(x.children or x.guides for x in self.regions)
+        rows = [r for region in self.regions for r in region.rows]
+        if len(rows) > 64 or any(r.family and r.family not in names for r in rows):
+            raise ValueError("At most64 rows; row families must be declared")
+        ordered = sum((r.count or 0) * (2 if r.mirror else 1) for r in rows)
+        guides = sum(x.guides for x in self.regions) + ordered
+        total = sum(x.children or x.guides for x in self.regions) + ordered
         if guides > 10000 or total > 50000:
             raise ValueError("System exceeds10000 guides or50000 evaluated curves")
         points = {f.name: len(f.shape) for f in self.families}
         if (
             sum((r.children or r.guides) * points[r.family] for r in self.regions)
+            + sum(
+                (r.count or 0)
+                * (2 if r.mirror else 1)
+                * points[r.family or region.family]
+                for region in self.regions
+                for r in region.rows
+            )
             > 800000
         ):
             raise ValueError("System exceeds800000 evaluated curve points")
@@ -246,12 +284,8 @@ class GrowthDelta(Model):
     families_changed: int = 0
 
 
-class GrowthInspectArguments(Model):
+class GrowthQAArguments(Model):
     object_name: Name
-    guide_offset: int = Field(default=0, ge=0)
-    guide_limit: int = Field(default=0, ge=0, le=32)
-    include_points: bool = False
-    include_recipe: bool = False
     qa_samples: int = Field(default=64, ge=0, le=512)
     template_samples: int = Field(
         default=0,
@@ -272,12 +306,24 @@ class GrowthInspectArguments(Model):
     )
 
 
+class GrowthInspectArguments(GrowthQAArguments):
+    guide_offset: int = Field(default=0, ge=0)
+    guide_limit: int = Field(default=0, ge=0, le=32)
+    include_points: bool = False
+    include_recipe: bool = False
+    include_rows: bool = False
+    field_samples: list[GrowthFieldQuery] = Field(default_factory=list, max_length=32)
+
+
 class GrowthGuide(Model):
     root_id: int
     region: str
     family: str
     uv: list[float]
     points: list[list[float]] | None = None
+    row: str | None = None
+    sequence: int | None = None
+    mirrored: bool = False
 
 
 class GrowthInspectResult(Model):
@@ -285,9 +331,11 @@ class GrowthInspectResult(Model):
     guides: list[GrowthGuide]
     next_guide_offset: int | None
     recipe: GrowthCreateArguments | None = None
+    rows: list[GrowthRowSummary] = Field(default_factory=list)
+    field_samples: list[GrowthFieldSample] = Field(default_factory=list)
 
 
-class GrowthSampleArguments(GrowthInspectArguments):
+class GrowthSampleArguments(GrowthQAArguments):
     armature_object: Name | None = None
     poses: list[EvaluationPose] = Field(default_factory=list, max_length=16)
     frames: list[Float32] = Field(default_factory=list, max_length=16)
@@ -298,8 +346,6 @@ class GrowthSampleArguments(GrowthInspectArguments):
             raise ValueError("Choose poses or frames")
         if any(p.bones for p in self.poses) and self.armature_object is None:
             raise ValueError("Bone poses require armature_object")
-        if self.guide_limit or self.include_recipe or self.include_points:
-            raise ValueError("Sweeps return compact QA, not guide/recipe detail")
         return self
 
 

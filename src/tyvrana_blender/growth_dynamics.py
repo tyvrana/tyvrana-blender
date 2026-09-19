@@ -19,7 +19,6 @@ from .dynamics_models import (
     DynamicsJobStatus,
     DynamicsObjectArguments,
 )
-from .growth_models import GrowthCreateArguments
 
 KEY = "_tyvrana_growth_dynamics"
 CACHE = "Secondary Cache"
@@ -209,9 +208,8 @@ def simulation(args: DynamicsBakeArguments) -> Generator[int, None, DynamicsCach
     old_cache = cache_object(group) if previous else None
     original_metadata = obj.get(KEY)
     original_signature = group.get(growth.KEY + "_signature")
-    spec = GrowthCreateArguments.model_validate(meta["spec"])
-    lengths = {f.name: len(f.shape) for f in spec.families}
-    count = sum((r.children or r.guides) * lengths[r.family] for r in spec.regions)
+    with growth.evaluated_path(obj, group) as evaluated:
+        count = len(evaluated.points)
     frames = args.frame_end - args.frame_start + 1
     if (
         count > args.max_points

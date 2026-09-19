@@ -50,6 +50,36 @@ that guide; generated children retain their region's output family. Region reass
 is expressed through the region list. Changes to selection or seed require explicit
 `rebind: true`. Mutation results include counts and compact change summaries.
 
+## Continuous fields and ordered roots
+
+A region's optional `field.controls` supplies UV positions, nonzero UV directions and
+positive `length_scale` values. Inverse squared UV distance blends normalized directions
+and length; exact control positions reproduce their values. The surface UV derivative
+maps directions into the rest tangent plane. Cancelled or singular directions fail.
+The field regenerates guides; dense child output uses native guide interpolation.
+This is a rest-surface field, carried through native surface deformation afterward.
+
+Use region `rows` with `guides: 0` and `children: 0` for ordered attachment systems.
+Each named row has a short UV `path`, either `count` or `spacing` with `count: null`,
+optional family/layer overrides, `order`, and `overlap` intent (`none` or
+`over_previous`). `mirror: "u"` or `"v"` adds a reflected row around `mirror_center`
+(default0.5); field directions are reflected too. Each root is checked against the
+region's selected faces and UV binding. Surface, UV map and face domain are its explicit
+support references. A row is its own native interpolation group.
+
+Spacing uses surface-local arc length sampled at16 intervals per UV path segment;
+it is approximate on curved/irregular mappings. `include_rows` returns measured rest
+chord spacing. There are at most64 rows/system,16/region,32 UV points/path and2048
+roots/side, within existing system budgets. Continuous-path coverage between quadrature
+samples and collision-free layering are not certified by root placement.
+
+Root IDs follow row name, side and sequence index through path, field, count and list
+order changes. Count edits may reposition surviving roots; explicit guide shapes translate
+with their revised root. Explicit rebinding creates fresh identities. Persisted attributes
+carry row, sequence, mirror side, order, overlap and layer without per-root objects.
+`growth.inspect` optionally returns row summaries and up to32 `field_samples` queries
+(`region`, `uv`), including rest position, direction, normal, length factor and face.
+
 ## Attachment and persistence
 
 Native Curves `surface`, `surface_uv_map` and per-curve UV coordinates drive Blender's
@@ -138,7 +168,6 @@ Per system: 16 regions, 8 families, 10,000 authored guides, 50,000 output curves
 (up to 4096). Budgets include family overrides and conservative interpolation point
 counts. Avoid large realized geometry when shared instances satisfy the intent.
 
-Dynamics, aerodynamic simulation, interactive grooming brushes, automatic clumping
-and arbitrary Geometry Nodes authoring are deferred. Stable roots, editable rest
-geometry, pin weights, families and native attributes provide inputs for future
-simulation work; they do not themselves implement simulation.
+Native rod dynamics and cache lifecycle are documented separately. Rod clearance does
+not certify broad-template or layered self-collision. Aerodynamic simulation, interactive
+grooming brushes, automatic clumping and arbitrary Geometry Nodes authoring are deferred.

@@ -15,6 +15,11 @@ MODIFIER = "Tyvrana Growth"
 ROOT_ATTRIBUTES = [
     "growth_root_id",
     "growth_region",
+    "growth_row",
+    "growth_sequence",
+    "growth_mirrored",
+    "growth_order",
+    "growth_overlap",
     "growth_family",
     "growth_root",
     "growth_normal",
