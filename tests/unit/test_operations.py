@@ -247,6 +247,8 @@ from tyvrana_blender.organization_models import (
     OrganizationRemoveResult,
 )
 from tyvrana_blender.reference_models import (
+    ConstructionReport,
+    LandmarkDeriveArguments,
     LandmarkInspectArguments,
     LandmarkInspectResult,
     LandmarkResult,
@@ -255,6 +257,10 @@ from tyvrana_blender.reference_models import (
     MeasurementResult,
     NamedRemoveArguments,
     NamedRemoveResult,
+    ObservationInspectArguments,
+    ObservationResult,
+    ObservationSetArguments,
+    ObservationWriteResult,
     ReferenceCalibrateArguments,
     ReferenceCalibrateResult,
     ReferenceConfigureArguments,
@@ -262,6 +268,8 @@ from tyvrana_blender.reference_models import (
     ReferenceInspectArguments,
     ReferenceInspectResult,
     ReferenceResult,
+    RegistrationArguments,
+    RegistrationResult,
     UnitsConfigureArguments,
     UnitsSummary,
 )
@@ -553,6 +561,34 @@ class Backend:
     def reference_calibrate(
         self, arguments: ReferenceCalibrateArguments
     ) -> ReferenceCalibrateResult:
+        raise NotImplementedError
+
+    def reference_register(
+        self, arguments: RegistrationArguments
+    ) -> RegistrationResult:
+        raise NotImplementedError
+
+    def reference_registration_inspect(
+        self, arguments: ReferenceInspectArguments
+    ) -> RegistrationResult:
+        raise NotImplementedError
+
+    def reference_observation_set(
+        self, arguments: ObservationSetArguments
+    ) -> ObservationWriteResult:
+        raise NotImplementedError
+
+    def reference_observation_inspect(
+        self, arguments: ObservationInspectArguments
+    ) -> ObservationResult:
+        raise NotImplementedError
+
+    def reference_observation_remove(
+        self, arguments: NamedRemoveArguments
+    ) -> NamedRemoveResult:
+        raise NotImplementedError
+
+    def landmark_derive(self, arguments: LandmarkDeriveArguments) -> ConstructionReport:
         raise NotImplementedError
 
     def landmark_set(self, arguments: LandmarkSetArguments) -> LandmarkResult:

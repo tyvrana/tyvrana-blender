@@ -7,6 +7,7 @@ import bmesh  # type: ignore[import-not-found]
 import bpy  # type: ignore[import-not-found]
 from mathutils import Matrix  # type: ignore[import-not-found]
 
+from .bindings import RESOURCE_KEY
 from .errors import OperationError
 from .inspection import page
 from .organization_models import (
@@ -689,7 +690,8 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
             "hide_select",
         }
         if not metadata_only and any(
-            str(k).startswith(("tyvrana_", "_tyvrana_")) and k not in {ROLE, TAGS}
+            str(k).startswith(("tyvrana_", "_tyvrana_"))
+            and k not in {ROLE, TAGS, RESOURCE_KEY}
             for k in obj.keys()
         ):
             fail(

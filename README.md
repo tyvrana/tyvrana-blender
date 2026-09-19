@@ -3466,11 +3466,24 @@ Discover the current typed schemas through `tyvrana_list_operations`.
 | `blender.reference.inspect` | Filter by names/prefix, image, collection or category; default 32, maximum 128 per page. |
 | `blender.reference.calibrate` | Set the scale of one reference using two image points and a known distance; preserve the first point in world space. |
 | `blender.reference.remove` | Remove 1–32 managed references after dependency checks; retain images. |
+| `blender.reference.register` | Calibrate and align 1–16 packed reference planes or orthographic views in a rigid construction frame. |
+| `blender.reference.registration.inspect` | Inspect saved registration and current/stale calibration bases. |
+| `blender.reference.observation.set` | Persist 1–128 source-pixel observations, identities, revisions and optional uncertainty. |
+| `blender.reference.observation.inspect` | Inspect bounded source evidence and optional display-plane coordinate mappings. |
+| `blender.reference.observation.remove` | Remove 1–32 observations; dependent derived points become stale. |
 | `blender.landmark.set` | Create or fully redefine 1–32 named world/object-local points in one declaration. |
+| `blender.landmark.derive` | Solve 1–32 landmarks from registered observations, known-axis planes or reflection; report rank, residual and uncertainty. |
 | `blender.landmark.inspect` | Filter by names/prefix, attached object, category or attachment type; default 32, maximum 128. |
 | `blender.landmark.remove` | Remove 1–32 managed landmarks, preserving their target objects. |
 | `blender.measurement.inspect` | Calculate 1–64 named distances, angles and authored mesh bounds; optionally compare scalar values to targets. |
 | `blender.scene.configure_units` | Set unit display system and meters per Blender unit without scaling geometry. |
+
+For persistent source evidence and deterministic construction instead of external
+coordinate calculations, see [Reference-space construction](docs/reference_construction.md).
+Literal `landmark.set` remains useful for known coordinates; it explicitly replaces
+any previous derivation provenance. `landmark.inspect` supports compact summary
+and bounded provenance views. Stale derived landmarks cannot be used as valid
+measurement points.
 
 ### Reference images and ownership
 

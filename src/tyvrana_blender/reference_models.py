@@ -144,6 +144,10 @@ class LandmarkSummary(Model):
     category: str
     attachment: Literal["world", "object"]
     valid: bool
+    derived: bool = False
+    stale: bool = False
+    residual: float | None = None
+    observation_ids: list[str] = Field(default_factory=list)
 
 
 class LandmarkResult(Model):
@@ -154,10 +158,15 @@ class LandmarkInspectArguments(InspectArguments):
     object: Name | None = None
     category: str | None = Field(default=None, max_length=64)
     attachment: Literal["world", "object"] | None = None
+    detail: Literal["points", "summary", "provenance"] = "points"
+    derived_only: bool = False
 
 
 class LandmarkInspectResult(LandmarkResult):
     page: PageInfo
+    construction: "ConstructionReport | None" = None
+    provenance: list["DerivationProvenance"] = Field(default_factory=list)
+    provenance_truncated: bool = False
 
 
 class WorldPoint(Model):
@@ -320,3 +329,250 @@ class ReferenceCalibrateResult(Model):
     factor: float
     size: float
     anchor_world: Point
+
+
+type Axis = Literal["x", "y", "z"]
+type SignedAxis = Literal["x", "y", "z", "-x", "-y", "-z"]
+
+
+class SourceObservation(Model):
+    id: Name
+    reference: Name
+    pixel: Pixel = Field(
+        description="Bottom-left image-edge coordinates; not world XYZ."
+    )
+    label: str = Field(default="", max_length=256)
+    sigma_pixels: Float32 | None = Field(default=None, gt=0, le=10000)
+    visibility: Literal["visible", "occluded"] = "visible"
+
+
+class ObservationSetArguments(Model):
+    observations: list[SourceObservation] = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def unique(self) -> Self:
+        if len({o.id for o in self.observations}) != len(self.observations):
+            raise ValueError("Observation IDs must be unique")
+        return self
+
+
+class ObservationSummary(SourceObservation):
+    revision: int
+    reference_id: str
+    source_sha256: str
+    source_dimensions: list[int]
+    source_label: str
+    stale: bool
+    reference_local: Point | None = None
+    world_point: Point | None = None
+
+
+class ObservationInspectArguments(InspectArguments):
+    reference: Name | None = None
+    mapped_points: bool = False
+
+
+class ObservationResult(Model):
+    observations: list[ObservationSummary]
+    page: PageInfo | None = None
+
+
+class ObservationWriteResult(Model):
+    count: int
+    ids: list[str]
+
+
+class ReferenceScale(Model):
+    a: Pixel
+    b: Pixel
+    distance: Distance
+    unit: Unit = "blender"
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        if self.a == self.b:
+            raise ValueError("Scale requires distinct source points")
+        return self
+
+
+class ReferenceRegistration(Model):
+    reference: Name
+    projection: Literal["plane", "orthographic", "perspective"] = Field(
+        description=(
+            "Explicit source assumption; perspective is rejected until "
+            "camera calibration is supported. Display visibility is not calibration."
+        )
+    )
+    calibration: ReferenceScale
+    origin_pixel: Pixel
+    horizontal: SignedAxis
+    vertical: SignedAxis
+    frame: Name | None = Field(
+        default=None,
+        description=(
+            "World if null; otherwise an existing rigid, unit-scale object frame."
+        ),
+    )
+    origin: Point = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+
+    @model_validator(mode="after")
+    def axes(self) -> Self:
+        if self.horizontal.lstrip("-") == self.vertical.lstrip("-"):
+            raise ValueError("Horizontal and vertical axes must differ")
+        return self
+
+
+class RegistrationArguments(Model):
+    registrations: list[ReferenceRegistration] = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="after")
+    def unique(self) -> Self:
+        if len({r.reference for r in self.registrations}) != len(self.registrations):
+            raise ValueError("References must be unique")
+        return self
+
+
+class RegistrationSummary(ReferenceRegistration):
+    reference_id: str
+    frame_id: str | None
+    revision: int
+    state: Literal["calibrated", "stale"]
+    source_sha256: str
+    basis_sha256: str
+
+
+class RegistrationResult(Model):
+    registrations: list[RegistrationSummary]
+    page: PageInfo
+
+
+class AxisConstraint(Model):
+    axis: Axis
+    value: Coordinate = Field(
+        description=(
+            "Known coordinate/plane in the selected construction frame, "
+            "in Blender units."
+        )
+    )
+
+
+class ObservationDerivation(Model):
+    kind: Literal["observations"] = "observations"
+    observations: list[Name] = Field(min_length=1, max_length=8)
+    constraints: list[AxisConstraint] = Field(default_factory=list, max_length=3)
+
+    @model_validator(mode="after")
+    def unique(self) -> Self:
+        if len(set(self.observations)) != len(self.observations):
+            raise ValueError("Observation IDs must be unique")
+        if len({c.axis for c in self.constraints}) != len(self.constraints):
+            raise ValueError("Constraint axes must be unique")
+        return self
+
+
+class ReflectionDerivation(Model):
+    kind: Literal["reflection"]
+    landmark: Name
+    axis: Axis
+    plane: Coordinate = 0.0
+
+
+type Derivation = Annotated[
+    ObservationDerivation | ReflectionDerivation, Field(discriminator="kind")
+]
+
+
+class LandmarkDerivation(Model):
+    name: Name
+    source: Derivation
+    label: str = Field(default="", max_length=256)
+    category: str = Field(default="", max_length=64)
+
+
+class LandmarkDeriveArguments(Model):
+    landmarks: list[LandmarkDerivation] = Field(min_length=1, max_length=32)
+    frame: Name | None = None
+    tolerance: Float32 = Field(default=0.001, gt=0, le=1e6)
+    worst_limit: int = Field(default=8, ge=0, le=32)
+
+    @model_validator(mode="after")
+    def unique(self) -> Self:
+        names = {s.name for s in self.landmarks}
+        if len(names) != len(self.landmarks):
+            raise ValueError("Landmark names must be unique")
+        if any(
+            isinstance(s.source, ReflectionDerivation) and s.source.landmark in names
+            for s in self.landmarks
+        ):
+            raise ValueError(
+                "Reflection requires a current landmark outside this batch"
+            )
+        return self
+
+
+type SolveStatus = Literal[
+    "solved",
+    "underconstrained",
+    "inconsistent",
+    "stale_dependency",
+    "registration_required",
+]
+
+
+class ConstructionPointResult(Model):
+    name: str
+    status: SolveStatus
+    rank: int = Field(ge=0, le=3)
+    residual: float | None = None
+    worst_observation: str | None = None
+    sigma: Point | None = None
+    message: str = ""
+
+
+class ConstructionReport(Model):
+    count: int
+    solved: int
+    underconstrained: int
+    inconsistent: int
+    stale: int
+    registration_required: int
+    max_residual: float | None
+    mean_residual: float | None
+    worst: list[ConstructionPointResult]
+    worst_truncated: bool
+    frame: str | None
+    frames: list[str] = Field(default_factory=list)
+    reference_ids: list[str] = Field(default_factory=list)
+    unit: Literal["blender"] = "blender"
+    solve_seconds: float
+
+
+class ObservationEvidence(Model):
+    id: str
+    revision: int
+    reference_id: str
+    registration_revision: int
+    source_sha256: str
+    basis_sha256: str
+    pixel: Pixel
+    sigma_pixels: float | None
+    residual: float
+
+
+class DerivationProvenance(Model):
+    name: str
+    specification: LandmarkDerivation
+    frame: str | None
+    frame_id: str | None
+    frame_sha256: str
+    observations: list[ObservationEvidence]
+    reflected_landmark: str | None = None
+    reflected_basis: str | None = None
+    point: Point
+    world_point: Point
+    tolerance: float
+    result: ConstructionPointResult
+    stale: bool = False
+
+
+LandmarkInspectResult.model_rebuild()

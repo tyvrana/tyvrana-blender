@@ -247,6 +247,8 @@ from .organization_models import (
     OrganizationRemoveResult,
 )
 from .reference_models import (
+    ConstructionReport,
+    LandmarkDeriveArguments,
     LandmarkInspectArguments,
     LandmarkInspectResult,
     LandmarkResult,
@@ -255,6 +257,10 @@ from .reference_models import (
     MeasurementResult,
     NamedRemoveArguments,
     NamedRemoveResult,
+    ObservationInspectArguments,
+    ObservationResult,
+    ObservationSetArguments,
+    ObservationWriteResult,
     ReferenceCalibrateArguments,
     ReferenceCalibrateResult,
     ReferenceConfigureArguments,
@@ -262,6 +268,8 @@ from .reference_models import (
     ReferenceInspectArguments,
     ReferenceInspectResult,
     ReferenceResult,
+    RegistrationArguments,
+    RegistrationResult,
     UnitsConfigureArguments,
     UnitsSummary,
 )
@@ -550,6 +558,30 @@ class SceneBackend(Protocol):
     def reference_calibrate(
         self, arguments: ReferenceCalibrateArguments
     ) -> ReferenceCalibrateResult: ...
+
+    def reference_register(
+        self, arguments: RegistrationArguments
+    ) -> RegistrationResult: ...
+
+    def reference_registration_inspect(
+        self, arguments: ReferenceInspectArguments
+    ) -> RegistrationResult: ...
+
+    def reference_observation_set(
+        self, arguments: ObservationSetArguments
+    ) -> ObservationWriteResult: ...
+
+    def reference_observation_inspect(
+        self, arguments: ObservationInspectArguments
+    ) -> ObservationResult: ...
+
+    def reference_observation_remove(
+        self, arguments: NamedRemoveArguments
+    ) -> NamedRemoveResult: ...
+
+    def landmark_derive(
+        self, arguments: LandmarkDeriveArguments
+    ) -> ConstructionReport: ...
 
     def landmark_set(self, arguments: LandmarkSetArguments) -> LandmarkResult: ...
 
@@ -2203,6 +2235,89 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.reference.register",
+        RegistrationArguments,
+        RegistrationResult,
+        lambda b, a, q: b.reference_register(a),
+        "Register 1..16 packed references as metric planes or orthographic "
+        "projections: source-pixel scale/origin and signed axes in a rigid "
+        "world/object frame. Aligns native reference empties and persists "
+        "calibration/provenance. Perspective requires camera calibration "
+        "and is rejected. Source assumptions must be justified; display "
+        "mode does not establish projection. Updates stale dependent "
+        "landmarks.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.reference.registration.inspect",
+        ReferenceInspectArguments,
+        RegistrationResult,
+        lambda b, a, q: b.reference_registration_inspect(a),
+        "Inspect registered reference calibration, frame, source identity, "
+        "revision and current/stale basis. Names/pagination follow "
+        "reference inspection. A stale registration must be explicitly "
+        "re-established.",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.reference.observation.set",
+        ObservationSetArguments,
+        ObservationWriteResult,
+        lambda b, a, q: b.reference_observation_set(a),
+        "Persist/redefine 1..128 named source-pixel observations with "
+        "reference identity, packed-source hash, dimensions, revision and "
+        "optional pixel uncertainty. Pixels remain in source coordinates "
+        "after plane movement. 2048 observations/2 MiB per scene; batch "
+        "returns IDs only. No 3D inference; occluded observations do not "
+        "constrain a solve.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.reference.observation.inspect",
+        ObservationInspectArguments,
+        ObservationResult,
+        lambda b, a, q: b.reference_observation_inspect(a),
+        "Inspect bounded source observations by IDs in names, reference or "
+        "page. Optional mapped_points includes reference-local and world "
+        "display-plane points, not inferred 3D positions. Source changes "
+        "report stale; reference transforms do not change stored pixels.",
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.reference.observation.remove",
+        NamedRemoveArguments,
+        NamedRemoveResult,
+        lambda b, a, q: b.reference_observation_remove(a),
+        "Remove 1..32 source observation IDs atomically. Existing derived "
+        "landmarks become stale and cannot be consumed as valid measurement"
+        " points until explicitly rederived.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.landmark.derive",
+        LandmarkDeriveArguments,
+        ConstructionReport,
+        lambda b, a, q: b.landmark_derive(a),
+        "Derive 1..32 existing-system landmarks from persisted observations"
+        " on registered planes/orthographic views or reflection of an "
+        "existing current landmark. Optional known-axis planes constrain "
+        "missing components in a rigid construction frame. Application "
+        "computes XYZ. Rank-deficient, stale or inconsistent inputs return "
+        "explicit per-point statuses; no guessed geometry. Only solved "
+        "points are written; failed re-solves invalidate old derived "
+        "outputs. Malformed requests roll back the batch. Saves provenance;"
+        " compact counts/residuals/conditional uncertainty and worst-N "
+        "(default8). Inspect details with landmark.inspect. No perspective "
+        "triangulation or automatic correspondence.",
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
         "blender.landmark.set",
         LandmarkSetArguments,
         LandmarkResult,
@@ -2211,7 +2326,8 @@ _DECLARATIONS = (
         "only managed landmarks; omitted metadata resets. Object-local points "
         "follow object transforms, not mesh deformation. Omit/null object for "
         "world points. Reject name collisions and landmark-to-landmark "
-        "attachments. ",
+        "attachments. Literal redefinition clears derivation provenance; "
+        "use landmark.derive for registered source observations. ",
         effect="mutating",
         execution="synchronous",
     ),
@@ -2223,7 +2339,10 @@ _DECLARATIONS = (
         "Inspect named/category/object/attachment-filtered landmark pages "
         "(default 32/max 128). Return local and world coordinates and explicit "
         "validity; missing attached objects require redefinition, never silent "
-        "world-point fallback. ",
+        "world-point fallback. Derived landmarks report stale input bases; "
+        "detail=summary omits coordinates, detail=provenance returns at "
+        "most8 records with explicit truncation. Construction statistics "
+        "cover the selected page. ",
         effect="read_only",
         execution="synchronous",
     ),

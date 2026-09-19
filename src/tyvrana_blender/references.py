@@ -349,7 +349,12 @@ def remove(arguments: NamedRemoveArguments, key: str) -> NamedRemoveResult:
     return NamedRemoveResult(removed=arguments.names)
 
 
-def landmark_summary(obj: Any) -> LandmarkSummary:
+def landmark_summary(
+    obj: Any, construction_context: tuple[dict[str, Any], dict[str, Any]] | None = None
+) -> LandmarkSummary:
+    from .construction import DERIVATION, freshness
+    from .reference_models import DerivationProvenance
+
     attachment = str(obj[LANDMARK])
     parent = obj.parent
     valid = (
@@ -363,6 +368,11 @@ def landmark_summary(obj: Any) -> LandmarkSummary:
             and parent.name in bpy.context.scene.objects
         )
     )
+    derived = DERIVATION in obj
+    stale = derived and not freshness(obj, context=construction_context)
+    provenance = (
+        DerivationProvenance.model_validate_json(obj[DERIVATION]) if derived else None
+    )
     return LandmarkSummary(
         name=obj.name,
         point=xyz(obj.location),
@@ -371,11 +381,17 @@ def landmark_summary(obj: Any) -> LandmarkSummary:
         label=str(obj.get(LABEL, "")),
         category=str(obj.get(CATEGORY, "")),
         attachment=cast(Any, attachment),
-        valid=valid,
+        valid=valid and not stale,
+        derived=derived,
+        stale=stale,
+        residual=provenance.result.residual if provenance else None,
+        observation_ids=[o.id for o in provenance.observations] if provenance else [],
     )
 
 
 def set_landmarks(arguments: LandmarkSetArguments) -> LandmarkResult:
+    from .construction import DERIVATION
+
     idle(mutate=True)
     names = {s.name for s in arguments.landmarks}
     existing: dict[str, Any] = {}
@@ -418,6 +434,8 @@ def set_landmarks(arguments: LandmarkSetArguments) -> LandmarkResult:
                 obj.empty_display_size = 0.05
             obj[LANDMARK] = "object" if spec.object else "world"
             obj[LABEL], obj[CATEGORY] = spec.label, spec.category
+            if DERIVATION in obj:
+                del obj[DERIVATION]
             obj.parent = parents.get(spec.name)
             obj.parent_type = "OBJECT"
             obj.matrix_parent_inverse = Matrix.Identity(4)
@@ -438,7 +456,7 @@ def set_landmarks(arguments: LandmarkSetArguments) -> LandmarkResult:
                 inverse,
                 basis,
             )
-            for key in (LANDMARK, LABEL, CATEGORY):
+            for key in (LANDMARK, LABEL, CATEGORY, DERIVATION):
                 if key in props:
                     obj[key] = props[key]
                 elif key in obj:
@@ -448,6 +466,9 @@ def set_landmarks(arguments: LandmarkSetArguments) -> LandmarkResult:
 
 
 def inspect_landmarks(arguments: LandmarkInspectArguments) -> LandmarkInspectResult:
+    from .construction import DERIVATION, freshness, observations, report
+    from .reference_models import DerivationProvenance
+
     idle()
     objects = (
         o
@@ -457,10 +478,50 @@ def inspect_landmarks(arguments: LandmarkInspectArguments) -> LandmarkInspectRes
         and (arguments.object is None or o.parent and o.parent.name == arguments.object)
         and (arguments.category is None or o.get(CATEGORY, "") == arguments.category)
         and (arguments.attachment is None or o.get(LANDMARK) == arguments.attachment)
+        and (not arguments.derived_only or DERIVATION in o)
     )
     selected, info = page(objects, arguments, lambda o: str(o.name))
+    construction_context: tuple[dict[str, Any], dict[str, Any]] = (observations(), {})
+    provenance = [
+        DerivationProvenance.model_validate_json(o[DERIVATION]).model_copy(
+            update={"name": o.name}
+        )
+        for o in selected
+        if DERIVATION in o
+    ]
+    provenance = [
+        record.model_copy(
+            update={
+                "stale": not freshness(
+                    object_named(record.name), context=construction_context
+                )
+            }
+        )
+        for record in provenance
+    ]
+    results = [
+        p.result.model_copy(update={"status": "stale_dependency"})
+        if p.stale
+        else p.result
+        for p in provenance
+    ]
     return LandmarkInspectResult(
-        page=info, landmarks=[landmark_summary(o) for o in selected]
+        page=info,
+        landmarks=[landmark_summary(o, construction_context) for o in selected]
+        if arguments.detail == "points"
+        else [],
+        construction=report(results, None).model_copy(
+            update={
+                "frames": sorted({p.frame_id or "world" for p in provenance}),
+                "reference_ids": sorted(
+                    {e.reference_id for p in provenance for e in p.observations}
+                ),
+            }
+        )
+        if results
+        else None,
+        provenance=provenance[:8] if arguments.detail == "provenance" else [],
+        provenance_truncated=arguments.detail == "provenance" and len(provenance) > 8,
     )
 
 
@@ -477,7 +538,11 @@ def resolve(source: PointSource) -> Any:
         return pixel_point(owned(source.reference, REFERENCE), source.pixel)
     obj = owned(source.name, LANDMARK)
     if not landmark_summary(obj).valid:
-        fail("Landmark attachment is missing; redefine the landmark explicitly")
+        fail(
+            "Landmark is stale or attachment is missing; "
+            "rederive/redefine it explicitly",
+            "stale_dependency",
+        )
     return obj.matrix_world.translation.copy()
 
 

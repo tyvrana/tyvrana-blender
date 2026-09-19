@@ -21,7 +21,9 @@ RESOURCE_KEY = "_tyvrana_resource_id"
 SCOPE = (
     "Structural summary only: object type/local transform/parent identity, "
     "data counts/bounds/modifier kinds, material node types/links, collection "
-    "membership. Excludes full geometry, shader values, rig/animation internals "
+    "membership; managed reference observations/registration and "
+    "derived-landmark freshness. Excludes full geometry, shader values, "
+    "rig/animation internals "
     "and external edits outside this scope. Caps: 64 modifiers,256 nodes,512 "
     "links,4096 members; total counts are included. Existence is not content "
     "validation."
@@ -60,6 +62,11 @@ def _collection(kind: str) -> Any:
 def _fingerprint(kind: str, resource: Any) -> str:
     data: dict[str, Any] = {"kind": kind}
     if kind == "object":
+        from .construction import fingerprint
+
+        construction = fingerprint(resource)
+        if construction is not None:
+            data["construction"] = construction
         data.update(
             type=resource.type,
             transform=[float(v) for row in resource.matrix_local for v in row],

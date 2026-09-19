@@ -273,6 +273,8 @@ from .organization_models import (
 )
 from .raster import raster_size
 from .reference_models import (
+    ConstructionReport,
+    LandmarkDeriveArguments,
     LandmarkInspectArguments,
     LandmarkInspectResult,
     LandmarkResult,
@@ -281,6 +283,10 @@ from .reference_models import (
     MeasurementResult,
     NamedRemoveArguments,
     NamedRemoveResult,
+    ObservationInspectArguments,
+    ObservationResult,
+    ObservationSetArguments,
+    ObservationWriteResult,
     ReferenceCalibrateArguments,
     ReferenceCalibrateResult,
     ReferenceConfigureArguments,
@@ -288,6 +294,8 @@ from .reference_models import (
     ReferenceInspectArguments,
     ReferenceInspectResult,
     ReferenceResult,
+    RegistrationArguments,
+    RegistrationResult,
     UnitsConfigureArguments,
     UnitsSummary,
 )
@@ -1081,6 +1089,46 @@ class BlenderBackend:
         from . import references
 
         return references.calibrate(arguments)
+
+    def reference_register(
+        self, arguments: RegistrationArguments
+    ) -> RegistrationResult:
+        from . import construction
+
+        return construction.register(arguments)
+
+    def reference_registration_inspect(
+        self, arguments: ReferenceInspectArguments
+    ) -> RegistrationResult:
+        from . import construction
+
+        return construction.registration_inspect(arguments)
+
+    def reference_observation_set(
+        self, arguments: ObservationSetArguments
+    ) -> ObservationWriteResult:
+        from . import construction
+
+        return construction.set_observations(arguments)
+
+    def reference_observation_inspect(
+        self, arguments: ObservationInspectArguments
+    ) -> ObservationResult:
+        from . import construction
+
+        return construction.inspect_observations(arguments)
+
+    def reference_observation_remove(
+        self, arguments: NamedRemoveArguments
+    ) -> NamedRemoveResult:
+        from . import construction
+
+        return construction.remove_observations(arguments)
+
+    def landmark_derive(self, arguments: LandmarkDeriveArguments) -> ConstructionReport:
+        from . import construction
+
+        return construction.derive(arguments)
 
     def landmark_set(self, arguments: LandmarkSetArguments) -> LandmarkResult:
         main_thread()
