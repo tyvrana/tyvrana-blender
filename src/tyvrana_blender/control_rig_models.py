@@ -5,6 +5,7 @@ from typing import Literal, Self
 from pydantic import Field, model_validator
 
 from .constraint_models import RigEndpoint
+from .keying_models import MatchKeying
 from .models import Model
 from .numeric import Float32
 from .reference_models import Name
@@ -36,6 +37,7 @@ class ControlRigSwitchArguments(ControlRigInspectArguments):
     mode: Literal["FK", "IK"]
     match: bool = True
     tolerance: Float32 = Field(default=0.001, gt=0, le=0.01)
+    keying: MatchKeying | None = None
 
 
 class ControlRigResult(Model):

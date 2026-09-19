@@ -5,6 +5,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
+from .keying_models import MatchKeying
 from .models import Model
 from .numeric import Float32, Vector32
 from .reference_models import Name
@@ -186,6 +187,7 @@ class TransformMatch(Model):
 class PoseMatchArguments(Model):
     matches: list[TransformMatch] = Field(min_length=1, max_length=64)
     tolerance: Float32 = Field(default=0.0001, gt=0, le=0.01)
+    keying: MatchKeying | None = None
 
     @model_validator(mode="after")
     def unique_targets(self) -> Self:
@@ -207,3 +209,4 @@ class SpaceSwitchArguments(Model):
     target: RigEndpoint
     maintain_transform: bool = True
     tolerance: Float32 = Field(default=0.0001, gt=0, le=0.01)
+    keying: MatchKeying | None = None

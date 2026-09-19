@@ -592,21 +592,16 @@ def matrix_error(a: Any, b: Any) -> float:
 
 
 def match(args: PoseMatchArguments) -> PoseMatchResult:
+    from . import rig_keying
+
     start = time.perf_counter()
     organization.idle(mutate=True)
     prepared = []
     for item in args.matches:
         obj, owner = endpoint(item.target, edit=True)
-        if (
-            owner.constraints
-            or obj.animation_data
-            or any(owner.lock_location)
-            or any(owner.lock_rotation)
-            or any(owner.lock_scale)
-        ):
-            fail("Match targets must be unconstrained, unlocked and unanimated")
+        rig_keying.guard(item.target, args.keying)
         prepared.append(
-            (item.target, world(item.source), owner, owner.matrix_basis.copy())
+            (item.target, world(item.source), owner, rig_keying.snapshot(owner))
         )
 
     def depth(item: Any) -> int:
@@ -624,28 +619,50 @@ def match(args: PoseMatchArguments) -> PoseMatchResult:
         return count
 
     prepared.sort(key=depth)
+    keys = rig_keying.Keys(
+        args.keying,
+        [
+            channel
+            for item in args.matches
+            for channel in rig_keying.transforms(item.target)
+        ],
+    )
     try:
         for ref, matrix, _, _ in prepared:
             set_world(ref, matrix)
-        error = max(matrix_error(world(ref), matrix) for ref, matrix, _, _ in prepared)
-        if error > args.tolerance:
-            fail("Match is not representable; inspect connected bones or scale/shear")
-        return PoseMatchResult(
-            matched=len(prepared),
-            maximum_matrix_error=error,
-            processing_seconds=time.perf_counter() - start,
-        )
+        with keys.commit():
+            error = max(
+                matrix_error(world(ref), matrix) for ref, matrix, _, _ in prepared
+            )
+            if error > args.tolerance:
+                fail(
+                    "Match is not representable; inspect connected bones or scale/shear"
+                )
+            return PoseMatchResult(
+                matched=len(prepared),
+                maximum_matrix_error=error,
+                processing_seconds=time.perf_counter() - start,
+            )
     except BaseException:
-        for _, _, owner, basis in prepared:
-            owner.matrix_basis = basis
+        for _, _, owner, values in prepared:
+            rig_keying.restore(owner, values)
         bpy.context.view_layer.update()
         raise
 
 
 def switch_space(args: SpaceSwitchArguments) -> ConstraintsResult:
+    from . import rig_spaces
+
+    if args.keying:
+        return rig_spaces.switch(args)
     start = time.perf_counter()
     organization.idle(mutate=True)
     _, owner = endpoint(args.owner, edit=True)
+    if rig_spaces.KEY in owner:
+        fail(
+            "This control has keyed spaces; continue with keying "
+            "to preserve its history"
+        )
     spec = definition(owner, args.owner, args.constraint)
     if not isinstance(spec.settings, ChildOf):
         fail("Space switching requires an owned child_of constraint")

@@ -3,12 +3,12 @@
 import json
 import math
 import time
-from typing import Any
+from typing import Any, Literal
 
 import bpy  # type: ignore[import-not-found]
 from mathutils import Matrix  # type: ignore[import-not-found]
 
-from . import organization
+from . import organization, rig_keying
 from . import rig_constraints as native
 from .constraint_models import (
     IK,
@@ -24,6 +24,7 @@ from .control_rig_models import (
     ControlRigResult,
     ControlRigSwitchArguments,
 )
+from .motion_models import ConstraintChannel
 
 KEY = "_tyvrana_control_rigs"
 
@@ -160,8 +161,17 @@ def configure(spec: ControlRigConfigureArguments) -> ControlRigResult:
 def inspect(args: ControlRigInspectArguments) -> ControlRigResult:
     start = time.perf_counter()
     obj, catalog, spec = read(args)
-    mode = catalog[args.name]["mode"]
     issues = []
+    evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    influences = [
+        evaluated.pose.bones[n].constraints[f"{spec.name}_IK_{i}"].influence
+        for i, n in enumerate(spec.deform)
+    ]
+    mode: Literal["FK", "IK"] = (
+        "IK" if all(abs(value - 1) < 1e-6 for value in influences) else "FK"
+    )
+    if mode == "FK" and any(abs(value) > 1e-6 for value in influences):
+        issues.append("Control network requires consistent discrete FK/IK influences")
     for chain in (spec.ik, spec.deform):
         for i, n in enumerate(chain):
             a, b = obj.data.bones[n], obj.data.bones[spec.fk[i]]
@@ -205,29 +215,34 @@ def switch(args: ControlRigSwitchArguments) -> ControlRigResult:
     state = inspect(args)
     if not state.valid:
         native.fail("Control network integrity failed; inspect before switching")
-    refs = [RigEndpoint(object_name=obj.name, bone=n) for n in spec.fk] + [
-        spec.target,
-        spec.pole,
-    ]
+    refs = (
+        [RigEndpoint(object_name=obj.name, bone=n) for n in spec.fk]
+        if args.mode == "FK"
+        else [spec.target, spec.pole]
+    )
     saved = []
     for ref in refs:
         owner_obj, owner = native.endpoint(ref, edit=True)
-        if (
-            owner_obj.animation_data
-            or owner.constraints
-            or any(owner.lock_location)
-            or any(owner.lock_rotation)
-            or any(owner.lock_scale)
-        ):
-            native.fail(
-                "Match unlocked, unconstrained, unanimated controls; "
-                "author keys afterward"
-            )
-        saved.append((owner, owner.matrix_basis.copy()))
+        rig_keying.guard(ref, args.keying)
+        saved.append((owner, rig_keying.snapshot(owner)))
     influences = [
         obj.pose.bones[n].constraints[f"{spec.name}_IK_{i}"].influence
         for i, n in enumerate(spec.deform)
     ]
+    keys = rig_keying.Keys(
+        args.keying,
+        [channel for ref in refs for channel in rig_keying.transforms(ref)]
+        + [
+            ConstraintChannel(
+                object_name=obj.name, bone=n, constraint=f"{spec.name}_IK_{i}"
+            )
+            for i, n in enumerate(spec.deform)
+        ],
+    )
+    if args.keying is None and obj.animation_data:
+        native.fail(
+            "Animated control networks require keying for their switch influences"
+        )
     match_error = 0.0
     try:
         if args.match and state.mode != args.mode:
@@ -311,18 +326,30 @@ def switch(args: ControlRigSwitchArguments) -> ControlRigResult:
         bpy.context.view_layer.update()
         catalog[args.name]["mode"] = args.mode
         obj[KEY] = json.dumps(catalog)
-        result = inspect(args)
-        if not result.valid:
-            native.fail("Switched network failed output validation")
-        return result.model_copy(
-            update={
-                "maximum_match_error": match_error,
-                "processing_seconds": time.perf_counter() - start,
-            }
-        )
+        with keys.commit():
+            result = inspect(args)
+            if not result.valid or result.mode != args.mode:
+                native.fail("Switched network failed output validation")
+            if args.match and state.mode != args.mode:
+                output_error = max(
+                    native.matrix_error(
+                        native.world(RigEndpoint(object_name=obj.name, bone=n)), m
+                    )
+                    for n, m in zip(spec.deform, matrices, strict=True)
+                )
+                if output_error > args.tolerance:
+                    native.fail(
+                        "Keyed switch did not preserve the evaluated output; restored"
+                    )
+            return result.model_copy(
+                update={
+                    "maximum_match_error": match_error,
+                    "processing_seconds": time.perf_counter() - start,
+                }
+            )
     except BaseException:
-        for owner, matrix in saved:
-            owner.matrix_basis = matrix
+        for owner, values in saved:
+            rig_keying.restore(owner, values)
         for i, n in enumerate(spec.deform):
             obj.pose.bones[n].constraints[f"{spec.name}_IK_{i}"].influence = influences[
                 i

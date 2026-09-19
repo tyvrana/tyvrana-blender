@@ -9,6 +9,7 @@ from tyvrana_blender.constraint_models import (
     PoseMatchArguments,
 )
 from tyvrana_blender.joint_models import IKJoint
+from tyvrana_blender.keying_models import MatchKeying
 from tyvrana_blender.rig_models import ArmatureRestArguments
 
 
@@ -57,3 +58,19 @@ def test_rest_preview_is_explicit_and_signature_bounded() -> None:
     assert ArmatureRestArguments.model_validate(data).dependency_policy == "reject"
     with pytest.raises(ValidationError):
         ArmatureRestArguments.model_validate(dict(data, expected_rest_sha256="old"))
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        dict(action_name="Shot"),
+        dict(action_name="Shot", anchor_frame=1.25),
+        dict(action_name="Shot", anchor_frame=-1048575),
+        dict(action_name="Shot", anchor_frame=1, python="unsafe"),
+    ],
+)
+def test_keyed_matching_requires_bounded_explicit_anchor(
+    data: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        MatchKeying.model_validate(data)

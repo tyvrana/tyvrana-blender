@@ -1642,8 +1642,9 @@ _DECLARATIONS = (
         (
             "Match and switch an owned two-segment FK/IK network with bounded "
             "native pole matching. Measure full world-matrix error; rollback "
-            "when tolerance cannot be met. Controls must be unlocked and "
-            "unanimated; keyframe authoring is separate. "
+            "when tolerance cannot be met. Optional keying extends the active "
+            "owned action atomically with hold keys; unlocked destination "
+            "controls must not be driven. Timeline inspection derives the active mode. "
         ),
         tags=("rigging", "ik_fk", "matching", "controls"),
         effect="mutating",
@@ -1715,8 +1716,9 @@ _DECLARATIONS = (
         (
             "Match up to 64 unconstrained object or FK bone world transforms "
             "to evaluated source endpoints. Sources sampled before mutation; "
-            "explicit tolerance, preservation on failure. No keyframes or "
-            "automatic IK solution."
+            "explicit tolerance and optional transactional keying into owned "
+            "active actions. Preserve poses/actions on failure; driven destinations "
+            "are protected. No automatic IK solution."
         ),
         tags=("rigging", "constraints", "controls"),
         effect="mutating",
@@ -1730,8 +1732,10 @@ _DECLARATIONS = (
         (
             "Switch an owned child-of constraint target to an explicit "
             "object/bone space, preserving evaluated transform by updating its "
-            "inverse. Validate measured error and restore on failure. No "
-            "implicit keyframe authoring."
+            "inverse. With keying, retain fixed targets in up to 16 owned branches, "
+            "key influences and compensate controls without changing earlier target "
+            "identities. Validate world-pose error; "
+            "restore action/constraints on failure."
         ),
         tags=("rigging", "constraints", "controls"),
         effect="mutating",

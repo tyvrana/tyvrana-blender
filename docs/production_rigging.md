@@ -27,10 +27,36 @@ existing bones (matching-rest FK, IK and deform chains), plus independent target
 and pole controls. Other architectures use the constraint and matching primitives.
 `control_rig.switch` matches both directions and verifies each segment's full
 matrix; `inspect` reports ownership, rest compatibility and output errors. `remove`
-leaves authored bones and controls intact. Network switches currently operate on
-unanimated, unlocked controls and do not insert keyframes. Use action authoring
-separately. Constraint construction/removal also preserves existing animation by
-requiring it to be detached before structural changes.
+leaves authored bones and controls intact. Inspection derives the selected mode
+from evaluated influences, including timeline playback.
+
+## Animated matching and spaces
+
+The three matching/switching operations accept optional
+`keying={"action_name":"Shot","anchor_frame":9}` at the current integer frame
+(for example frame 10). This extends the controls' owned active action, or creates
+the named action, in the same transaction as matching. It samples destination
+controls at the explicit earlier anchor and inserts CONSTANT anchor/switch keys.
+Existing keys remain; the interval from the anchor to the switch is deliberately
+revised. No action detachment or manual key reconstruction is needed. The original
+action, assignments and channels remain available until evaluated pose validation
+passes; failures restore them. Use existing action editing for subsequent spline
+timing adjustments.
+
+Keyed space switches retain up to 16 fixed-target Child Of branches on one control.
+They key branch influences and compensate local transforms, preserving world pose
+within the requested tolerance. Earlier target identities and inverse matrices
+remain unchanged. Subsequent switches reuse existing target branches. Inspection
+exposes their influences and native validity through `constraint.inspect`.
+
+Destinations must be unlocked, use XYZ rotation for keys, and have no drivers;
+match their source controls when driven. Evaluated sources may be animated or
+constrained. Keyed spaces require an exclusive owned Child Of stack with exactly
+one fully active branch. Blended influences, NLA, foreign actions, nonrepresentable
+scale/shear, and unrelated destination constraints are protected. These operations
+do not promise pose-preserving interpolation between sampled frames. General
+constraint construction/removal still protects animated structures; rest revision
+uses the explicit preservation contract below.
 
 ## Safe rest revisions
 

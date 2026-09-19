@@ -14,7 +14,10 @@ from .conftest import ROOT, running_blender
 from .test_e2e import core_client, discover
 
 
-@pytest.mark.parametrize("script", ["constraints_checks.py", "rest_revision_checks.py"])
+@pytest.mark.parametrize(
+    "script",
+    ["constraints_checks.py", "rest_revision_checks.py", "animated_controls_checks.py"],
+)
 def test_native_production_rigging(
     profile: dict[str, str], tmp_path: Path, script: str
 ) -> None:

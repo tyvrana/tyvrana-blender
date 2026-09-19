@@ -1,6 +1,8 @@
 """Transactional slotted actions with explicit owner assignment and bounded keys."""
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import bpy  # type: ignore[import-not-found]
@@ -155,6 +157,15 @@ def identity(spec: Channel) -> tuple[int, str, int]:
 
 
 def edit(args: ActionEditArguments) -> ActionResult:
+    with staged_edit(args) as result:
+        return result
+
+
+@contextmanager
+def staged_edit(
+    args: ActionEditArguments, *, activate: bool = False
+) -> Iterator[ActionResult]:
+    """Retain original IDs/assignments until dependent pose validation succeeds."""
     from .deformation_geometry import native_name
 
     native_name(args.name)
@@ -177,6 +188,7 @@ def edit(args: ActionEditArguments) -> ActionResult:
             channels.check_value(target, key.value)
     candidate = original.copy() if original else bpy.data.actions.new(args.name)
     assignments: list[tuple[Any, Any]] = []
+    activated: list[tuple[Any, Any, Any, str, float, str, bool]] = []
     try:
         if not original:
             candidate.use_fake_user = True
@@ -287,11 +299,55 @@ def edit(args: ActionEditArguments) -> ActionResult:
             old_name = original.name
             original.name = old_name + ".replaced"
             candidate.name = old_name
+        if activate:
+            for owner, handle in {
+                channels.resolve(s).owner: h for s, h in entries.values()
+            }.items():
+                animation = owner.animation_data
+                if animation and animation.action not in (None, candidate):
+                    channels.fail(
+                        "Keyed matching must extend the controls' active action"
+                    )
+                activated.append(
+                    (
+                        owner,
+                        animation.action if animation else None,
+                        animation.action_slot if animation else None,
+                        animation.action_blend_type if animation else "REPLACE",
+                        animation.action_influence if animation else 1.0,
+                        animation.action_extrapolation if animation else "HOLD",
+                        animation is not None,
+                    )
+                )
+                animation = owner.animation_data_create()
+                animation.action = candidate
+                animation.action_slot = slot(candidate, handle)
+                animation.action_blend_type = "REPLACE"
+                animation.action_influence = 1.0
+                animation.action_extrapolation = "HOLD"
         channels.refresh()
         result = inspect(
             ActionInspectArguments(name=candidate.name), include_channels=False
         )
+        yield result
     except BaseException:
+        for (
+            owner,
+            action,
+            action_slot,
+            blend,
+            influence,
+            extrapolation,
+            existed,
+        ) in activated:
+            animation = owner.animation_data
+            animation.action = action
+            animation.action_slot = action_slot
+            animation.action_blend_type = blend
+            animation.action_influence = influence
+            animation.action_extrapolation = extrapolation
+            if not existed:
+                channels.clear_empty_animation(owner)
         for owner, old_slot in assignments:
             owner.animation_data.action = original
             owner.animation_data.action_slot = old_slot
@@ -302,7 +358,6 @@ def edit(args: ActionEditArguments) -> ActionResult:
         raise
     if original:
         bpy.data.actions.remove(original)
-    return result
 
 
 def assign(args: ActionAssignArguments) -> MotionNames:
