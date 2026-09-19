@@ -35,7 +35,10 @@ async def observed_connection(
 
     async def forward(adapter: ServerConnection) -> None:
         async with connect(
-            f"ws://127.0.0.1:{port}", proxy=None, compression=None
+            f"ws://127.0.0.1:{port}",
+            proxy=None,
+            compression=None,
+            max_size=4 * 1024 * 1024,
         ) as core:
 
             async def upstream() -> None:
@@ -59,7 +62,12 @@ async def observed_connection(
                 await asyncio.gather(*tasks, return_exceptions=True)
 
     async with serve(
-        forward, "127.0.0.1", 0, compression=None, close_timeout=1
+        forward,
+        "127.0.0.1",
+        0,
+        compression=None,
+        close_timeout=1,
+        max_size=4 * 1024 * 1024,
     ) as server:
         yield server.sockets[0].getsockname()[1], frames
 

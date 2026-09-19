@@ -864,9 +864,10 @@ image names, and unavailable OCIO color spaces are rejected.
 
 Supported inputs are deliberately limited to **PNG** (`image/png`) and **JPEG**
 (`image/jpeg`, 8-bit baseline/extended sequential or progressive DCT). Header
-signatures must match the declared type. Dimensions must be 1–4096 on each axis;
-headers and terminal markers are checked before Blender decodes the image.
-PNG header integrity is checked, and JPEG header scanning is bounded. Blender
+signatures must match the declared type. Limits are **64 MiB encoded**, **1–16384
+pixels per axis**, and **33554432 total pixels**, checked before native decode.
+Headers and terminal markers are checked; length-delimited JPEG metadata is skipped
+without copying it. Blender
 must then supply a valid decoded buffer with matching dimensions. Corrupt or
 unsupported images fail without leaving a newly created image resource.
 
@@ -879,9 +880,12 @@ packed bytes survive buffer reload and saving/reopening an assigned image in a
 `.blend` file. The original source file and adapter transfer file are no longer
 dependencies. Image inspection never returns a filepath.
 
-Failures include `artifact_not_attached`, `artifact_not_found`,
-`unsupported_artifact_media_type`, and `artifact_decode_failed`. Image creation
-requires the same editable Object Mode context as generated-image creation.
+Failures distinguish missing/read/integrity problems, unsupported or mismatched
+format, truncation, `artifact_too_large`, `image_dimensions_exceeded`, native decode,
+packing and resource creation. Error details identify the stage and exceeded bounds.
+See [image ingestion](docs/image_artifacts.md) for the complete error and memory
+contract. EXIF orientation is not applied; original encoded bytes remain unchanged.
+Image creation requires the same editable Object Mode context as generated images.
 
 For an external texture workflow:
 
@@ -3519,7 +3523,8 @@ are bounded to 63 characters and must fit Blender's native naming representation
 source labels are bounded to 512 characters. Labels describe supplied provenance,
 not verified source authenticity. Missing image data yields `valid: false` and no
 corners; it does not substitute another image. Only static packed/generated images
-up to 4096 pixels per axis are supported.
+within the shared image-import bounds (16384 pixels per axis, 33554432 total pixels)
+are supported.
 
 ### Persistent landmarks and coordinate frames
 

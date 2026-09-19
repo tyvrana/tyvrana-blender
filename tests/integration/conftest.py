@@ -11,6 +11,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.fixture(scope="session")
+def input_image_fixtures(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    from tests.raster_fixtures import create_rasters
+
+    directory = tmp_path_factory.mktemp("input-images")
+    create_rasters(directory)
+    return directory
+
+
 @pytest.fixture
 def profile(tmp_path: Path) -> dict[str, str]:
     root = tmp_path / "profile"

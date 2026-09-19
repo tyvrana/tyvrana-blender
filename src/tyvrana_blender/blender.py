@@ -271,7 +271,7 @@ from .organization_models import (
     ObjectSetResult,
     OrganizationRemoveResult,
 )
-from .raster import RasterError, raster_size
+from .raster import raster_size
 from .reference_models import (
     LandmarkInspectArguments,
     LandmarkInspectResult,
@@ -1768,18 +1768,29 @@ class BlenderBackend:
         )
         if descriptor is None:
             raise OperationError(
-                "artifact_not_attached", "Image artifact is not attached"
+                "artifact_not_attached",
+                "Image artifact is not attached",
+                {"stage": "artifact_read"},
             )
         if descriptor.media_type not in {"image/png", "image/jpeg"}:
             raise OperationError(
                 "unsupported_artifact_media_type",
                 "Only PNG and JPEG images are supported",
+                {"stage": "image_format", "media_type": descriptor.media_type},
             )
         if self.spool is None:
-            raise OperationError("artifact_not_found", "Input artifact is unavailable")
+            raise OperationError(
+                "artifact_not_found",
+                "Input artifact is unavailable",
+                {"stage": "artifact_read"},
+            )
         path = input_path(self.spool.root, request.request_id, descriptor.artifact_id)
         if not path.is_file():
-            raise OperationError("artifact_not_found", "Input artifact is unavailable")
+            raise OperationError(
+                "artifact_not_found",
+                "Input artifact is unavailable",
+                {"stage": "artifact_read"},
+            )
         if arguments.name is not None and any(
             image.name == arguments.name for image in bpy.data.images
         ):
@@ -1787,29 +1798,44 @@ class BlenderBackend:
         if arguments.color_space is not None:
             validate_color_space(arguments.color_space)
         image = None
+        stage = "image_header"
         try:
-            size = raster_size(path, descriptor.media_type)
+            size = raster_size(
+                path, descriptor.media_type, expected_bytes=descriptor.byte_size
+            )
+            stage = "blender_decode"
             image = bpy.data.images.load(str(path), check_existing=False)
-            if (
-                tuple(image.size) not in {size, tuple(reversed(size))}
-                or not image.has_data
-                or len(image.pixels) < 4
-            ):
-                raise RasterError("Blender could not decode the input image")
+            if tuple(image.size) != size or not image.has_data or len(image.pixels) < 4:
+                raise OperationError(
+                    "image_decode_failed",
+                    "Blender could not decode the admitted image",
+                    {
+                        "stage": stage,
+                        "expected_width": size[0],
+                        "expected_height": size[1],
+                    },
+                )
+            stage = "blender_datablock"
             image.name = arguments.name or "Image"
             if arguments.name is not None and image.name != arguments.name:
                 raise OperationError(
                     "invalid_arguments",
                     "Blender cannot store the requested image name exactly",
                 )
+            stage = "blender_pack"
             image.pack()
             if not image.packed_files:
-                raise RasterError("Blender could not pack the input image")
+                raise OperationError(
+                    "image_pack_failed",
+                    "Blender could not pack the input image",
+                    {"stage": stage},
+                )
             # Empty paths cannot accidentally reload another local file. Packed
             # bytes remain authoritative through buffer reload and .blend saving.
             image.filepath_raw = ""
             for packed in image.packed_files:
                 packed.filepath = ""
+            stage = "blender_datablock"
             if arguments.color_space is not None:
                 image.colorspace_settings.name = arguments.color_space
             if arguments.alpha_mode is not None:
@@ -1821,17 +1847,29 @@ class BlenderBackend:
                 or not result.width
                 or not result.height
             ):
-                raise RasterError("Blender did not retain a packed input image")
+                raise OperationError(
+                    "image_datablock_failed",
+                    "Blender did not retain a packed input image",
+                    {"stage": stage},
+                )
             return result
         except OperationError:
             if image is not None:
                 bpy.data.images.remove(image, do_unlink=True)
             raise
-        except (RasterError, RuntimeError, OSError, ValueError) as exc:
+        except (RuntimeError, OSError, ValueError, MemoryError) as exc:
             if image is not None:
                 bpy.data.images.remove(image, do_unlink=True)
             raise OperationError(
-                "artifact_decode_failed", "Cannot decode and pack the input image"
+                "image_memory_exhausted"
+                if isinstance(exc, MemoryError)
+                else "image_pack_failed"
+                if stage == "blender_pack"
+                else "image_datablock_failed"
+                if stage == "blender_datablock"
+                else "image_decode_failed",
+                "Input image import failed during " + stage,
+                {"stage": stage},
             ) from exc
         except BaseException:
             if image is not None:

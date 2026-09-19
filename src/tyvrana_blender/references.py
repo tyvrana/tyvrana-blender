@@ -8,6 +8,7 @@ from mathutils import Matrix, Vector  # type: ignore[import-not-found]
 
 from .errors import OperationError
 from .inspection import page
+from .raster import image_dimensions_supported
 from .reference_models import (
     AngleQuery,
     BoundsQuery,
@@ -111,7 +112,7 @@ def image_valid(image: Any) -> bool:
     return bool(
         image is not None
         and image.source in {"FILE", "GENERATED"}
-        and all(0 < n <= 4096 for n in image.size)
+        and image_dimensions_supported(*image.size)
         and (image.source == "GENERATED" or image.packed_files)
         and all(math.isfinite(v) and v > 0 for v in image.display_aspect)
         # Reopened images are lazy. Acquire only bounded packed/generated buffers;
@@ -125,8 +126,8 @@ def dimensions(obj: Any) -> tuple[float, float]:
     image = obj.data
     if obj.empty_display_type != "IMAGE" or not image_valid(image):
         fail(
-            "Reference requires a loaded, packed or generated static image (up to "
-            "4096px)"
+            "Reference requires a loaded, packed or generated static image "
+            "within image import dimension/pixel limits"
         )
     width, height = (image.size[i] * image.display_aspect[i] for i in range(2))
     longest = max(width, height)

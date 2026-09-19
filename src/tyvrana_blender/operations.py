@@ -2632,9 +2632,13 @@ _DECLARATIONS = (
         ImageFromArtifactArguments,
         ImageSummary,
         lambda b, a, q: b.image_from_artifact(a, q),
-        "Create and pack an image from one attached PNG/JPEG artifact. The "
-        "artifact ID references transferred bytes, never a shared filesystem "
-        "transport path.",
+        "Create and pack unchanged bytes from one attached PNG/8-bit DCT JPEG "
+        "(baseline/progressive, RGB/grayscale/CMYK). Limits: 64 MiB encoded, "
+        "16384 pixels per side, 33554432 total pixels, checked before native "
+        "decode. No resize/re-encoding; EXIF orientation is not applied. "
+        "Failures identify format, truncation, byte/pixel limits, native decode "
+        "or packing stage; no image remains on failure. Returns metadata only. "
+        "Artifact IDs reference transferred bytes, never shared filesystem paths.",
         effect="mutating",
         execution="synchronous",
         input_artifacts="required",

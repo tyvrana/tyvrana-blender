@@ -2,11 +2,13 @@
 
 import hashlib
 import importlib
+import json
 import os
 import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 from uuid import uuid4
 
 import bpy  # type: ignore[import-not-found]
@@ -26,6 +28,7 @@ adapter = importlib.import_module("bl_ext.user_default.tyvrana_blender.blender")
 operations = importlib.import_module("bl_ext.user_default.tyvrana_blender.operations")
 incoming = importlib.import_module("bl_ext.user_default.tyvrana_blender.incoming")
 artifacts = importlib.import_module("bl_ext.user_default.tyvrana_blender.artifacts")
+raster = importlib.import_module("bl_ext.user_default.tyvrana_blender.raster")
 
 
 class InputImageTests(unittest.TestCase):
@@ -185,10 +188,10 @@ class InputImageTests(unittest.TestCase):
         corrupt = data[:45] + b"x" * 10 + data[55:]
         for payload, media_type, code in [
             (data, "application/octet-stream", "unsupported_artifact_media_type"),
-            (data, "image/jpeg", "artifact_decode_failed"),
-            (b"not png", "image/png", "artifact_decode_failed"),
-            (data[:-10], "image/png", "artifact_decode_failed"),
-            (corrupt, "image/png", "artifact_decode_failed"),
+            (data, "image/jpeg", "artifact_media_type_mismatch"),
+            (b"not png", "image/png", "image_decode_failed"),
+            (data[:-10], "image/png", "artifact_truncated"),
+            (corrupt, "image/png", "image_decode_failed"),
         ]:
             with self.subTest(media_type=media_type, size=len(payload)):
                 names = set(bpy.data.images.keys())
@@ -221,6 +224,57 @@ class InputImageTests(unittest.TestCase):
             (response.result["width"], response.result["height"]), (4096, 4096)
         )
         self.assertTrue(response.result["packed"])
+
+    def test_synthetic_format_dimension_and_metadata_matrix(self) -> None:
+        root = Path(os.environ["TYVRANA_TEST_IMAGE_FIXTURES"])
+        rows = json.loads((root / "manifest.json").read_text())
+        for row in rows:
+            with self.subTest(fixture=row["name"]):
+                data = (root / row["name"]).read_bytes()
+                before = set(bpy.data.images.keys())
+                result = self.call(self.admit(data, row["media_type"], name="Matrix"))
+                if row["error"]:
+                    self.assertIsInstance(result, OperationFailure, str(result))
+                    self.assertEqual(result.error.code, row["error"])
+                    self.assertIsNotNone(result.error.details)
+                    self.assertEqual(set(bpy.data.images.keys()), before)
+                else:
+                    self.assertIsInstance(result, OperationSuccess, str(result))
+                    image = bpy.data.images["Matrix"]
+                    self.assertEqual(tuple(image.size), (row["width"], row["height"]))
+                    self.assertEqual(
+                        hashlib.sha256(image.packed_file.data).hexdigest(),
+                        row["sha256"],
+                    )
+                    self.assertEqual(image.filepath, "")
+                    pixel = list(image.pixels[:4])
+                    image.buffers_free()
+                    self.assertEqual(list(image.pixels[:4]), pixel)
+                    bpy.data.images.remove(image)
+                self.assertFalse(list(self.spool.root.iterdir()))
+
+    def test_post_pack_failure_removes_native_datablock_and_input(self) -> None:
+        request = self.admit(checker_png(), name="Unpublished")
+        with patch.object(
+            adapter, "image_summary", side_effect=RuntimeError("fixture")
+        ):
+            result = self.call(request)
+        self.assertIsInstance(result, OperationFailure, str(result))
+        self.assertEqual(result.error.code, "image_datablock_failed")
+        self.assertEqual(result.error.details, {"stage": "blender_datablock"})
+        self.assertEqual(list(bpy.data.images.keys()), [])
+        self.assertFalse(list(self.spool.root.iterdir()))
+
+    def test_encoded_byte_limit_is_atomic_before_native_decode(self) -> None:
+        # Real byte boundaries use sparse unit fixtures. Lower only this native
+        # test's budget to prove dispatch/cleanup without transferring 64 MiB.
+        request = self.admit(checker_png(), name="OverBudget")
+        with patch.object(raster, "MAX_IMAGE_BYTES", 64):
+            result = self.call(request)
+        self.assertIsInstance(result, OperationFailure)
+        self.assertEqual(result.error.code, "artifact_too_large")
+        self.assertEqual(list(bpy.data.images.keys()), [])
+        self.assertFalse(list(self.spool.root.iterdir()))
 
 
 suite = unittest.defaultTestLoader.loadTestsFromTestCase(InputImageTests)

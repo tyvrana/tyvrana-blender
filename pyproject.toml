@@ -25,6 +25,7 @@ dev = [
     "pip>=26.2",
     "mcp>=2.2.0",
     "hatchling>=1.32.0",
+    "pillow>=12.3.0",
 ]
 
 [tool.hatch.metadata]

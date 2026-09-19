@@ -28,7 +28,10 @@ def test_native_uv_operations_and_context(
     assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))
 
 
-def test_native_input_images(profile: dict[str, str], tmp_path: Path) -> None:
+def test_native_input_images(
+    profile: dict[str, str], tmp_path: Path, input_image_fixtures: Path
+) -> None:
+    profile["TYVRANA_TEST_IMAGE_FIXTURES"] = str(input_image_fixtures)
     result = subprocess.run(
         [
             "blender",
@@ -45,7 +48,7 @@ def test_native_input_images(profile: dict[str, str], tmp_path: Path) -> None:
     )
     (tmp_path / "image-native.log").write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_INPUT_IMAGE_TESTS_PASSED 8" in result.stdout
+    assert "BLENDER_INPUT_IMAGE_TESTS_PASSED 11" in result.stdout
     assert "Traceback" not in result.stdout + result.stderr
     assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))
 

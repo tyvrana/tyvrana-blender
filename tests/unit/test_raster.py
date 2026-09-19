@@ -8,7 +8,13 @@ from tyvrana_protocol import OperationRequest, OperationSuccess
 
 from tyvrana_blender.image_models import ImageFromArtifactArguments
 from tyvrana_blender.operations import OPERATIONS, execute
-from tyvrana_blender.raster import RasterError, raster_size
+from tyvrana_blender.raster import (
+    MAX_IMAGE_BYTES,
+    MAX_IMAGE_DIMENSION,
+    MAX_IMAGE_PIXELS,
+    RasterError,
+    raster_size,
+)
 
 from ..png import checker_png
 from .test_operations import Backend
@@ -59,7 +65,7 @@ def test_raster_rejections_are_path_free(tmp_path: Path, failure: str) -> None:
     elif failure in {"oversize", "zero"}:
         data = (
             data[:16]
-            + struct.pack(">I", 4097 if failure == "oversize" else 0)
+            + struct.pack(">I", MAX_IMAGE_DIMENSION + 1 if failure == "oversize" else 0)
             + data[20:]
         )
         data = data[:29] + struct.pack(">I", zlib.crc32(data[12:29])) + data[33:]
@@ -92,6 +98,116 @@ def test_malformed_jpeg_headers(tmp_path: Path, data: bytes) -> None:
     path.write_bytes(data)
     with pytest.raises(RasterError):
         raster_size(path, "image/jpeg")
+
+
+def png_dimensions(width: int, height: int) -> bytes:
+    data = checker_png(1, 1)
+    header = data[:16] + struct.pack(">II", width, height) + data[24:29]
+    return header + struct.pack(">I", zlib.crc32(header[12:29])) + data[33:]
+
+
+@pytest.mark.parametrize(
+    "size,accepted",
+    [
+        ((4095, 8), True),
+        ((4096, 8), True),
+        ((4097, 8), True),
+        ((4672, 3314), True),
+        ((MAX_IMAGE_DIMENSION, 1), True),
+        ((MAX_IMAGE_DIMENSION + 1, 1), False),
+        ((1, MAX_IMAGE_DIMENSION + 1), False),
+        ((8192, MAX_IMAGE_PIXELS // 8192), True),
+        ((8192, MAX_IMAGE_PIXELS // 8192 + 1), False),
+    ],
+)
+def test_dimension_and_pixel_guards(
+    tmp_path: Path,
+    size: tuple[int, int],
+    accepted: bool,
+) -> None:
+    path = tmp_path / "image"
+    path.write_bytes(png_dimensions(*size))
+    if accepted:
+        assert raster_size(path, "image/png") == size
+    else:
+        with pytest.raises(RasterError) as caught:
+            raster_size(path, "image/png")
+        assert caught.value.error.code == "image_dimensions_exceeded"
+        assert caught.value.error.details == dict(
+            stage="image_limits",
+            width=size[0],
+            height=size[1],
+            pixels=size[0] * size[1],
+            max_dimension=MAX_IMAGE_DIMENSION,
+            max_pixels=MAX_IMAGE_PIXELS,
+        )
+
+
+@pytest.mark.parametrize("delta", [-1, 0, 1])
+def test_encoded_byte_boundary_without_allocating_payload(
+    tmp_path: Path, delta: int
+) -> None:
+    path = tmp_path / "sparse.png"
+    data = checker_png(1, 1)
+    with path.open("wb") as stream:
+        stream.write(data[:-12])
+        stream.seek(MAX_IMAGE_BYTES + delta - 12)
+        stream.write(data[-12:])
+    # Header admission is deliberately independent of native pixel decoding.
+    if delta <= 0:
+        assert raster_size(path, "image/png") == (1, 1)
+    else:
+        with pytest.raises(RasterError) as caught:
+            raster_size(path, "image/png")
+        assert caught.value.error.code == "artifact_too_large"
+
+
+@pytest.mark.parametrize(
+    "difference,code", [(1, "artifact_truncated"), (-1, "artifact_integrity_failed")]
+)
+def test_materialized_length_matches_verified_descriptor(
+    tmp_path: Path, difference: int, code: str
+) -> None:
+    path = tmp_path / "input"
+    data = checker_png(1, 1)
+    path.write_bytes(data)
+    with pytest.raises(RasterError) as caught:
+        raster_size(path, "image/png", expected_bytes=len(data) + difference)
+    assert caught.value.error.code == code
+    assert caught.value.error.details is not None
+
+
+@pytest.mark.parametrize(
+    "payload,media,code",
+    [
+        (checker_png(1, 1), "image/jpeg", "artifact_media_type_mismatch"),
+        (checker_png(1, 1)[:-1], "image/png", "artifact_truncated"),
+        (b"not png", "image/png", "image_decode_failed"),
+        (b"RIFFxxxxWEBP", "image/webp", "unsupported_artifact_media_type"),
+        (b"\xff\xd8\xff\xe0\xff\xff", "image/jpeg", "artifact_truncated"),
+        (
+            b"\xff\xd8\xff\xc3\x00\x02\xff\xd9",
+            "image/jpeg",
+            "unsupported_image_encoding",
+        ),
+    ],
+)
+def test_precise_admission_errors(
+    tmp_path: Path, payload: bytes, media: str, code: str
+) -> None:
+    path = tmp_path / "input"
+    path.write_bytes(payload)
+    with pytest.raises(RasterError) as caught:
+        raster_size(path, media)
+    assert caught.value.error.code == code
+    assert str(tmp_path) not in str(caught.value.error)
+
+
+def test_missing_file_reports_read_stage(tmp_path: Path) -> None:
+    with pytest.raises(RasterError) as caught:
+        raster_size(tmp_path / "missing", "image/png")
+    assert caught.value.error.code == "artifact_read_failed"
+    assert caught.value.error.details == {"stage": "artifact_read"}
 
 
 @pytest.mark.parametrize(
