@@ -47,7 +47,7 @@ async def test_live_catalog_drives_filtered_inspection(
                         "blender.file.save",
                         "blender.file.open",
                     ],
-                    "include_schemas": True,
+                    "schemas": "full",
                 },
             )
             assert not catalog.is_error

@@ -90,10 +90,23 @@ def render_steps(
     *,
     observe: Callable[[str, float], None] | None = None,
     interactive: bool = False,
+    checkpoint: Callable[[], None] | None = None,
 ) -> Generator[None, None, tuple[RenderResult, ArtifactDescriptor]]:
     global _native_async
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("Rendering requires Blender's main thread")
+    if arguments.inspection is not None:
+        from .inspection_render import steps
+
+        return (
+            yield from steps(
+                arguments,
+                spool,
+                observe=observe,
+                interactive=interactive,
+                checkpoint=checkpoint,
+            )
+        )
     scene = bpy.context.scene
     if scene.camera is None:
         raise OperationError("no_camera", "The current scene has no camera")

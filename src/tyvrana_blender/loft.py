@@ -10,14 +10,17 @@ from typing import Any
 
 import bpy  # type: ignore[import-not-found]
 from mathutils import Vector  # type: ignore[import-not-found]
+from pydantic import ValidationError
 
 from . import organization
-from .errors import OperationError
+from .errors import OperationError, constraint_error
 from .loft_models import (
+    LoftBatch,
     LoftConfigureArguments,
     LoftCreateArguments,
     LoftInspectArguments,
     LoftResult,
+    LoftRevision,
     LoftSpec,
     LoftSummary,
 )
@@ -65,6 +68,7 @@ def geometry(spec: LoftSpec) -> tuple[list[list[float]], list[list[int]]]:
         (centers[-1], list(spec.sections[-1].radii), spec.sections[-1].twist)
     )
     vertices = []
+    frames = []
     reference = Vector(spec.x_reference).normalized()
     for i, (point, radii, twist) in enumerate(samples):
         tangent = samples[min(len(samples) - 1, i + 1)][0] - samples[max(0, i - 1)][0]
@@ -84,12 +88,24 @@ def geometry(spec: LoftSpec) -> tuple[list[list[float]], list[list[int]]]:
             x * math.cos(twist) - z * math.sin(twist),
             x * math.sin(twist) + z * math.cos(twist),
         )
+        frames.append((point, tangent.copy()))
         for side in range(spec.sides):
             theta = 2 * math.pi * side / spec.sides
             u, v = math.cos(theta), math.sin(theta)
             offset = (
                 tx * u * radii[0 if u >= 0 else 1] + tz * v * radii[2 if v >= 0 else 3]
             )
+            displacement = 0.0
+            for feature in spec.features:
+                axial = abs(i / (len(samples) - 1) - feature.position)
+                angle = abs((theta - feature.angle + math.pi) % (2 * math.pi) - math.pi)
+                if axial < feature.axial_width and angle < feature.angular_width:
+                    axial_weight = 1 - (axial / feature.axial_width) ** 2
+                    angle_weight = 1 - (angle / feature.angular_width) ** 2
+                    displacement += feature.height * axial_weight**2 * angle_weight**2
+            if offset.length + displacement < 1e-6:
+                fail("Local feature collapses the section; reduce groove depth")
+            offset += offset.normalized() * displacement
             vertices.append(list(point + offset))
     faces = []
     n = spec.sides
@@ -104,7 +120,31 @@ def geometry(spec: LoftSpec) -> tuple[list[list[float]], list[list[int]]]:
                     ring * n + nxt,
                 ]
             )
-    if spec.caps:
+    if spec.ends is not None:
+        for end, depth in ((0, spec.ends.start_depth), (1, spec.ends.end_depth)):
+            base = 0 if end == 0 else (len(samples) - 1) * n
+            center, tangent = frames[0 if end == 0 else -1]
+            outer = [Vector(vertices[base + side]) for side in range(n)]
+            previous = [base + side for side in range(n)]
+            for ring in range(1, spec.ends.rings + 1):
+                radius = 1 - ring / (spec.ends.rings + 1)
+                shift = (
+                    tangent
+                    * depth
+                    * (1 if end == 0 else -1)
+                    * (1 - radius * radius) ** 2
+                )
+                current = []
+                for point in outer:
+                    current.append(len(vertices))
+                    vertices.append(list(center + (point - center) * radius + shift))
+                for side in range(n):
+                    nxt = (side + 1) % n
+                    face = [previous[side], previous[nxt], current[nxt], current[side]]
+                    faces.append(face if end == 0 else list(reversed(face)))
+                previous = current
+            faces.append(previous if end == 0 else list(reversed(previous)))
+    elif spec.caps:
         faces += [
             list(range(n)),
             list(reversed(range(len(vertices) - n, len(vertices)))),
@@ -160,7 +200,50 @@ def summary(obj: Any, detail: bool = False) -> LoftSummary:
         valid=not issues,
         issues=issues,
         spec=spec if detail else None,
+        revision=meta["revision"],
+        region_ids=[s.id for s in spec.sections if s.id]
+        + [f.id for f in spec.features]
+        + (["start_cap", "end_cap"] if spec.caps else []),
     )
+
+
+def revised(old: LoftSpec, edit: LoftRevision) -> LoftSpec:
+    values = old.model_dump()
+    values.update(
+        edit.model_dump(
+            exclude_unset=True, exclude={"section_edits", "expected_revision"}
+        )
+    )
+    sections = {s["id"]: s for s in values["sections"] if s["id"] is not None}
+    for change in edit.section_edits:
+        if change.id not in sections:
+            fail(f"Unknown section ID: {change.id}")
+        sections[change.id].update(
+            change.model_dump(exclude_unset=True, exclude_none=True)
+        )
+    try:
+        return LoftSpec.model_validate(values)
+    except ValidationError as exc:
+        raise constraint_error("loft_invalid", exc) from exc
+
+
+def native_checks(mesh: Any, spec: LoftSpec) -> dict[str, Any]:
+    from .surfaces import native_checks as check
+
+    try:
+        return check(mesh)
+    except OperationError as exc:
+        raise OperationError(
+            exc.error.code,
+            f"Loft {spec.name}: invalid generated surface; reduce end depths/features "
+            "or revise section curvature, spacing and sampling",
+            {"component": spec.name, "cause": exc.error.message},
+        ) from exc
+
+
+def validate_mesh(mesh: Any, spec: LoftSpec) -> None:
+    if spec.features or spec.ends:
+        native_checks(mesh, spec)
 
 
 def create(args: LoftCreateArguments) -> LoftResult:
@@ -181,6 +264,7 @@ def create(args: LoftCreateArguments) -> LoftResult:
             meshes.append(mesh)
             mesh.from_pydata(vertices, [], faces)
             mesh.update()
+            validate_mesh(mesh, spec)
             for polygon in mesh.polygons:
                 polygon.use_smooth = spec.smooth
             obj = bpy.data.objects.new(spec.name, mesh)
@@ -190,6 +274,7 @@ def create(args: LoftCreateArguments) -> LoftResult:
             obj[KEY] = json.dumps(
                 dict(
                     id=uuid.uuid4().hex,
+                    revision=1,
                     spec=spec.model_dump(),
                     signature=signature(mesh),
                 )
@@ -211,12 +296,22 @@ def configure(args: LoftConfigureArguments) -> LoftResult:
     start = time.perf_counter()
     organization.idle(mutate=True)
     prepared = []
-    for spec in args.components:
-        obj = organization.object_named(spec.name)
+    for edit in args.components:
+        obj = organization.object_named(edit.name)
         organization.object_editable(obj)
         organization.editable(obj.data)
         meta = metadata(obj)
         old = LoftSpec.model_validate(meta["spec"])
+        if (
+            edit.expected_revision is not None
+            and edit.expected_revision != meta["revision"]
+        ):
+            raise OperationError(
+                "loft_revision_conflict", "Expected revision is not current"
+            )
+        spec = revised(old, edit)
+        if [s.id for s in old.sections] != [s.id for s in spec.sections]:
+            fail("Loft revision preserves ordered section identities")
         if (len(old.sections), old.sides, old.subdivisions, old.caps) != (
             len(spec.sections),
             spec.sides,
@@ -227,12 +322,24 @@ def configure(args: LoftConfigureArguments) -> LoftResult:
                 "Loft revision preserves ordered topology; keep section "
                 "count, sides, subdivisions and caps"
             )
+        if (old.ends.rings if old.ends else None) != (
+            spec.ends.rings if spec.ends else None
+        ):
+            fail("End support-ring count must be preserved")
         if obj.data.users != 1 or obj.data.shape_keys or obj.data.animation_data:
             fail(
                 "Loft revision requires exclusive mesh without shape "
                 "keys/data animation"
             )
-        vertices, _ = geometry(spec)
+        vertices, faces = geometry(spec)
+        if spec.features or spec.ends:
+            staged = bpy.data.meshes.new("LoftValidation")
+            try:
+                staged.from_pydata(vertices, [], faces)
+                staged.update()
+                validate_mesh(staged, spec)
+            finally:
+                bpy.data.meshes.remove(staged)
         prepared.append(
             (
                 obj,
@@ -243,6 +350,7 @@ def configure(args: LoftConfigureArguments) -> LoftResult:
                 [p.use_smooth for p in obj.data.polygons],
             )
         )
+    LoftBatch(components=[item[1] for item in prepared])
     try:
         for obj, spec, vertices, _, _, _ in prepared:
             for vertex, co in zip(obj.data.vertices, vertices, strict=True):
@@ -251,7 +359,11 @@ def configure(args: LoftConfigureArguments) -> LoftResult:
                 p.use_smooth = spec.smooth
             obj.data.update()
             meta = json.loads(obj[KEY])
-            meta.update(spec=spec.model_dump(), signature=signature(obj.data))
+            meta.update(
+                spec=spec.model_dump(),
+                signature=signature(obj.data),
+                revision=meta["revision"] + 1,
+            )
             obj[KEY] = json.dumps(meta)
         bpy.context.view_layer.update()
         return LoftResult(

@@ -108,7 +108,7 @@ async def test_motion_corrective_layers_persist(
                     request: dict[str, Any] = dict(
                         adapter_id=adapter.instance_id,
                         names=names,
-                        include_schemas=True,
+                        schemas="full",
                     )
                     contracts = {}
                     while True:

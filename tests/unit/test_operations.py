@@ -15,6 +15,12 @@ from tyvrana_protocol import (
 from tyvrana_blender import remesh_models as voxel
 from tyvrana_blender import retopo_models as retopology
 from tyvrana_blender import sculpt_models as regional
+from tyvrana_blender.assembly_models import (
+    AssemblyConfigureArguments,
+    AssemblyCreateArguments,
+    AssemblyInspectArguments,
+    AssemblyResult,
+)
 from tyvrana_blender.bake_models import (
     BakeImageArguments,
     BakeInspectArguments,
@@ -32,6 +38,7 @@ from tyvrana_blender.camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from tyvrana_blender.cleanup_models import CleanupArguments, CleanupResult
 from tyvrana_blender.constraint_models import (
     ConstraintsConfigureArguments,
     ConstraintsInspectArguments,
@@ -246,6 +253,7 @@ from tyvrana_blender.organization_models import (
     ObjectSetResult,
     OrganizationRemoveResult,
 )
+from tyvrana_blender.placement_models import PlacementArguments, PlacementResult
 from tyvrana_blender.reference_models import (
     ConstructionReport,
     LandmarkDeriveArguments,
@@ -473,6 +481,23 @@ class Backend:
         raise NotImplementedError
 
     def surface_create(self, arguments: SurfaceCreateArguments) -> SurfaceResult:
+        raise NotImplementedError
+
+    def assembly_create(self, arguments: AssemblyCreateArguments) -> AssemblyResult:
+        raise NotImplementedError
+
+    def assembly_configure(
+        self, arguments: AssemblyConfigureArguments
+    ) -> AssemblyResult:
+        raise NotImplementedError
+
+    def assembly_inspect(self, arguments: AssemblyInspectArguments) -> AssemblyResult:
+        raise NotImplementedError
+
+    def object_set_place(self, arguments: PlacementArguments) -> PlacementResult:
+        raise NotImplementedError
+
+    def mesh_cleanup(self, arguments: CleanupArguments) -> CleanupResult:
         raise NotImplementedError
 
     def surface_configure(self, arguments: SurfaceConfigureArguments) -> SurfaceResult:

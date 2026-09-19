@@ -254,6 +254,11 @@ Names are advertised in sorted order:
 | `blender.loft.create` | Batched component sections, radii, twist and sampling | Created native meshes and identity |
 | `blender.loft.configure` | Same-topology section revisions | Preserved identity/data and updated geometry |
 | `blender.loft.inspect` | Selected components; optional definitions | Integrity, bounds and counts |
+| `blender.assembly.create` | Mixed loft/surface templates and varied families | Bounded native hierarchy, independent members and provenance |
+| `blender.assembly.configure` | Selected family/member revisions and placement refresh | Atomic revision, stable identities and affected members |
+| `blender.assembly.inspect` | Filtered/paged inventory; optional sparse specification | Bounds, regions, identity and freshness |
+| `blender.object_set.place` | Landmark/frame placement, dimensional fitting and mirroring | Atomic static constraints and fitted dimensions |
+| `blender.mesh.cleanup` | Explicit bounded repair with preview and postconditions | Atomic cleaned meshes or precise rejection |
 | `blender.constraint.configure` | Typed ordered constraint batch; explicit replace | Owned native relationships and evaluated state |
 | `blender.constraint.inspect` | Selected object/bone owners | Bounded validity and optional definitions |
 | `blender.constraint.remove` | Owned constraint references | Atomic removal |
@@ -2799,6 +2804,10 @@ is not certified. Quad views are rejected. Isolated OpenGL validation does not
 establish support for every GPU/backend; capture failures remain explicit.
 
 ## Section lofts and multi-source mechanics
+
+Mixed varied families, static interface placement, bounded cleanup and automatically
+framed multiview diagnostics are described in
+[structural assemblies](docs/structural_assemblies.md).
 
 `loft.create`, `loft.configure` and `loft.inspect` provide batched editable variable,
 asymmetric section meshes. See [section lofts](docs/section_lofts.md) for geometry,

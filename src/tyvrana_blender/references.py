@@ -526,6 +526,10 @@ def inspect_landmarks(arguments: LandmarkInspectArguments) -> LandmarkInspectRes
 
 
 def resolve(source: PointSource) -> Any:
+    if source.kind == "geometry":
+        from .geometry_points import resolve
+
+        return resolve(source)
     if source.kind == "bone":
         from .joints import bone_point
 

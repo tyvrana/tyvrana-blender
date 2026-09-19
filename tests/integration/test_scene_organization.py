@@ -68,7 +68,7 @@ async def test_repeated_parts_workflow(
             )
             schemas = await client.call_tool(
                 "tyvrana_list_operations",
-                dict(adapter_id=adapter.instance_id, names=names, include_schemas=True),
+                dict(adapter_id=adapter.instance_id, names=names, schemas="full"),
             )
             assert not schemas.is_error
             phase = "setup"
@@ -167,7 +167,7 @@ async def test_organized_assembly_room_and_chain_persist(
                     dict(
                         adapter_id=adapter.instance_id,
                         names=names,
-                        include_schemas=True,
+                        schemas="full",
                     ),
                 )
                 assert not result.is_error

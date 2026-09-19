@@ -202,8 +202,41 @@ class ReferencePoint(Model):
     )
 
 
+class GeometryPoint(Model):
+    kind: Literal["geometry"]
+    object: Name
+    region: Name | None = None
+    position: Annotated[
+        list[Annotated[Float32, Field(ge=0, le=1)]], Field(min_length=3, max_length=3)
+    ] = Field(default_factory=lambda: [0.5, 0.5, 0.5])
+    project: bool = Field(
+        default=True,
+        description="Project normalized local region-bounds position onto authored "
+        "triangles. False returns the bounding-region point; not an inferred "
+        "physical joint center.",
+    )
+    offset: Float32 = Field(
+        default=0,
+        ge=-1000,
+        le=1000,
+        description="Offset along projected face normal, in object-local units; "
+        "requires project=true.",
+    )
+
+    @model_validator(mode="after")
+    def offset_requires_surface(self) -> Self:
+        if self.offset and not self.project:
+            raise ValueError("Geometry point offset requires surface projection")
+        return self
+
+
 type PointSource = Annotated[
-    WorldPoint | ObjectPoint | LandmarkPoint | ReferencePoint | BonePoint,
+    WorldPoint
+    | ObjectPoint
+    | LandmarkPoint
+    | ReferencePoint
+    | BonePoint
+    | GeometryPoint,
     Field(discriminator="kind"),
 ]
 
@@ -477,8 +510,14 @@ class ReflectionDerivation(Model):
     plane: Coordinate = 0.0
 
 
+class GeometryDerivation(Model):
+    kind: Literal["geometry"]
+    source: GeometryPoint
+
+
 type Derivation = Annotated[
-    ObservationDerivation | ReflectionDerivation, Field(discriminator="kind")
+    ObservationDerivation | ReflectionDerivation | GeometryDerivation,
+    Field(discriminator="kind"),
 ]
 
 
@@ -568,6 +607,8 @@ class DerivationProvenance(Model):
     observations: list[ObservationEvidence]
     reflected_landmark: str | None = None
     reflected_basis: str | None = None
+    geometry_resource_id: str | None = None
+    geometry_basis: str | None = None
     point: Point
     world_point: Point
     tolerance: float

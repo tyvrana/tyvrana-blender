@@ -503,6 +503,15 @@ def freshness(
                 other, depth=depth + 1
             ):
                 return False
+        if record.specification.source.kind == "geometry":
+            from .geometry_points import basis as geometry_basis
+
+            source = refs.object_named(record.specification.source.source.object)
+            if (
+                source.get(RESOURCE_KEY) != record.geometry_resource_id
+                or geometry_basis(source) != record.geometry_basis
+            ):
+                return False
         return True
     except (OperationError, ValueError, KeyError):
         return False
@@ -519,7 +528,23 @@ def derive_one(
     f_id = identity(refs.object_named(arguments.frame)) if arguments.frame else None
     evidence: list[ObservationEvidence] = []
     reflected = reflected_basis = None
-    if spec.source.kind == "reflection":
+    geometry_id = geometry_hash = None
+    if spec.source.kind == "geometry":
+        from .geometry_points import basis as geometry_basis
+
+        source = refs.object_named(spec.source.source.object)
+        geometry_id = identity(source)
+        geometry_hash = geometry_basis(source)
+        point = inverse @ refs.resolve(spec.source.source)
+        result = ConstructionPointResult(
+            name=spec.name,
+            status="solved",
+            rank=3,
+            residual=0,
+            message="Authored geometry estimate; exact native shape basis, no "
+            "physical-center inference",
+        )
+    elif spec.source.kind == "reflection":
         other = refs.owned(spec.source.landmark, refs.LANDMARK)
         if not refs.landmark_summary(other).valid:
             return ConstructionPointResult(
@@ -680,6 +705,8 @@ def derive_one(
         observations=evidence,
         reflected_landmark=reflected,
         reflected_basis=reflected_basis,
+        geometry_resource_id=geometry_id,
+        geometry_basis=geometry_hash,
         point=refs.xyz(point),
         world_point=refs.xyz(construction @ point),
         tolerance=arguments.tolerance,
@@ -725,6 +752,11 @@ def derive(arguments: LandmarkDeriveArguments) -> ConstructionReport:
     ]
     objects = existing + (
         [refs.object_named(arguments.frame)] if arguments.frame else []
+    )
+    objects.extend(
+        refs.object_named(s.source.source.object)
+        for s in arguments.landmarks
+        if s.source.kind == "geometry"
     )
     # Preflight all destinations even when a solve will be underconstrained.
     for obj in existing:

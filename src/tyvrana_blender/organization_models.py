@@ -316,7 +316,13 @@ class ObjectSetConfigureArguments(Model):
 
 
 type InspectField = Literal[
-    "hierarchy", "memberships", "transforms", "metadata", "data", "visibility"
+    "hierarchy",
+    "memberships",
+    "transforms",
+    "metadata",
+    "data",
+    "visibility",
+    "placement",
 ]
 
 
@@ -332,7 +338,7 @@ class ObjectSetInspectArguments(InspectArguments):
     fields: list[InspectField] = Field(
         default_factory=default_fields,
         min_length=1,
-        max_length=6,
+        max_length=7,
     )
 
     @model_validator(mode="after")
@@ -388,6 +394,7 @@ class VisibilityInfo(Model):
 
 
 class SetObjectSummary(Model):
+    placement: "PlacementInfo | None" = None
     visibility: VisibilityInfo | None = None
     name: str
     type: str
@@ -396,6 +403,12 @@ class SetObjectSummary(Model):
     transforms: TransformInfo | None = None
     metadata: MetadataInfo | None = None
     data: DataInfo | None = None
+
+
+class PlacementInfo(Model):
+    revision: int
+    valid: bool
+    dimensions: Vector32
 
 
 class ObjectSetResult(Model):

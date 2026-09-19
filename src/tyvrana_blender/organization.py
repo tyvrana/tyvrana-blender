@@ -587,6 +587,15 @@ def metadata_info(obj: Any) -> MetadataInfo:
 
 def object_summary(obj: Any, fields: list[str]) -> SetObjectSummary:
     data: dict[str, Any] = {"name": str(obj.name), "type": str(obj.type)}
+    if "placement" in fields and "tyvrana_placement" in obj:
+        from .placement import summary
+
+        state = summary(obj)
+        data["placement"] = {
+            "revision": state.revision,
+            "valid": state.valid,
+            "dimensions": state.dimensions,
+        }
     if "visibility" in fields:
         data["visibility"] = VisibilityInfo(
             hide_viewport=obj.hide_viewport,

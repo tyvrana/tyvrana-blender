@@ -236,6 +236,45 @@ RenderPass = Literal[
 ]
 
 
+class InspectionView(Model):
+    name: str = Field(min_length=1, max_length=64)
+    orientation: Literal[
+        "left", "right", "top", "bottom", "front", "rear", "oblique", "reverse_oblique"
+    ]
+    objects: list[ObjectName] = Field(default_factory=list, max_length=128)
+
+
+class InspectionRenderOptions(Model):
+    objects: list[ObjectName] = Field(default_factory=list, max_length=128)
+    views: list[InspectionView] = Field(
+        default_factory=lambda: [
+            InspectionView(name=n, orientation=n)
+            for n in ("left", "right", "top", "bottom", "front", "rear", "oblique")
+        ],
+        min_length=1,
+        max_length=12,
+    )
+    columns: int = Field(default=3, ge=1, le=4)
+    margin: FiniteFloat = Field(default=0.1, ge=0.01, le=1)
+
+    @model_validator(mode="after")
+    def unique(self) -> Self:
+        if len({v.name for v in self.views}) != len(self.views):
+            raise ValueError("Inspection view names must be unique")
+        for names in [self.objects, *(v.objects for v in self.views)]:
+            if len(set(names)) != len(names):
+                raise ValueError("Inspection object names must be unique")
+        return self
+
+
+class InspectionTile(Model):
+    name: str
+    orientation: str
+    column: int
+    row: int
+    object_count: int
+
+
 class RenderArguments(Model):
     width: int = Field(default=512, ge=64, le=16384)
     height: int = Field(default=512, ge=64, le=16384)
@@ -257,6 +296,12 @@ class RenderArguments(Model):
     wireframe: WireframeRenderOptions | None = None
     uv_checker: UVCheckerRenderOptions | None = None
     surface: SurfaceRenderOptions | None = None
+    inspection: InspectionRenderOptions | None = Field(
+        default=None,
+        description="Auto-framed Workbench multiview contact sheet. No persistent "
+        "cameras/lights; native state restored. Width/height are per tile; PNG8 "
+        "only. Empty object list selects scene meshes.",
+    )
     show_result: bool = False
     wait_seconds: FiniteFloat = Field(default=5, ge=0, le=5)
     output: RenderOutput | None = None
@@ -273,6 +318,29 @@ class RenderArguments(Model):
     @model_validator(mode="after")
     def diagnostic_options(self) -> Self:
         pixels = self.width * self.height
+        if self.inspection is not None:
+            if (
+                self.frames
+                or self.cycles
+                or self.surface
+                or self.wireframe
+                or self.uv_checker
+                or self.passes
+                or self.aovs
+                or self.show_result
+            ):
+                raise ValueError(
+                    "Inspection contact sheets cannot combine with other render modes"
+                )
+            if (
+                self.format != "png"
+                or self.bit_depth != 8
+                or max(self.width, self.height) > 1024
+            ):
+                raise ValueError("Inspection tiles require PNG8 and dimensions64..1024")
+            columns = min(self.inspection.columns, len(self.inspection.views))
+            rows = (len(self.inspection.views) + columns - 1) // columns
+            pixels *= columns * rows
         if (
             pixels > self.budget.max_pixels
             or pixels * len(self.frames or [0]) > self.budget.max_total_pixels
@@ -341,3 +409,4 @@ class RenderResult(Model):
     color_mode: Literal["RGB", "RGBA"] = "RGBA"
     color_management: RenderColorMetadata | None = None
     output_channels: list[str] = Field(default_factory=list, max_length=256)
+    inspection_tiles: list[InspectionTile] = Field(default_factory=list, max_length=12)

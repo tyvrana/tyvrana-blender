@@ -100,7 +100,7 @@ async def test_reference_measurement_mcp_workflow(
                         "blender.measurement.inspect",
                         "blender.reference.calibrate",
                     ],
-                    "include_schemas": True,
+                    "schemas": "full",
                 },
             )
             assert not schemas.is_error

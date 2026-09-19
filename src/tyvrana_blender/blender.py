@@ -38,6 +38,12 @@ from . import (
     weights,
 )
 from .artifacts import ArtifactSpool
+from .assembly_models import (
+    AssemblyConfigureArguments,
+    AssemblyCreateArguments,
+    AssemblyInspectArguments,
+    AssemblyResult,
+)
 from .bake_models import (
     BakeImageArguments,
     BakeInspectArguments,
@@ -59,6 +65,7 @@ from .camera_models import (
     normalize_projection,
     validate_optics,
 )
+from .cleanup_models import CleanupArguments, CleanupResult
 from .compatibility import require_blender
 from .constraint_models import (
     ConstraintsConfigureArguments,
@@ -271,6 +278,7 @@ from .organization_models import (
     ObjectSetResult,
     OrganizationRemoveResult,
 )
+from .placement_models import PlacementArguments, PlacementResult
 from .raster import raster_size
 from .reference_models import (
     ConstructionReport,
@@ -947,6 +955,33 @@ class BlenderBackend:
         from . import rig_constraints
 
         return rig_constraints.switch_space(arguments)
+
+    def mesh_cleanup(self, arguments: CleanupArguments) -> CleanupResult:
+        from . import cleanup
+
+        return cleanup.cleanup(arguments)
+
+    def assembly_create(self, arguments: AssemblyCreateArguments) -> AssemblyResult:
+        from . import assembly
+
+        return assembly.create(arguments)
+
+    def assembly_configure(
+        self, arguments: AssemblyConfigureArguments
+    ) -> AssemblyResult:
+        from . import assembly
+
+        return assembly.configure(arguments)
+
+    def assembly_inspect(self, arguments: AssemblyInspectArguments) -> AssemblyResult:
+        from . import assembly
+
+        return assembly.inspect(arguments)
+
+    def object_set_place(self, arguments: PlacementArguments) -> PlacementResult:
+        from . import placement
+
+        return placement.place(arguments)
 
     def surface_create(self, arguments: SurfaceCreateArguments) -> SurfaceResult:
         from . import surfaces

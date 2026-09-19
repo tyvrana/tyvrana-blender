@@ -115,7 +115,7 @@ def test_all_organization_contracts_registered_and_bounded() -> None:
         for n in OPERATIONS
         if n.startswith(("blender.collection.", "blender.object_set."))
     ]
-    assert len(names) == 8
+    assert len(names) == 9
     for name in names:
         contract = REGISTRY[name].contract
         assert contract.arguments_schema and contract.result_schema

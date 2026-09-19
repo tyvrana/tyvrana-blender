@@ -365,6 +365,13 @@ class RenderJobs:
                 if "output" in report
                 else None,
                 output_channels=report.get("output", {}).get("output_channels", []),
+                width=report.get("output", {}).get("width", job.arguments.width),
+                height=report.get("output", {}).get("height", job.arguments.height),
+                inspection_tiles=RenderResult.model_validate(
+                    report["output"]
+                ).inspection_tiles
+                if "output" in report
+                else [],
             )
         except asyncio.CancelledError:
             (job.directory / "cancel.request").touch()

@@ -100,7 +100,7 @@ async def test_paths_persist_and_reevaluate_across_hosts(
                                 "blender.curve." + n
                                 for n in ["create", "configure", "inspect", "remove"]
                             ],
-                            include_schemas=True,
+                            schemas="full",
                         ),
                     )
                     assert not schema.is_error

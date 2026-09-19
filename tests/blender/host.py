@@ -10,6 +10,7 @@ from pathlib import Path
 import bpy  # type: ignore[import-not-found]
 
 adapter = importlib.import_module("bl_ext.user_default.tyvrana_blender.blender")
+lifecycle = importlib.import_module("bl_ext.user_default.tyvrana_blender.lifecycle")
 control = Path(os.environ["TYVRANA_TEST_CONTROL"])
 bpy.context.preferences.view.show_splash = False
 preferences = bpy.context.preferences.addons[adapter.__package__].preferences
@@ -95,6 +96,9 @@ if os.environ.get("TYVRANA_TEST_CYCLES_OVERRIDE") == "1":
 
 
 def check() -> float | None:
+    global adapter
+    if os.environ.get("TYVRANA_TEST_LIFECYCLE") == "1":
+        adapter = lifecycle._backend
     try:
         if time.monotonic() >= deadline:
             raise RuntimeError("Integration host exceeded its deadline")
@@ -168,6 +172,12 @@ def check() -> float | None:
 if bpy.app.background:
     try:
         while True:
+            if os.environ.get("TYVRANA_TEST_LIFECYCLE") == "1":
+                adapter = lifecycle._backend
+                if bpy.app.timers.is_registered(lifecycle._poll):
+                    if lifecycle._poll() is None:
+                        bpy.app.timers.unregister(lifecycle._poll)
+                    adapter = lifecycle._backend
             adapter.pump()
             if check() is None:
                 break

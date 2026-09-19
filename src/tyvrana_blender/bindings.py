@@ -72,6 +72,38 @@ def _fingerprint(kind: str, resource: Any) -> str:
             from .surfaces import fingerprint as surface_fingerprint
 
             data["surface"] = surface_fingerprint(resource)
+        if "tyvrana_loft" in resource:
+            from .loft import signature
+
+            data["loft"] = {
+                "state": str(resource["tyvrana_loft"]),
+                "content": signature(resource.data),
+            }
+        if "tyvrana_assembly" in resource:
+            from .assembly import content, get_members, root_state
+
+            try:
+                meta = root_state(resource)
+                data["assembly"] = {
+                    "state": meta,
+                    "members": [
+                        (
+                            o.get(RESOURCE_KEY),
+                            content(o),
+                            [list(row) for row in o.matrix_world],
+                        )
+                        for o in get_members(meta)
+                    ],
+                }
+            except (OperationError, KeyError, ValueError, TypeError):
+                data["assembly"] = {"invalid": str(resource["tyvrana_assembly"])}
+        if "tyvrana_placement" in resource:
+            from .placement import summary as placement_summary
+
+            try:
+                data["placement"] = placement_summary(resource).model_dump(mode="json")
+            except (OperationError, KeyError, ValueError, TypeError):
+                data["placement"] = {"invalid": str(resource["tyvrana_placement"])}
         data.update(
             type=resource.type,
             transform=[float(v) for row in resource.matrix_local for v in row],

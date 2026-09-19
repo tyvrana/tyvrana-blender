@@ -71,7 +71,7 @@ async def test_chain_interaction(
                         if compact
                         else "blender.armature.inspect",
                     ],
-                    include_schemas=True,
+                    schemas="full",
                 ),
             )
             assert not result.is_error
@@ -356,7 +356,7 @@ async def test_structural_fixtures_persist_across_hosts(
                                     "pose",
                                 ]
                             ],
-                            include_schemas=True,
+                            schemas="full",
                         ),
                     )
                     assert not schemas.is_error

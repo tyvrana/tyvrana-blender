@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from tyvrana_protocol import (
@@ -19,6 +19,12 @@ from tyvrana_protocol import (
     ResourceInspectionResult,
 )
 
+from .assembly_models import (
+    AssemblyConfigureArguments,
+    AssemblyCreateArguments,
+    AssemblyInspectArguments,
+    AssemblyResult,
+)
 from .bake_models import (
     BakeImageArguments,
     BakeInspectArguments,
@@ -36,6 +42,7 @@ from .camera_models import (
     CameraSetActiveArguments,
     CameraSummary,
 )
+from .cleanup_models import CleanupArguments, CleanupResult
 from .constraint_models import (
     ConstraintsConfigureArguments,
     ConstraintsInspectArguments,
@@ -246,6 +253,7 @@ from .organization_models import (
     ObjectSetResult,
     OrganizationRemoveResult,
 )
+from .placement_models import PlacementArguments, PlacementResult
 from .reference_models import (
     ConstructionReport,
     LandmarkDeriveArguments,
@@ -417,6 +425,17 @@ type Response = OperationSuccess | OperationFailure
 
 
 class SceneBackend(Protocol):
+    def mesh_cleanup(self, arguments: CleanupArguments) -> CleanupResult: ...
+
+    def assembly_create(self, arguments: AssemblyCreateArguments) -> AssemblyResult: ...
+    def assembly_configure(
+        self, arguments: AssemblyConfigureArguments
+    ) -> AssemblyResult: ...
+    def assembly_inspect(
+        self, arguments: AssemblyInspectArguments
+    ) -> AssemblyResult: ...
+    def object_set_place(self, arguments: PlacementArguments) -> PlacementResult: ...
+
     def growth_layers_correct(self, arguments: LayerCorrectArguments) -> LayerCache: ...
 
     def growth_layers_inspect(self, arguments: LayerObjectArguments) -> LayerCache: ...
@@ -935,6 +954,29 @@ class OperationSpec:
     ]
 
 
+def argument_schema(validator: TypeAdapter[Any]) -> dict[str, Any]:
+    """Discriminated unions require their tag before branch defaults are applied."""
+    schema = validator.json_schema()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            discriminator = value.get("discriminator")
+            if isinstance(discriminator, dict):
+                tag = discriminator.get("propertyName")
+                if isinstance(tag, str):
+                    required = value.setdefault("required", [])
+                    if tag not in required:
+                        required.append(tag)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(schema)
+    return schema
+
+
 def _operation[A: BaseModel, R: BaseModel](
     name: str,
     arguments: type[A] | TypeAdapter[A],
@@ -960,7 +1002,7 @@ def _operation[A: BaseModel, R: BaseModel](
         description=description,
         category=name.split(".")[1],
         tags=tags,
-        arguments_schema=validator.json_schema(),
+        arguments_schema=argument_schema(validator),
         result_schema=result_validator.json_schema(mode="serialization"),
         effect=effect,
         execution=execution,
@@ -984,6 +1026,112 @@ def _operation[A: BaseModel, R: BaseModel](
 
 
 _DECLARATIONS = (
+    _operation(
+        "blender.mesh.cleanup",
+        CleanupArguments,
+        CleanupResult,
+        lambda b, a, q: b.mesh_cleanup(a),
+        "Atomically clean up1..32 meshes: explicit merge distance, "
+        "duplicate/degenerate "
+        "and loose removal, normal consistency; optional bounded hole filling, "
+        "small-island "
+        "removal and ngon triangulation. Preview stages the same work without "
+        "publishing. "
+        "Preserve openings by default. Reject remaining non-manifold/self-intersecting "
+        "geometry; require_closed optionally enforces closed shells. Not automatic "
+        "retopology or arbitrary shape repair.2M total mesh elements; protected native "
+        "dependencies and construction metadata require explicit resolution. Clean "
+        "managed meshes are no-ops; actual repair needs explicit detach_construction "
+        "and invalidates generator revision. Object/resource identity persists.",
+        tags=("modeling", "topology", "repair", "cleanup", "batched"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.assembly.create",
+        AssemblyCreateArguments,
+        AssemblyResult,
+        lambda b, a, q: b.assembly_create(a),
+        "Create a mixed structural assembly from sparse loft/surface templates "
+        "and varied "
+        "families. Up to64 named mesh components,16 templates,32 families,131072 "
+        "vertices; "
+        "256KiB input. Paths place members by arc length; interpolate "
+        "scale/rotation and "
+        "feature strength, with named per-member exceptions and mirrored families. "
+        "Native hierarchy, resource IDs, construction regions and provenance persist. "
+        "No source mesh, explicit topology or scripting. Atomic create; inspect "
+        "compact "
+        "inventory and revise family/member rules with assembly.configure. Use "
+        "individual "
+        "loft/surface operations for single standalone forms.",
+        tags=(
+            "modeling",
+            "structural",
+            "assembly",
+            "family",
+            "repeat",
+            "mirror",
+            "batched",
+        ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.assembly.configure",
+        AssemblyConfigureArguments,
+        AssemblyResult,
+        lambda b, a, q: b.assembly_configure(a),
+        "Revise selected assembly templates/family rules or indexed member exceptions. "
+        "Omitted rules persist; expected_revision guards stale edits. Keep "
+        "membership/counts "
+        "and semantic IDs. Geometry-only changes preserve ordered connectivity/data; "
+        "changed tessellation requires topology_policy=rebuild and no protected "
+        "downstream "
+        "data. Externally edited base meshes are protected. Atomic staged rollback. "
+        "Use members.shape for section/feature/opening/thickness changes; "
+        "refresh_placements re-evaluates saved landmark/interface rules. "
+        "Returns totals, all changed names and at most16 changed member rows; "
+        "unchanged inventory is omitted.",
+        tags=("modeling", "structural", "assembly", "family", "revision", "batched"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.assembly.inspect",
+        AssemblyInspectArguments,
+        AssemblyResult,
+        lambda b, a, q: b.assembly_inspect(a),
+        "Compact assembly inventory: stable member/resource IDs, family/side "
+        "provenance, "
+        "bounds/dimensions, counts, named regions and construction/placement "
+        "freshness. "
+        "Default16/max64 member rows; limit=0 totals only. Filter families. "
+        "Full sparse specification is opt-in; never generated vertex arrays. "
+        "Construction validity is not evaluated-modifier or visual acceptance.",
+        tags=("structural", "assembly", "inventory", "inspection"),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.object_set.place",
+        PlacementArguments,
+        PlacementResult,
+        lambda b, a, q: b.object_set_place(a),
+        "Atomically place/fit up to64 mesh components: between named landmarks/object "
+        "points, align a local anchor/axis to a target frame, fit selected local "
+        "dimensions, "
+        "or reflect a source transform across a plane. Math runs in Blender. "
+        "Between fits bounding end planes, not arbitrary curved centerline length; "
+        "dimensions are local-axis extents, world scene units. Preserve geometry and "
+        "resource IDs. refresh re-evaluates stored rules. Static constraints, not live "
+        "drivers; reject cycles, stale landmarks, singular axes and shear. "
+        "Mirror placement positions an existing independently authored component; "
+        "assembly families can create mirrored geometry with provenance.",
+        tags=("structural", "assembly", "placement", "landmark", "fit", "batched"),
+        effect="mutating",
+        execution="synchronous",
+    ),
     _operation(
         "blender.timeline.inspect",
         TimelineInspectArguments,
@@ -1952,7 +2100,9 @@ _DECLARATIONS = (
         LoftResult,
         lambda b, a, q: b.loft_create(a),
         (
-            "Create up to 64 editable asymmetric section lofts with transported "
+            "Create up to64 editable section lofts with named sections, radial "
+            "process/ridge/groove features and shaped convex/concave end caps. "
+            "Transported "
             "frames, variable four-sided radii, twist, linear/Catmull-Rom "
             "centerlines and deterministic quad topology. Native meshes support "
             "downstream modifiers, binding and mesh refinement; use "
@@ -1969,10 +2119,12 @@ _DECLARATIONS = (
         LoftResult,
         lambda b, a, q: b.loft_configure(a),
         (
-            "Revise owned loft section positions/radii/twist in one atomic "
+            "Patch named section positions/radii/twist, local features and end depths "
+            "(or supply full sections) in one atomic "
             "batch while preserving objects, UUIDs, ordered topology, groups "
             "and modifiers. Keep section count, sides, subdivisions and caps "
-            "unchanged. Reject shared data, shape keys and externally edited "
+            "unchanged, including end support rings. Optional expected_revision. "
+            "Reject shared data, shape keys and externally edited "
             "base meshes; use mesh tools for downstream freeform refinement."
         ),
         tags=("structural", "organic", "sections", "batched"),
@@ -3355,7 +3507,12 @@ _DECLARATIONS = (
         RenderArguments,
         RenderJobStatus,
         lambda b, a, q: b.render(a, q.request_id),
-        "Render in the connected host using its live scene/resources; no second "
+        "For structural multiview QA, inspection={} renders a bounded auto-framed "
+        "Workbench contact sheet; per-view object lists add regional closeups. "
+        "No camera "
+        "or light setup needed, native state restored. Otherwise render in the "
+        "connected host "
+        "using its live scene/resources; no second "
         "Blender process or project snapshot. Interactive hosts use native async "
         "jobs. One active job; only render jobs and extension identity remain "
         "available during work. Current scene camera/frame/engine "

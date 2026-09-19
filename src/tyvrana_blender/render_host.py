@@ -57,7 +57,7 @@ def prepare(
         raise OperationError("adapter_busy", "A native render or bake is running")
     if bpy.context.mode != "OBJECT":
         raise OperationError("invalid_context", "Rendering requires Object Mode")
-    if scene.camera is None:
+    if scene.camera is None and arguments.inspection is None:
         raise OperationError("no_camera", "The current scene has no camera")
     from . import growth
 
@@ -91,7 +91,9 @@ def prepare(
             )
         destination = str(path)
     engine = (
-        "CYCLES"
+        "BLENDER_WORKBENCH"
+        if arguments.inspection
+        else "CYCLES"
         if arguments.cycles
         else (
             "BLENDER_EEVEE"
@@ -190,7 +192,11 @@ def frames(
                 }
             )
             result, descriptor = yield from render_steps(
-                options, spool, observe=observe, interactive=not bpy.app.background
+                options,
+                spool,
+                observe=observe,
+                interactive=not bpy.app.background,
+                checkpoint=check,
             )
             check()
             filename = f"frame-{target:07d}" + (

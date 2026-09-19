@@ -83,7 +83,7 @@ async def test_volumes_layers_and_guides_persist(
                 if host == 0:
                     schema_args: dict[str, Any] = dict(
                         adapter_id=adapter.instance_id,
-                        include_schemas=True,
+                        schemas="full",
                         names=[
                             "blender.volume.inspect",
                             "blender.volume.snapshot",

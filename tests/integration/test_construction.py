@@ -12,7 +12,7 @@ from tyvrana_protocol import ArtifactDescriptor
 
 from ..construction_fixture import create_fixture
 from .conftest import ROOT, running_blender
-from .test_e2e import core_client, discover
+from .test_e2e import core_client, discover, wait_for_project
 
 
 def test_native_construction(profile: dict[str, str], tmp_path: Path) -> None:
@@ -80,8 +80,13 @@ async def test_construction_mcp(profile: dict[str, str], tmp_path: Path) -> None
                         "arguments": args,
                     },
                 )
-                assert not response.is_error, response
-                return cast(dict[str, Any], response.structured_content["result"])
+                assert not response.is_error, response.content
+                value = cast(dict[str, Any], response.structured_content["result"])
+                if operation_name in {"file.save", "file.open"}:
+                    await wait_for_project(
+                        client, adapter.instance_id, value["filepath"]
+                    )
+                return value
 
             for name in ("Front", "Side", "Top"):
                 response = await tool(
@@ -103,7 +108,7 @@ async def test_construction_mcp(profile: dict[str, str], tmp_path: Path) -> None
                         "artifact_ids": [artifact.artifact_id],
                     },
                 )
-                assert not response.is_error, response
+                assert not response.is_error, response.content
                 await tool(
                     "tyvrana_release_artifact", {"artifact_id": artifact.artifact_id}
                 )
@@ -133,7 +138,7 @@ async def test_construction_mcp(profile: dict[str, str], tmp_path: Path) -> None
                         "blender.landmark.derive",
                         "blender.landmark.inspect",
                     ],
-                    "include_schemas": True,
+                    "schemas": "full",
                 },
             )
             assert not schemas.is_error

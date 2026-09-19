@@ -81,7 +81,7 @@ async def test_topology_workflow_persists_across_hosts(
                                 "blender.deformation.sweep",
                                 "blender.retopo.insert_loop",
                             ],
-                            include_schemas=True,
+                            schemas="full",
                         ),
                     )
                     assert not schemas.is_error
