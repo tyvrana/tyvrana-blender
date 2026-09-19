@@ -1111,7 +1111,9 @@ _DECLARATIONS = (
         (
             "Evaluate active scene actions/drivers over 1..128 explicit/range "
             "integer frames in one call. Never assigns actions. Reuse "
-            "joint/deformation/target/volume/layer diagnostics; meshes "
+            "joint/deformation/target/volume/layer diagnostics and 32 typed "
+            "distance/angle measurements (world Blender units/degrees), including "
+            "closure residuals and comparison violations; meshes "
             "compare with evaluated reference_frame (default first sample), "
             "not implicit rest. Aggregate min/max/mean/p 05/p 50/p 95 with worst"
             " frames, thresholds, coupling error/saturation, "

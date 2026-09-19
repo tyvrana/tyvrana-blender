@@ -168,3 +168,26 @@ def test_timeline_patch_and_operation_contract_security() -> None:
         "simple expressions"
         in REGISTRY["blender.coupling.configure"].contract.description
     )
+
+
+def test_shared_scalar_measurement_batch_contract() -> None:
+    query = dict(
+        kind="distance",
+        name="Closure",
+        a=dict(kind="bone", object="Rig", bone="End", endpoint="tail"),
+        b=dict(kind="world", point=[0, 0, 0]),
+        comparison=dict(target=0, tolerance=0.001),
+    )
+    assert (
+        MotionSampleArguments.model_validate(dict(frames=[1, 2], measurements=[query]))
+        .measurements[0]
+        .name
+        == "Closure"
+    )
+    for items in [
+        [query, query],
+        [dict(kind="bounds", name="Bounds", object="Rig")],
+        [query | dict(name=str(i)) for i in range(33)],
+    ]:
+        with pytest.raises(ValidationError):
+            MotionSampleArguments.model_validate(dict(frames=[1], measurements=items))

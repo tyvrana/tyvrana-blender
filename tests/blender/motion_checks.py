@@ -66,6 +66,40 @@ class MotionTests(VolumeTests):
         )
         return bpy.data.objects["Rig"]
 
+    def test_batched_endpoint_measurements_and_failure_restoration(self) -> None:
+        self.chain(2)
+        a = dict(kind="bone", object="Rig", bone="J0", endpoint="tail")
+        b = dict(kind="bone", object="Rig", bone="J1", endpoint="head")
+        queries = [
+            dict(
+                kind="distance",
+                name="Closure",
+                a=a,
+                b=b,
+                comparison=dict(target=0, tolerance=0.0001),
+            ),
+            dict(
+                kind="angle",
+                name="Angle",
+                a=dict(kind="world", point=[1, 0, 0]),
+                vertex=dict(kind="world", point=[0, 0, 0]),
+                b=dict(kind="world", point=[0, 1, 0]),
+                comparison=dict(target=80, tolerance=1),
+            ),
+        ]
+        bpy.context.scene.frame_set(7, subframe=0.25)
+        report = self.call("motion.sample", frames=[1, 2, 3], measurements=queries)
+        self.assertEqual(report["violation_count"], 3)
+        values = {m["name"]: m for m in report["metrics"]}
+        self.assertEqual(values["measurement.Closure.value"]["maximum"], 0)
+        self.assertAlmostEqual(values["measurement.Angle.value"]["maximum"], 90)
+        self.assertEqual(bpy.context.scene.frame_current, 7)
+        self.assertAlmostEqual(bpy.context.scene.frame_subframe, 0.25)
+        queries[0]["a"] = dict(kind="bone", object="Rig", bone="Missing")
+        self.error("motion.sample", frames=[1, 2], measurements=queries)
+        self.assertEqual(bpy.context.scene.frame_current, 7)
+        self.assertAlmostEqual(bpy.context.scene.frame_subframe, 0.25)
+
     def coupling(
         self,
         name: str = "Follow",

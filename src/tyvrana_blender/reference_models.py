@@ -239,6 +239,11 @@ class BoundsQuery(Model):
     object: Name
 
 
+type ScalarMeasurementQuery = Annotated[
+    DistanceQuery | AngleQuery, Field(discriminator="kind")
+]
+
+
 type MeasurementQuery = Annotated[
     DistanceQuery | AngleQuery | BoundsQuery, Field(discriminator="kind")
 ]

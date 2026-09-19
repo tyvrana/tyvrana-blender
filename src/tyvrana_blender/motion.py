@@ -16,6 +16,7 @@ from . import (
     layer_geometry,
     layers,
     modifiers,
+    references,
     retopo_geometry,
     rig,
     volumes,
@@ -29,6 +30,7 @@ from .motion_models import (
     MotionSampleResult,
     MotionViolation,
 )
+from .reference_models import MeasurementArguments
 
 MAX_VERTEX_SAMPLES = 2_000_000
 MAX_METRICS = 1024
@@ -167,6 +169,13 @@ def sample(args: MotionSampleArguments) -> MotionSampleResult:
     frames = args.samples()
     reference = args.reference_frame if args.reference_frame is not None else frames[0]
     resolved = [(c.name, channels.resolve(c.channel)) for c in args.channels]
+    measurement_args = (
+        MeasurementArguments.model_validate(
+            {"queries": [q.model_dump() for q in args.measurements]}
+        )
+        if args.measurements
+        else None
+    )
     catalog = couplings.records() if args.couplings else {}
     if any(n not in catalog for n in args.couplings):
         channels.fail(
@@ -197,6 +206,13 @@ def sample(args: MotionSampleArguments) -> MotionSampleResult:
             scene.frame_set(frame)
             bpy.context.view_layer.update()
             values: dict[str, float | None] = {}
+            if measurement_args:
+                for row in references.measure(measurement_args).measurements:
+                    prefix = "measurement." + row.name + "."
+                    values[prefix + "value"] = row.value
+                    if row.deviation is not None:
+                        values[prefix + "error"] = abs(row.deviation)
+                        values[prefix + "valid"] = float(bool(row.within_tolerance))
             for name, target in resolved:
                 values["channel." + name] = target.value(evaluated=True)
             for name in args.couplings:

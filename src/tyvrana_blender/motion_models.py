@@ -7,7 +7,7 @@ from pydantic import Field, FiniteFloat, model_validator
 from .corrective_models import ComparisonPair
 from .layer_models import LayerInspectArguments
 from .models import InspectArguments, Model, PageInfo
-from .reference_models import Name
+from .reference_models import Name, ScalarMeasurementQuery
 from .volume_models import VolumeQuery
 
 type Scalar = Annotated[FiniteFloat, Field(ge=-1e9, le=1e9)]
@@ -453,6 +453,12 @@ class MotionSampleArguments(Model):
         ),
     )
     channels: list[NamedChannel] = Field(default_factory=list, max_length=64)
+    measurements: list[ScalarMeasurementQuery] = Field(
+        default_factory=list,
+        max_length=32,
+        description="Existing typed distance/angle queries in world Blender units "
+        "or degrees, aggregated across frames. Comparison failures are violations.",
+    )
     couplings: list[ControlName] = Field(default_factory=list, max_length=64)
     armature_object: Name | None = None
     bones: list[Name] = Field(default_factory=list, max_length=64)
@@ -481,6 +487,7 @@ class MotionSampleArguments(Model):
             raise ValueError("Bone QA requires armature_object")
         if not (
             self.channels
+            or self.measurements
             or self.couplings
             or self.bones
             or self.objects
@@ -496,6 +503,7 @@ class MotionSampleArguments(Model):
             self.objects,
             self.couplings,
             [c.name for c in self.channels],
+            [q.name for q in self.measurements],
             [t.metric for t in self.thresholds],
         ]
         for values in groups:

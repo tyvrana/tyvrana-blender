@@ -229,3 +229,13 @@ return tracebacks. Unexpected native failures remain visible in diagnostic logs.
 Implementation uses Blender's [slotted action API](https://developer.blender.org/docs/release_notes/5.0/python_api/),
 [native driver variables and simple expressions](https://docs.blender.org/manual/en/5.2/animation/drivers/drivers_panel.html),
 and [scene frame evaluation](https://docs.blender.org/api/5.2/bpy.types.Scene.html).
+
+
+`motion.sample.measurements` reuses the existing typed distance/angle queries
+from `measurement.inspect` (up to 32). Points resolve in world space at each
+sampled frame; distances use Blender units and angles use degrees. Aggregate
+`measurement.<name>.value`, absolute comparison `error`, and `valid` replace
+per-frame calls and manual endpoint subtraction. Failed explicit comparisons
+contribute violations, with the same timeline restoration and bounded result
+policy as other motion diagnostics. This verifies sampled mechanism closure;
+it does not implement an additional solver or continuous motion certificate.
