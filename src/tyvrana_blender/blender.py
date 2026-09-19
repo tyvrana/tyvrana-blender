@@ -97,6 +97,7 @@ from .curve_models import (
     CurveResult,
 )
 from .deformation_sweep_models import DeformationSweepArguments, DeformationSweepResult
+from .delivery_models import FileAuditArguments, FileAuditResult
 from .dispatch import CommandQueue
 from .dynamics_models import (
     DynamicsBakeArguments,
@@ -1129,6 +1130,12 @@ class BlenderBackend:
 
         return files.inspect()
 
+    def file_audit(self, arguments: FileAuditArguments) -> FileAuditResult:
+        from . import delivery
+
+        main_thread()
+        return delivery.audit(arguments)
+
     def project_bind(self, arguments: ProjectBindArguments) -> ProjectBindResult:
         main_thread()
         from . import bindings
@@ -1642,8 +1649,10 @@ class BlenderBackend:
         return mesh.edit(uv.mesh_object(arguments.object_name), arguments)
 
     def operation_allowed(self, operation: str) -> bool:
-        from . import bake_jobs, growth_dynamics
+        from . import bake_jobs, growth_dynamics, render_host
 
+        if render_host.busy():
+            return operation == "blender.extension.inspect"
         if growth_dynamics.busy():
             return operation in {
                 "blender.growth.dynamics.status",
@@ -2552,7 +2561,7 @@ class BlenderBackend:
 
     def render(self, arguments: RenderArguments, job_id: str) -> RenderJobStatus:
         main_thread()
-        from .render_snapshot import prepare
+        from .render_host import prepare
 
         if self.spool is None:
             raise OperationError("invalid_context", "Render storage is unavailable")
@@ -2721,26 +2730,6 @@ class Runtime:
                 self.queue.cancel(message.request_id)
             elif (
                 isinstance(message, AdapterEvent)
-                and message.event == "blender.render.show"
-            ):
-                from .render_snapshot import display_result
-
-                assert isinstance(message.payload, dict)
-                identifier = str(message.payload["job_id"])
-                error = None
-                try:
-                    display_result(self.worker.spool, identifier)
-                except Exception:
-                    error = "Could not display the completed render"
-                self.worker.send(
-                    AdapterEvent(
-                        type="adapter.event",
-                        event="blender.render.shown",
-                        payload={"job_id": identifier, "error": error},
-                    )
-                )
-            elif (
-                isinstance(message, AdapterEvent)
                 and message.event == "blender.response.sent"
             ):
                 from . import lifecycle
@@ -2760,6 +2749,11 @@ class Runtime:
             else:
                 raise ValueError("Unexpected networking worker message")
         self.queue.drain(self.worker.send)
+        # Publish the prepare acknowledgement before any blocking headless frame.
+        if not self.worker.output_pending:
+            from . import render_host
+
+            render_host.tick()
 
     def stop(self) -> None:
         main_thread()
@@ -2784,8 +2778,9 @@ def preferences_config() -> ConnectionConfig:
 def stop() -> None:
     global _runtime
     main_thread()
-    from . import growth_dynamics
+    from . import growth_dynamics, render_host
 
+    render_host.shutdown()
     growth_dynamics.shutdown()
     if _runtime is not None:
         _runtime.stop()

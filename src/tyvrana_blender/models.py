@@ -187,7 +187,16 @@ class RenderBudget(Model):
     max_total_pixels: int = Field(default=16777216, ge=4096, le=268435456)
     max_buffer_bytes: int = Field(default=536870912, ge=65536, le=2147483648)
     max_artifact_bytes: int = Field(default=67108864, ge=1024, le=134217728)
-    max_seconds: float = Field(default=600, ge=1, le=7200)
+    max_seconds: float = Field(
+        default=600,
+        ge=1,
+        le=7200,
+        description=(
+            "Deadline checked at native frame boundaries; Cycles also receives "
+            "a remaining-time limit. Active frames drain before cleanup. "
+            "Not a hard wall-clock or native-job preemption guarantee."
+        ),
+    )
 
 
 class RenderColorOptions(Model):

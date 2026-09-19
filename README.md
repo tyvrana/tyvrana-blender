@@ -3009,7 +3009,7 @@ with native Blender checks for stored precision and render behavior.
 ## Rendered images
 
 `blender.render.image` submits an observable, cancellable still or sequence render job using
-an isolated snapshot of the active scene. A default bounded five-second wait
+the active scene in the connected host, without another Blender process. A default bounded five-second wait
 returns an inline image for short renders; longer work returns a job identity.
 Use `render.status` with revision-based event waits up to 20 seconds, then
 `render.result` for the image. Set `wait_seconds: 0` for prompt submission.
@@ -3025,12 +3025,12 @@ pixel, buffer, total-frame, artifact-size and time budgets. PNG supports 8/16 bi
 EXR supports scene-linear half/full float and selected multilayer passes/AOVs.
 An explicit bounded `frames` list produces a ZIP containing outputs and a manifest.
 The active camera/frame/engine are used unless supported overrides are supplied.
-`show_result: true` displays a packed still preview in an interactive host;
+`show_result: true` fits native Render Result in an interactive host;
 background hosts and sequences reject this option. Optional `output` atomically
 persists an explicit destination with the corresponding extension.
 
 See [render jobs](docs/render_jobs.md) for states, errors, cancellation, ownership,
-limits, file/bake/reload conflicts, snapshot fidelity and host-loss semantics.
+limits, file/bake/reload conflicts, host preservation and host-loss semantics.
 
 An optional `wireframe` object displays the actual evaluated edges of named Mesh
 objects as cyan native wire geometry in this render:

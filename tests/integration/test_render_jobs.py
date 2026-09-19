@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import pytest
 from mcp import Client
 from mcp.types import CallToolResult
 
@@ -42,7 +41,7 @@ async def test_job_failure_recovery_persistence_and_guards(
             assert adapter is not None
             identifier = adapter.instance_id
             before = await operation(client, identifier, "blender.scene.inspect", {})
-            # Native snapshot succeeds, diagnostic preparation in child fails.
+            # Host submission succeeds, diagnostic preparation then fails.
             submitted = await call(
                 client,
                 identifier,
@@ -97,7 +96,7 @@ async def test_job_failure_recovery_persistence_and_guards(
                 observed.structured_content["result"]["job_id"]
                 == submitted.structured_content["result"]["job_id"]
             )
-            assert len(observed.model_dump_json()) < 1800
+            assert len(observed.model_dump_json()) < 2600
             assert not any(c.type == "image" for c in observed.content)
             result = await complete_render(client, identifier, submitted)
             status = result.structured_content["result"]
@@ -144,14 +143,13 @@ async def test_job_failure_recovery_persistence_and_guards(
             assert output.read_bytes() == pixels
 
 
-@pytest.mark.long_render
-async def test_render_exceeds_deadline_and_cancels_running_child(
+async def test_render_running_cancel_and_recovery(
     profile: dict[str, str], tmp_path: Path
 ) -> None:
-    profile.update(TYVRANA_TEST_RENDER="1", TYVRANA_TEST_RENDER_LONG="1")
+    profile["TYVRANA_TEST_RENDER"] = "1"
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
-        async with running_blender(profile, tmp_path, ui=False):
+        async with running_blender(profile, tmp_path, ui=True):
             adapter = await discover(client)
             assert adapter is not None
             identifier = adapter.instance_id
@@ -160,32 +158,14 @@ async def test_render_exceeds_deadline_and_cancels_running_child(
                 client,
                 identifier,
                 "render.image",
-                width=1024,
-                height=1024,
-                cycles={"samples": 512},
+                width=256,
+                height=256,
+                frames=[1, 2, 3],
+                cycles={"samples": 64},
                 wait_seconds=0,
             )
             assert time.monotonic() - started < 2
-            assert not (
-                await call(client, identifier, "scene.inspect", limit=1)
-            ).is_error
-            result = await complete_render(client, identifier, submitted)
-            assert result.structured_content["result"]["render_seconds"] > 30
-            assert result.structured_content["result"]["state"] == "succeeded"
-            assert inspect_png(
-                base64.b64decode(
-                    next(c.data for c in result.content if c.type == "image")
-                )
-            ) == (1024, 1024)
-            submitted = await call(
-                client,
-                identifier,
-                "render.image",
-                width=1024,
-                height=1024,
-                cycles={"samples": 512},
-                wait_seconds=0,
-            )
+            assert (await call(client, identifier, "scene.inspect", limit=1)).is_error
             status = submitted.structured_content["result"]
             while status["state"] == "queued":
                 response = await call(
@@ -204,7 +184,8 @@ async def test_render_exceeds_deadline_and_cancels_running_child(
             )
             cancelled = await complete_render(client, identifier, cancelled)
             assert cancelled.structured_content["result"]["state"] == "cancelled"
-            assert time.monotonic() - started < 5
+            assert time.monotonic() - started < 90
+            assert cancelled.structured_content["result"]["completed_frames"] < 3
             unavailable = await call(
                 client, identifier, "render.result", job_id=status["job_id"]
             )
@@ -222,7 +203,7 @@ async def test_render_exceeds_deadline_and_cancels_running_child(
             ).structured_content["result"]["state"] == "succeeded"
 
 
-async def test_host_loss_disconnects_and_reaps_render_child(
+async def test_host_loss_disconnects_without_an_alternate_render_host(
     profile: dict[str, str], tmp_path: Path
 ) -> None:
     import json
@@ -277,7 +258,8 @@ async def test_host_loss_disconnects_and_reaps_render_child(
                 children_path = Path(f"/proc/{worker_pid}/task/{worker_pid}/children")
                 children = children_path.read_text()  # noqa: ASYNC240 - Small owned process metadata.
                 child_pids = [int(x) for x in children.split()]
-                assert child_pids
+                assert not child_pids
+                assert status["host_pid"] == process.pid
                 process.kill()
                 await process.wait()
                 async with asyncio.timeout(5):

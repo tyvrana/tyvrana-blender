@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import shutil
-import signal
 import tempfile
 import time
 from collections.abc import Awaitable, Callable
@@ -15,7 +14,6 @@ from typing import cast
 from uuid import uuid4
 
 from tyvrana_protocol import (
-    AdapterEvent,
     ArtifactDescriptor,
     Message,
     OperationFailure,
@@ -46,7 +44,6 @@ OPERATIONS = frozenset(
 )
 MAX_HISTORY = 16
 MAX_RESULTS = 4
-MARKER = "TYVRANA_RENDER_EVENT "
 
 
 def utc() -> str:
@@ -64,9 +61,6 @@ class Job:
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     created: float = field(default_factory=time.monotonic)
     task: asyncio.Task[None] | None = None
-    process: asyncio.subprocess.Process | None = None
-    stopping: asyncio.Task[None] | None = None
-    shown: asyncio.Future[str | None] | None = None
 
 
 class RenderJobs:
@@ -148,13 +142,6 @@ class RenderJobs:
             job.prepared.set_result(response)
         return True
 
-    def accept_shown(self, event: AdapterEvent) -> None:
-        assert isinstance(event.payload, dict)
-        job = self.jobs.get(str(event.payload["job_id"]))
-        if job is not None and job.shown is not None and not job.shown.done():
-            value = event.payload.get("error")
-            job.shown.set_result(str(value) if value is not None else None)
-
     def render_status(self, arguments: RenderStatusArguments) -> RenderJobStatus:
         identifier = arguments.job_id or self.active or next(reversed(self.jobs), None)
         if identifier is None:
@@ -168,8 +155,7 @@ class RenderJobs:
         job = self.lookup(arguments.job_id)
         if job.status.state not in TERMINAL and job.status.state != "cancel_requested":
             self.change(job, state="cancel_requested")
-            if job.process is not None:
-                job.stopping = asyncio.create_task(self.stop_process(job.process))
+            (job.directory / "cancel.request").touch()
         return self.observe(job)
 
     def render_result(
@@ -266,29 +252,6 @@ class RenderJobs:
     def is_cancelled(job: Job) -> bool:
         return job.status.state == "cancel_requested"
 
-    async def stop_process(self, process: asyncio.subprocess.Process) -> None:
-        if process.returncode is not None:
-            return
-        try:
-            if os.name == "posix":
-                process.send_signal(signal.SIGINT)
-            else:
-                process.terminate()
-            try:
-                async with asyncio.timeout(0.75):
-                    await process.wait()
-                return
-            except TimeoutError:
-                process.terminate()
-            try:
-                async with asyncio.timeout(0.5):
-                    await process.wait()
-            except TimeoutError:
-                process.kill()
-                await process.wait()
-        except ProcessLookupError:
-            await process.wait()
-
     def persist(self, job: Job, destination: str) -> None:
         target = Path(destination)
         if target.is_symlink() or not target.parent.is_dir():
@@ -332,71 +295,40 @@ class RenderJobs:
             response = await job.prepared
             if isinstance(response, OperationFailure):
                 raise OperationError(response.error.code, response.error.message)
-            if self.is_cancelled(job):
-                return
             prepared = RenderJobStatus.model_validate(response.result)
             self.change(
                 job,
                 engine=prepared.engine,
                 frame=prepared.frame,
                 samples_requested=prepared.samples_requested,
+                host_pid=prepared.host_pid,
+                host_background=prepared.host_background,
+                document_filepath=prepared.document_filepath,
+                scene_name=prepared.scene_name,
             )
             config = json.loads((job.directory / "config.json").read_text())
-            command = [
-                config["binary"],
-                "--background",
-                "--factory-startup",
-                "--disable-autoexec",
-                "--python-exit-code",
-                "1",
-                "--python",
-                str(Path(__file__).with_name("render_child.py")),
-                "--",
-                str(job.directory),
-            ]
-            job.process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                limit=128 * 1024,
-                env={**os.environ, "TMPDIR": str(job.directory)},
-            )
-            if self.is_cancelled(job):
-                job.stopping = asyncio.create_task(self.stop_process(job.process))
-            assert job.process.stdout is not None
-            tail = bytearray()
-            async with asyncio.timeout(job.arguments.budget.max_seconds):
-                async for line in job.process.stdout:
-                    tail.extend(line)
-                    del tail[:-8192]
-                    if line.startswith(MARKER.encode()):
-                        event = json.loads(line[len(MARKER) :])
-                        if (
-                            event["event"] == "running"
-                            and job.status.state != "cancel_requested"
-                        ):
-                            self.change(
-                                job,
+            last_progress = None
+            while not (job.directory / "completed.json").is_file():
+                progress = job.directory / "progress.json"
+                if progress.is_file():
+                    current = json.loads(progress.read_text())
+                    if current != last_progress:
+                        updates: dict[str, object] = {
+                            "completed_frames": current["completed_frames"]
+                        }
+                        if not self.is_cancelled(job):
+                            updates.update(
                                 state="running",
-                                started_at=job.status.started_at or utc(),
+                                started_at=current.get("started_at")
+                                or job.status.started_at
+                                or utc(),
                             )
-                        elif event["event"] == "frame_complete":
-                            self.change(job, completed_frames=event["completed_frames"])
-                returncode = await job.process.wait()
-            if job.stopping is not None:
-                await job.stopping
+                        self.change(job, **updates)
+                        last_progress = current
+                # The connected host owns native work. Never signal or kill it.
+                await asyncio.sleep(0.05)
             if self.is_cancelled(job):
                 return
-            if returncode != 0:
-                log.info(
-                    "Render child failed (%s): %s",
-                    returncode,
-                    tail.decode(errors="replace"),
-                )
-                raise OperationError(
-                    "render_process_failed",
-                    f"Render subprocess exited ({returncode}); see application log",
-                )
             report = json.loads((job.directory / "completed.json").read_text())
             if "error" in report:
                 raise OperationError(
@@ -409,21 +341,6 @@ class RenderJobs:
                 render_output.media_type(job.arguments),
                 maximum=job.arguments.budget.max_artifact_bytes,
             )
-            if job.arguments.show_result:
-                job.shown = asyncio.get_running_loop().create_future()
-                await self.send(
-                    AdapterEvent(
-                        type="adapter.event",
-                        event="blender.render.show",
-                        payload={"job_id": identifier},
-                    )
-                )
-                async with asyncio.timeout(5):
-                    display_error = await job.shown
-                if display_error:
-                    raise OperationError("render_display_failed", display_error)
-                if self.is_cancelled(job):
-                    return
             if config.get("destination"):
                 self.persist(job, config["destination"])
             retained = [j for j in self.jobs.values() if j.status.result_available]
@@ -440,6 +357,7 @@ class RenderJobs:
                 byte_size=descriptor.byte_size,
                 sha256=descriptor.sha256,
                 render_seconds=report["render_seconds"],
+                started_at=report.get("started_at") or job.status.started_at,
                 completed_frames=report.get("completed_frames", 1),
                 color_management=RenderResult.model_validate(
                     report["output"]
@@ -449,18 +367,9 @@ class RenderJobs:
                 output_channels=report.get("output", {}).get("output_channels", []),
             )
         except asyncio.CancelledError:
-            if job.process is not None:
-                await self.stop_process(job.process)
+            (job.directory / "cancel.request").touch()
             raise
         except Exception as exc:
-            if job.process is not None and job.process.returncode is None:
-                await self.stop_process(job.process)
-            if isinstance(exc, TimeoutError):
-                exc = OperationError(
-                    "render_budget_exceeded",
-                    "Render exceeded budget.max_seconds; reduce workload or "
-                    "explicitly raise budget",
-                )
             error = exc.error if isinstance(exc, OperationError) else None
             if error is None:
                 log.exception("Render job failed")
@@ -476,8 +385,6 @@ class RenderJobs:
                     ),
                 )
         finally:
-            if job.stopping is not None:
-                await job.stopping
             if self.is_cancelled(job):
                 self.change(job, state="cancelled")
             self.change(

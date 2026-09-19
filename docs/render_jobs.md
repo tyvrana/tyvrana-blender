@@ -1,9 +1,12 @@
 # Still-render jobs
 
 `blender.render.image` submits a render and returns a job identity promptly.
-Rendering runs in an owned background Blender process using a private snapshot of
-the active scene. The connected Blender host remains available. There is no render
-execution deadline; individual requests keep the normal core/client deadlines.
+Rendering uses the connected Blender process and its live scene/resource IDs.
+Interactive hosts invoke Blender's native asynchronous render job; headless test hosts
+execute frames in their main thread. No second Blender, scene serialization, project
+copy, or image-buffer copying is involved. Status includes `host_pid`,
+`host_background`, scene/document identity, `execution="connected_host"` and
+`cancellation="frame_boundary"`. Individual requests retain normal client deadlines.
 
 ## Short and long workflows
 
@@ -16,7 +19,7 @@ A short diagnostic render can take one call:
 Submission waits at most `wait_seconds` (default 5, range 0–5). If the render
 succeeds within that interval, the response includes its output artifact and MCP
 image. Otherwise it returns current job metadata. Always inspect `state`.
-Process startup and scene snapshotting add overhead even for tiny renders.
+Native engine initialization can still dominate tiny renders.
 
 For long work, set `wait_seconds: 0`. Then call `blender.render.status`:
 
@@ -40,34 +43,33 @@ status wait or disconnecting a client does not cancel the render.
 
 | State | Meaning |
 | --- | --- |
-| `queued` | Admitted; preparing the scene snapshot or starting the child. |
-| `running` | The child entered native rendering. |
+| `queued` | Admitted; waiting for host preflight/native job start. |
+| `running` | The host invoked native rendering. |
 | `succeeded` | Validated output produced; optional output published. |
 | `failed` | Preparation, native rendering, encoding, storage or output failed. |
-| `cancel_requested` | Cancellation accepted; child exit/preparation cleanup pending. |
+| `cancel_requested` | Cancellation accepted; active native frame/cleanup still pending. |
 | `cancelled` | Work stopped and temporary job output removed. |
 
-`blender.render.cancel` requests cancellation and returns promptly. Running work
-receives SIGINT, followed by termination after 0.75 seconds and kill after a
-further 0.5 seconds if necessary. The user host is never killed. Queued cancellation
-prevents child execution; an already-running main-thread snapshot write finishes
-before cleanup. Repeated cancellation is idempotent. Terminal cancellation returns
-the existing terminal state. A completion committed before cancellation wins;
-accepted cancellation before that point discards the result.
+`blender.render.cancel` returns promptly with `cancel_requested`. It prevents
+remaining frames, waits for any active native frame to finish, discards output and
+restores settings before reporting `cancelled`. Blender's Python API does not expose
+a safe native render-job stop operation; cancellation does not send process signals,
+inject input, kill the host or claim immediate GPU preemption. Queued cancellation
+prevents rendering. Repeated/terminal cancellation is idempotent; a completion already
+committed wins. A stalled native engine can delay cleanup indefinitely.
 
 Metadata includes job ID, revision, UTC timestamps, elapsed time, engine, frame,
 requested dimensions, requested Cycles samples when applicable, native render
 duration on success, output availability/size/SHA-256 and a bounded error. Queued
-metadata may not yet know the engine/frame. Native duration excludes process
-startup and output encoding. Adaptive sampling or a scene time limit can finish
+metadata may not yet know the engine/frame. Native duration excludes output encoding. Adaptive sampling or a scene time limit can finish
 before the requested maximum samples. No sample count, percentage or ETA is
 reported: these are not dependable cross-engine observations. No UI text is read.
 
 Invalid request schemas fail immediately. Host-specific validation and execution
 failures normally reach `failed` after submission. Errors include `no_camera`,
 `invalid_context`, `render_engine_unavailable`, `render_device_unavailable`,
-`file_destination_invalid`, `file_exists`, `render_snapshot_limit`,
-`render_failed`, `render_process_failed`, and artifact/output errors. Normal results
+`file_destination_invalid`, `file_exists`, `render_budget_exceeded`,
+`render_failed`, and artifact/output errors. Normal results
 contain concise repair guidance; detailed diagnostics remain in application logs.
 Unknown jobs and unavailable results have separate errors.
 
@@ -82,37 +84,27 @@ options remain available. Output formats and resource admission are described be
 sequencer output are disabled. Compositor processing remains; File Output nodes
 are muted to prevent unintended external writes.
 
-The parent scene is serialized without saving or changing the open project.
-Live generated/dirty image buffers are copied privately so unsaved bake/paint data
-are preserved, bounded at 128 images and 512 MiB across loaded used images. Scene
-snapshot I/O happens on the host main thread and can briefly delay other host
-operations; networking submission/status/cancellation remain responsive. External
-linked resources and caches must remain accessible and stable. Unsaved simulation
-caches, custom render engines and arbitrary Python drivers are not reproduced.
-Object Mode is required. Snapshot storage scales with the native scene size.
+The connected host reads its actual live image buffers, dependencies, GPU preferences
+and evaluated scene. External resources must remain available. Temporary resolution,
+engine, pass, color and diagnostic overrides are restored after completion/failure;
+the original timeline frame/subframe is restored. Object Mode is required. Rendering
+does not save or reopen the project. Native Render Result/render slots are updated.
+Native dirty flags alone are not a complete proof of unchanged data.
 
-Temporary overrides and diagnostic resources exist in the child, using the same
-restoring renderer implementation on success/failure. Cancellation destroys that
-isolated state. The original scene settings, images, geometry and materials stay
-unchanged. GPU device selections are copied from the existing configuration to
-the child's temporary preferences; preferences are never saved. Device availability
-must be checked in the actual deployment environment. CPU headless testing does
-not establish desktop GPU feasibility or performance.
-
-`show_result: true` requires an interactive host and a suitable editor. On
-completion it loads and packs the preview as `Tyvrana Render` and fits it in the
-largest active-window 3D View or Image Editor. This deliberately changes that
-editor. It does not populate the host's native Render Result or render slots.
-The default false leaves editors and image resources unchanged.
+GPU device selection uses the connected host configuration. CPU/headless tests do
+not establish desktop GPU feasibility. `show_result: true` fits native Render Result
+in a suitable editor; native render invocation can also open Blender's configured
+render display. Neither behavior silently changes the authoritative process.
 
 ## Ownership, concurrency and persistence
 
 The adapter networking process owns jobs; core routes their typed operations and
 owns received transfer artifacts. There is one active job and no work queue. The
 `queued` state is preparation, not a promise of a scheduler. Another render returns
-`adapter_busy`. During an active render, read-only inspection is allowed; bake,
-file open/save, extension reload and other mutations are rejected. Native active
-bake/render jobs also prevent snapshot preparation. Stop/wait for work before
+`adapter_busy`. During an active render only render job operations and extension identity are
+available. Other inspections can evaluate geometry or alter sample time and are
+therefore blocked along with edits, bake, persistence and reload. Native active
+bake/render jobs prevent submission. Stop/wait for work before
 changing project or extension generation.
 
 The newest 16 metadata records and four successful result files are retained.
@@ -131,8 +123,7 @@ Client/core disconnection does not delete jobs in a surviving adapter worker;
 reconnect and inspect by ID or use the latest-job fallback. File open, extension
 reload, worker shutdown and host termination discard job records and temporary
 results. Core reports adapter loss instead of serving cached RUNNING state; a new
-host/generation cannot recover the old job. Parent EOF causes the worker to reap
-its render child and delete its spool. An OS kill of the entire process tree can
+host/generation cannot recover the old job. Parent EOF causes the worker to delete its spool; there is no render child. An OS kill of the entire process tree can
 prevent cleanup code; no crash-persistent job database is promised.
 
 To keep an output after host shutdown, supply:
@@ -169,19 +160,34 @@ PNG is display-referred; EXR is scene-linear regardless of display metadata.
 | Total sequence pixels | 16,777,216 | 268,435,456 |
 | Estimated output buffers | 512 MiB | 2 GiB |
 | Final artifact bytes | 64 MiB | 128 MiB |
-| Child execution seconds | 600 | 7200 |
+| Frame-boundary deadline seconds | 600 | 7200 |
 
 Each dimension is 64–16384. Requests exceeding default admission must explicitly
 supply a larger allowed `budget`. Buffer admission uses a conservative 16 bytes per
 pixel per combined/pass/AOV output; it is not a bound on all engine allocations.
-The time budget covers child execution, not host snapshot preparation. Output
-budget failures discard temporary results. Cancellation uses the same existing job
-lifecycle for every format.
+The time budget is checked before/after native frames. Explicit Cycles settings also
+receive the remaining native `time_limit`; synchronization/encoding may exceed it.
+It is not a hard wall-clock or GPU preemption guarantee. Output/deadline failures
+discard temporary results and restore the host before admitting new work.
 
 `frames` is an optional unique list of up to 64 explicit integers. A sequence runs
-in one isolated child and returns an `application/zip` artifact containing frame
+in the connected host and returns an `application/zip` artifact containing frame
 files and a JSON manifest with frame numbers, filenames and integrity hashes.
 `frame_count` and `completed_frames` report progress; completed-frame events can be
 consumed through revision waits. No percentage/ETA is inferred for an active frame.
 `show_result` is restricted to stills. Persistent `output.filepath` must end in
 `.png`, `.exr` or `.zip`, matching the request.
+
+## Saved delivery audit
+
+`file.audit` returns current native document identity, totals and worst-N dependencies.
+It checks used images (packed, external, dirty/generated), linked library paths,
+native external paths, actions and owned growth caches. Required files support minimum
+size and optional SHA-256; required action names detect omissions. Default inventory
+bound is 4096 resources (maximum16384), detail16 (maximum64), hash budget128MiB.
+
+Missing/unsaved/unknown dependencies make `ready=false`. Sequence coverage, unknown
+native simulation bakes and external physics cache coverage remain explicitly
+unverified; a directory's existence does not certify a bake. Linked files are not
+recursively opened. This is a persistence/presence audit, not appearance, motion or
+continuous-cache acceptance. It never packs assets, saves data or rewrites paths.

@@ -73,6 +73,7 @@ from .curve_models import (
     CurveResult,
 )
 from .deformation_sweep_models import DeformationSweepArguments, DeformationSweepResult
+from .delivery_models import FileAuditArguments, FileAuditResult
 from .dynamics_models import (
     DynamicsBakeArguments,
     DynamicsCache,
@@ -674,6 +675,8 @@ class SceneBackend(Protocol):
     ) -> ExtensionReloadResult: ...
 
     def file_inspect(self) -> FileState: ...
+
+    def file_audit(self, arguments: FileAuditArguments) -> FileAuditResult: ...
     def file_new(self, arguments: FileNewArguments) -> FileState: ...
 
     def viewport_configure(
@@ -2388,6 +2391,20 @@ _DECLARATIONS = (
         execution="lifecycle",
     ),
     _operation(
+        "blender.file.audit",
+        FileAuditArguments,
+        FileAuditResult,
+        lambda b, a, q: b.file_audit(a),
+        "Audit saved document identity, packed/external images, linked paths, "
+        "actions and cache persistence. Verify explicitly required files and optional "
+        "checksums with bounded work. Return totals and worst-N dependencies; "
+        "unknown sequence/simulation coverage remains unverified. Presence is not "
+        "visual or motion acceptance. Read-only; never packs, saves or rewrites paths.",
+        tags=("file", "delivery", "dependencies", "verification"),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
         "blender.file.inspect",
         FileInspectArguments,
         FileState,
@@ -3045,20 +3062,20 @@ _DECLARATIONS = (
         RenderArguments,
         RenderJobStatus,
         lambda b, a, q: b.render(a, q.request_id),
-        "Submit an isolated still or bounded frame-sequence render job; queued "
-        "includes "
-        "scene "
-        "snapshot preparation. One active job, no queue; mutations, bake, file "
-        "and reload are blocked while active. Current scene camera/frame/engine "
+        "Render in the connected host using its live scene/resources; no second "
+        "Blender process or project snapshot. Interactive hosts use native async "
+        "jobs. One active job; only render jobs and extension identity remain "
+        "available during work. Current scene camera/frame/engine "
         "or temporary Cycles/diagnostic settings. PNG 8/16, EXR half/full float or "
         "multilayer passes/AOVs; dimensions 64..16384 within explicit pixel/buffer/"
         "artifact/time budgets. Sequences (max64 frames) return ZIP+manifest. "
         "Optional wait_seconds 0..5 (default 5) returns inline image on success "
-        "or job ID for render.status. Job time is bounded by budget.max_seconds. "
+        "or job ID for render.status. Deadline is checked at frame boundaries; "
+        "Cycles also uses native time_limit. A running frame drains before cleanup. "
         "Jobs/results survive disconnect, not host/reload/file-open; "
         "retain 16 job records/4 result files. Optional output persists an artifact "
         "atomically to an explicit destination; temporary output is not saved "
-        "in the project. Live image snapshot buffers cap at 512 MiB/128 images. "
+        "in the project. Temporary settings and frame are restored after completion. "
         "show_result needs an interactive host and a still. Frame progress and "
         "color/channel metadata are inspectable. Additional passes need multilayer; "
         "AOV outputs are authored with shader nodes.",
@@ -3091,9 +3108,10 @@ _DECLARATIONS = (
         RenderJobArguments,
         RenderJobStatus,
         lambda b, a, q: b.render_cancel(a),
-        "Request real cancellation of queued/running render; returns promptly "
-        "with cancel_requested, then cancelled after child exit/cleanup. "
-        "Uses interrupt then bounded terminate/kill; never kills the host. "
+        "Request frame-boundary cancellation; returns promptly with cancel_requested. "
+        "A running native frame drains, remaining frames/output are discarded, "
+        "then state becomes cancelled after host restoration. No unsafe native-job "
+        "preemption, process signals or host termination. "
         "Repeated or terminal cancel is idempotent and preserves terminal "
         "state. Completion already committed wins; otherwise cancellation "
         "discards output. Unknown job: render_job_not_found.",

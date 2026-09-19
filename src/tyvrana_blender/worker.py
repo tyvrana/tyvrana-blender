@@ -39,7 +39,7 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 from .artifacts import artifact_path
 from .incoming import InputError, InputStore
-from .operations import REGISTRY, Response
+from .operations import Response
 from .render_jobs import OPERATIONS as RENDER_OPERATIONS
 from .render_jobs import RenderJobs
 
@@ -478,13 +478,8 @@ class NetworkClient:
                                     or (
                                         self.renders.active is not None
                                         and message.operation not in RENDER_OPERATIONS
-                                        and (
-                                            message.operation not in REGISTRY
-                                            or REGISTRY[
-                                                message.operation
-                                            ].contract.effect
-                                            != "read_only"
-                                        )
+                                        and message.operation
+                                        != "blender.extension.inspect"
                                     )
                                     or (
                                         message.operation == "blender.extension.reload"
@@ -595,12 +590,6 @@ class NetworkClient:
                 ):
                     raise ValueError("A project refresh cannot change adapter identity")
                 self.registration = message
-                continue
-            if (
-                isinstance(message, AdapterEvent)
-                and message.event == "blender.render.shown"
-            ):
-                self.renders.accept_shown(message)
                 continue
             if isinstance(
                 message, (OperationSuccess, OperationFailure)

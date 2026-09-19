@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -32,42 +32,37 @@ def request(name: str, **arguments: Any) -> OperationRequest:
 
 
 @pytest.fixture
-def service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RenderJobs:
+async def service(tmp_path: Path) -> AsyncIterator[RenderJobs]:
+    tasks: list[asyncio.Task[None]] = []
+
+    async def complete(directory: Path) -> None:
+        (directory / "progress.json").write_text(
+            json.dumps({"running": True, "completed_frames": 0})
+        )
+        await asyncio.sleep(0.1)
+        (directory / (directory.name + ".png")).write_bytes(b"png bytes")
+        (directory / "completed.json").write_text(json.dumps({"render_seconds": 0.05}))
+
     async def send(message: Any) -> None:
         job = jobs.jobs[message.request_id]
-        (job.directory / "config.json").write_text(
-            json.dumps({"binary": sys.executable})
-        )
+        (job.directory / "config.json").write_text(json.dumps({"destination": None}))
         jobs.accept_prepared(
             OperationSuccess(
                 type="operation.success",
                 request_id=message.request_id,
-                result=job.status.model_dump(mode="json"),
+                result=job.status.model_copy(update={"host_pid": 123}).model_dump(
+                    mode="json"
+                ),
             )
         )
+        tasks.append(asyncio.create_task(complete(job.directory)))
 
     jobs = RenderJobs(tmp_path, send)
-    original = asyncio.create_subprocess_exec
-
-    async def launch(*args: Any, **kwargs: Any) -> asyncio.subprocess.Process:
-        directory = Path(args[-1])
-        program = "\n".join(
-            [
-                "import pathlib,json,time,sys",
-                "root=pathlib.Path(sys.argv[1])",
-                "print('TYVRANA_RENDER_EVENT '+"
-                "json.dumps({'event':'running'}),flush=True)",
-                "time.sleep(float(sys.argv[2]))",
-                "(root/(root.name+'.png')).write_bytes(b'png bytes')",
-                "(root/'completed.json').write_text(json.dumps({'render_seconds':0.05}))",
-            ]
-        )
-        return await original(
-            sys.executable, "-c", program, str(directory), "0.05", **kwargs
-        )
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", launch)
-    return jobs
+    try:
+        yield jobs
+    finally:
+        await asyncio.gather(*tasks)
+        await jobs.close()
 
 
 async def finish(service: RenderJobs, identifier: str) -> None:
@@ -90,7 +85,8 @@ async def test_success_wait_compact_status_and_retryable_result(
         await finish(service, job.status.job_id)
         status = service.render_status(RenderStatusArguments(job_id=job.status.job_id))
         assert status.state == "succeeded" and status.started_at and status.completed_at
-        assert len(status.model_dump_json()) < 1200
+        assert len(status.model_dump_json()) < 1500
+        assert status.host_pid == 123 and status.execution == "connected_host"
         first = service.render_result(RenderJobArguments(job_id=status.job_id))[1]
         ArtifactSpool(service.spool).release((first,))
         second = service.render_result(RenderJobArguments(job_id=status.job_id))[1]
@@ -144,7 +140,6 @@ async def test_queued_cancel_and_admission_guard(service: RenderJobs) -> None:
         resume.set()
         await finish(service, status.job_id)
         assert service.render_cancel(args).state == "cancelled"
-        assert service.jobs[status.job_id].process is None
         assert list(service.jobs[status.job_id].directory.iterdir()) == []
         assert service.active is None
     finally:
@@ -162,12 +157,14 @@ async def test_running_cancel_recovery_and_no_false_artifact(
             await service.wait(job, job.status.revision, 1)
         assert job.status.state == "running"
         service.render_cancel(RenderJobArguments(job_id=status.job_id))
+        assert service.observe(job).state == "cancel_requested"
+        assert job.task is not None
+        assert service.active == status.job_id and not job.task.done()
         await finish(service, status.job_id)
         assert (
             service.observe(job).state == "cancelled"
             and not job.status.result_available
         )
-        assert job.process is not None and job.process.returncode is not None
         result = await service.handle(request("result", job_id=status.job_id))
         assert isinstance(result, OperationFailure)
         result = await service.handle(request("image", wait_seconds=1))

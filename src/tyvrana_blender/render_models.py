@@ -71,3 +71,9 @@ class RenderJobStatus(RenderResult):
     sha256: str | None = None
     saved_filepath: str | None = None
     error: RenderJobError | None = None
+    execution: Literal["connected_host"] = "connected_host"
+    cancellation: Literal["frame_boundary"] = "frame_boundary"
+    host_pid: int | None = None
+    host_background: bool | None = None
+    document_filepath: str | None = None
+    scene_name: str | None = None

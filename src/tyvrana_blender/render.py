@@ -4,7 +4,7 @@ import logging
 import struct
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from typing import Any
 
 import bpy  # type: ignore[import-not-found]
@@ -18,6 +18,12 @@ from .uv_checker import display as checker_display
 from .wireframe import display
 
 logger = logging.getLogger(__name__)
+_native_async = False
+
+
+def native_pending() -> bool:
+    """Includes the native job's delay before is_job_running becomes true."""
+    return _native_async
 
 
 def output_nodes(tree: Any, visited: set[int]) -> list[Any]:
@@ -70,6 +76,22 @@ def render_image(
     *,
     observe: Callable[[str, float], None] | None = None,
 ) -> tuple[RenderResult, ArtifactDescriptor]:
+    steps = render_steps(arguments, spool, observe=observe)
+    try:
+        next(steps)
+    except StopIteration as done:
+        return done.value  # type: ignore[no-any-return]
+    raise RuntimeError("Synchronous render unexpectedly yielded")
+
+
+def render_steps(
+    arguments: RenderArguments,
+    spool: ArtifactSpool,
+    *,
+    observe: Callable[[str, float], None] | None = None,
+    interactive: bool = False,
+) -> Generator[None, None, tuple[RenderResult, ArtifactDescriptor]]:
+    global _native_async
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("Rendering requires Blender's main thread")
     scene = bpy.context.scene
@@ -106,6 +128,14 @@ def render_image(
                 (cycles, "use_denoising", options.denoise),
                 (cycles, "use_layer_samples", "IGNORE"),
                 (cycles, "use_sample_subset", False),
+                (
+                    cycles,
+                    "time_limit",
+                    min(
+                        cycles.time_limit or arguments.budget.max_seconds,
+                        arguments.budget.max_seconds,
+                    ),
+                ),
             ]
         )
     # File Output nodes are side effects, not part of the requested PNG. Preserve
@@ -131,11 +161,42 @@ def render_image(
                     if observe is not None:
                         observe("running", 0)
                     started = time.monotonic()
-                    outcome = bpy.ops.render.render(
-                        "EXEC_DEFAULT",
-                        write_still=False,
-                        layer=bpy.context.view_layer.name,
-                    )
+                    if interactive:
+                        completed = []
+
+                        def finish(*_args: Any) -> None:
+                            completed.append(True)
+
+                        def cancel(*_args: Any) -> None:
+                            completed.append(False)
+
+                        bpy.app.handlers.render_complete.append(finish)
+                        bpy.app.handlers.render_cancel.append(cancel)
+                        _native_async = True
+                        try:
+                            outcome = bpy.ops.render.render(
+                                "INVOKE_DEFAULT",
+                                write_still=False,
+                                layer=bpy.context.view_layer.name,
+                            )
+                            if "RUNNING_MODAL" in outcome:
+                                while not completed or bpy.app.is_job_running("RENDER"):
+                                    yield
+                                outcome = (
+                                    {"FINISHED"} if completed[-1] else {"CANCELLED"}
+                                )
+                        finally:
+                            _native_async = False
+                            if finish in bpy.app.handlers.render_complete:
+                                bpy.app.handlers.render_complete.remove(finish)
+                            if cancel in bpy.app.handlers.render_cancel:
+                                bpy.app.handlers.render_cancel.remove(cancel)
+                    else:
+                        outcome = bpy.ops.render.render(
+                            "EXEC_DEFAULT",
+                            write_still=False,
+                            layer=bpy.context.view_layer.name,
+                        )
                     if observe is not None:
                         observe("completed", time.monotonic() - started)
                 result = bpy.data.images.get("Render Result")

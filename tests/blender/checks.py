@@ -31,7 +31,7 @@ light_checks = importlib.import_module("tests.blender.light_checks")
 material_checks = importlib.import_module("tests.blender.material_checks")
 material_author_checks = importlib.import_module("tests.blender.material_author_checks")
 shader_checks = importlib.import_module("tests.blender.shader_checks")
-render_snapshot_checks = importlib.import_module("tests.blender.render_snapshot_checks")
+render_host_checks = importlib.import_module("tests.blender.render_host_checks")
 
 
 class BlenderTests(unittest.TestCase):
@@ -428,7 +428,7 @@ try:
                 ),
                 unittest.defaultTestLoader.loadTestsFromTestCase(BlenderTests),
                 unittest.defaultTestLoader.loadTestsFromTestCase(
-                    render_snapshot_checks.RenderSnapshotTests
+                    render_host_checks.RenderHostTests
                 ),
                 unittest.defaultTestLoader.loadTestsFromTestCase(
                     material_author_checks.MaterialAuthorTests

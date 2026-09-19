@@ -121,7 +121,7 @@ def check() -> float | None:
                 assert any(
                     area.type == "IMAGE_EDITOR"
                     and area.spaces.active.image is not None
-                    and area.spaces.active.image.get("tyvrana_render_preview")
+                    and area.spaces.active.image.name == "Render Result"
                     for window in bpy.context.window_manager.windows
                     for area in window.screen.areas
                 )

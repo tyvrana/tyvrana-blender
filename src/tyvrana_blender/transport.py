@@ -76,6 +76,10 @@ class WorkerProcess:
             raise RuntimeError("Networking worker is closed")
         self._outgoing.append(frame)
 
+    @property
+    def output_pending(self) -> bool:
+        return bool(self._outgoing)
+
     def poll(self) -> list[Message]:
         if self.process.poll() is not None:
             raise RuntimeError(
