@@ -171,3 +171,42 @@ counts. Avoid large realized geometry when shared instances satisfy the intent.
 Native rod dynamics and cache lifecycle are documented separately. Rod clearance does
 not certify broad-template or layered self-collision. Aerodynamic simulation, interactive
 grooming brushes, automatic clumping and arbitrary Geometry Nodes authoring are deferred.
+
+
+## Broad-template layer correction
+
+`growth.layers.correct` addresses broad mesh templates after support motion and
+root order have been authored. It processes `(layer, order, root_id)` and lifts
+each template along a chosen growth-object-space direction. Template local Z
+selects a pinned root band and a smooth transition to full lift. Full triangle
+clearance is checked against explicit mesh colliders and accepted earlier
+elements; nonadjacent internal triangles and degenerate triangles are also
+checked. Upper-side vertex/centroid rays enforce the declared overlap intent.
+An infeasible pin, insufficient lift or work/time bound produces a visible
+failure; an unresolved conflict returns `valid=false` with the previous state
+retained. This is a directional kinematic tool, not a general sheet simulator.
+
+Repeated bounded sweeps coordinate a conservative per-element lift over the
+entire requested range, then revalidate with those same lift amounts. This
+avoids independent per-frame correction jumps. At most `steps + 1` passes are
+allowed within the shared time/triangle/ray budgets. The uniform fractional-time
+samples publish one owned mesh of local
+**offsets** atomically. Native Geometry Nodes realizes the final template output
+and applies interpolated offsets to the live support-deformed geometry. Shared
+source templates and pinned roots remain intact. The authored `Path` output is
+unchanged: independent shaft geometry still needs its own QA. Outside the cache
+range the authored output is used. Lazy template QA applies the same offsets.
+`growth.layers.inspect` reports settings, hash, work, displacement and stale state;
+`growth.layers.clear` restores authored output. `replace=true` recomputes safely.
+Clear before revising/removing growth. The cache persists through save/reopen and
+is included in `file.audit`. Typed geometry/motion edits disable stale playback;
+external motion edits require explicit recomputation. Ownership/hash checks do
+not prove that an externally edited animation still matches its cache.
+
+Cached samples are not continuous collision certification. Always run adaptive
+`geometry.inspect` over the delivered motion, including times between cache
+samples. Increase cache sampling or revise the authored motion if it finds a
+conflict. Side rays are bounded probes, not proof of an entire overlap envelope;
+the direction must suit the fold, and incompatible opposing folds may require
+separate systems. Shared-vertex triangle pairs are excluded from self-contact
+checks. Numerical degeneracy guards are not a material strain model.

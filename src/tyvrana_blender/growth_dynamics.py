@@ -545,12 +545,12 @@ def shutdown() -> None:
         cancel(_active)
 
 
-def invalidate(operation: str, arguments: dict[str, Any] | None = None) -> None:
+def affects_cache(operation: str, arguments: dict[str, Any] | None = None) -> bool:
     # Conservative native cache invalidation after geometry/motion source edits.
     domain = operation.removeprefix("blender.").split(".")[0]
     if domain == "timeline":
         if not set(arguments or {}) & {"fps", "fps_base"}:
-            return
+            return False
         domain = "motion"
     if domain not in {
         "mesh",
@@ -574,7 +574,15 @@ def invalidate(operation: str, arguments: dict[str, Any] | None = None) -> None:
         "retopo",
         "uv",
         "volume",
-    } or operation.startswith("blender.growth.dynamics."):
+    }:
+        return False
+    return True
+
+
+def invalidate(operation: str, arguments: dict[str, Any] | None = None) -> None:
+    if operation.startswith(
+        ("blender.growth.dynamics.", "blender.growth.layers.")
+    ) or not affects_cache(operation, arguments):
         return
     for obj in bpy.context.scene.objects:
         if KEY not in obj:

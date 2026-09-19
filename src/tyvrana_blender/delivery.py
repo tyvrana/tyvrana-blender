@@ -133,7 +133,7 @@ def audit(args: FileAuditArguments) -> FileAuditResult:
                 status="missing",
                 detail="Required action is absent",
             )
-    from . import growth, growth_dynamics
+    from . import growth, growth_dynamics, growth_layers
     from .dynamics_models import DynamicsObjectArguments
 
     for obj in bpy.data.objects:
@@ -154,6 +154,28 @@ def audit(args: FileAuditArguments) -> FileAuditResult:
                 add(
                     kind="cache",
                     name=obj.name,
+                    status="unverified",
+                    detail=exc.error.message,
+                )
+        if growth_layers.KEY in obj and growth.KEY in obj:
+            from .growth_layers_models import LayerObjectArguments
+
+            try:
+                layer_cache = growth_layers.inspect(
+                    LayerObjectArguments(object_name=obj.name)
+                )
+                add(
+                    kind="cache",
+                    name=obj.name + "/layers",
+                    status="embedded"
+                    if layer_cache.valid and layer_cache.cached
+                    else "unverified",
+                    detail="; ".join(layer_cache.issues) or None,
+                )
+            except OperationError as exc:
+                add(
+                    kind="cache",
+                    name=obj.name + "/layers",
                     status="unverified",
                     detail=exc.error.message,
                 )

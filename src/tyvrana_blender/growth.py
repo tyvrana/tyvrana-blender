@@ -697,8 +697,12 @@ def create(args: GrowthCreateArguments) -> GrowthDelta:
 
 
 def configure(args: GrowthConfigureArguments) -> GrowthDelta:
-    from . import growth_dynamics
+    from . import growth_dynamics, growth_layers
 
+    if growth_layers.KEY in bpy.data.objects.get(args.object_name, {}):
+        fail(
+            "Clear layer correction through growth.layers.clear before growth revision"
+        )
     if growth_dynamics.KEY in bpy.data.objects.get(args.object_name, {}):
         fail("Clear dynamics through growth.dynamics.clear before growth revision")
     obj, meta, carrier, group = owned(args.object_name)
@@ -882,9 +886,14 @@ def summary(
 
     spec = GrowthCreateArguments.model_validate(meta["spec"])
     warnings = validity(obj, meta)
-    from . import growth_dynamics
+    from . import growth_dynamics, growth_layers
     from .dynamics_models import DynamicsObjectArguments
+    from .growth_layers_models import LayerObjectArguments
 
+    if growth_layers.KEY in obj:
+        warnings.extend(
+            growth_layers.inspect(LayerObjectArguments(object_name=obj.name)).issues
+        )
     if growth_dynamics.KEY in obj:
         warnings.extend(
             growth_dynamics.inspect(
@@ -1055,8 +1064,10 @@ def field_samples(
 
 def remove(args: GrowthRemoveArguments) -> GrowthRemoveResult:
     obj, _, carrier, group = owned(args.object_name)
-    from . import growth_dynamics
+    from . import growth_dynamics, growth_layers
 
+    if growth_layers.KEY in obj:
+        fail("Clear layer correction through growth.layers.clear before removal")
     if growth_dynamics.KEY in obj:
         fail("Clear dynamics through growth.dynamics.clear before removal")
     # Owned resources must not silently delete external references or shared data.

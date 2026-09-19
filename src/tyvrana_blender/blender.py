@@ -119,6 +119,11 @@ from .file_models import (
     FileState,
 )
 from .geometry_qa_models import GeometryInspectArguments, GeometryInspectResult
+from .growth_layers_models import (
+    LayerCache,
+    LayerCorrectArguments,
+    LayerObjectArguments,
+)
 from .growth_models import (
     GrowthConfigureArguments,
     GrowthCreateArguments,
@@ -795,6 +800,21 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def growth_layers_correct(self, arguments: LayerCorrectArguments) -> LayerCache:
+        from . import growth_layers
+
+        return growth_layers.correct(arguments)
+
+    def growth_layers_inspect(self, arguments: LayerObjectArguments) -> LayerCache:
+        from . import growth_layers
+
+        return growth_layers.inspect(arguments)
+
+    def growth_layers_clear(self, arguments: LayerObjectArguments) -> LayerCache:
+        from . import growth_layers
+
+        return growth_layers.clear(arguments)
+
     def growth_dynamics_bake(
         self, arguments: DynamicsBakeArguments
     ) -> DynamicsJobStatus:
@@ -2705,7 +2725,7 @@ class Runtime:
         self.status = "connecting"
 
     def execute_operation(self, request: OperationRequest) -> Response:
-        from . import growth_dynamics
+        from . import growth_dynamics, growth_layers
         from .operations import REGISTRY
 
         result = execute(BlenderBackend(self.worker.spool), request)
@@ -2713,6 +2733,10 @@ class Runtime:
             isinstance(result, OperationSuccess)
             and REGISTRY[request.operation].contract.effect == "mutating"
         ):
+            growth_layers.invalidate(
+                request.operation,
+                request.arguments if isinstance(request.arguments, dict) else None,
+            )
             growth_dynamics.invalidate(
                 request.operation,
                 request.arguments if isinstance(request.arguments, dict) else None,

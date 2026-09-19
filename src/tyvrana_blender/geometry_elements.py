@@ -52,6 +52,7 @@ class Element:
     lengths: list[float] = field(default_factory=list)
     width: float = 1
     thickness: float = 1
+    offsets: list[Any] = field(default_factory=list)
     _points: list[Any] | None = None
 
     def point(self, local: Any) -> Any:
@@ -75,6 +76,11 @@ class Element:
     def points(self) -> list[Any]:
         if self._points is None:
             self._points = [self.point(p) for p in self.prototype.points]
+            if self.offsets:
+                self._points = [
+                    p + delta
+                    for p, delta in zip(self._points, self.offsets, strict=True)
+                ]
         return self._points
 
     def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
@@ -95,6 +101,10 @@ class Element:
                 for p in self.prototype.points
             )
             radius = [local_radius * self.matrix.to_3x3()[k].length for k in range(3)]
+        if self.offsets:
+            radius = [
+                radius[k] + max(abs(p[k]) for p in self.offsets) for k in range(3)
+            ]
         return (
             tuple(min(p[k] for p in points) - radius[k] for k in range(3)),
             tuple(max(p[k] for p in points) + radius[k] for k in range(3)),
@@ -114,7 +124,11 @@ class Elements:
 
 
 def collect_growth(
-    name: str, maximum: int = 50000, *, templates_only: bool = False
+    name: str,
+    maximum: int = 50000,
+    *,
+    templates_only: bool = False,
+    apply_correction: bool = True,
 ) -> Elements:
     obj, meta, _, group = growth.owned(name)
     warnings = growth.validity(obj, meta)
@@ -205,6 +219,10 @@ def collect_growth(
                 element.width = template.width
                 element.thickness = template.thickness
             result.elements.append(element)
+    if apply_correction:
+        from . import growth_layers
+
+        growth_layers.apply_offsets(obj, group, result)
     return result
 
 

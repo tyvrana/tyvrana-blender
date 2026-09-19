@@ -96,6 +96,11 @@ from .file_models import (
     FileState,
 )
 from .geometry_qa_models import GeometryInspectArguments, GeometryInspectResult
+from .growth_layers_models import (
+    LayerCache,
+    LayerCorrectArguments,
+    LayerObjectArguments,
+)
 from .growth_models import (
     GrowthConfigureArguments,
     GrowthCreateArguments,
@@ -398,6 +403,12 @@ type Response = OperationSuccess | OperationFailure
 
 
 class SceneBackend(Protocol):
+    def growth_layers_correct(self, arguments: LayerCorrectArguments) -> LayerCache: ...
+
+    def growth_layers_inspect(self, arguments: LayerObjectArguments) -> LayerCache: ...
+
+    def growth_layers_clear(self, arguments: LayerObjectArguments) -> LayerCache: ...
+
     def growth_dynamics_bake(
         self, arguments: DynamicsBakeArguments
     ) -> DynamicsJobStatus: ...
@@ -1442,6 +1453,58 @@ _DECLARATIONS = (
             "target ownership; masks may transfer without a rig. Return "
             "distance/coverage summary, not per-vertex matrices."
         ),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.growth.layers.correct",
+        LayerCorrectArguments,
+        LayerCache,
+        lambda b, a, q: b.growth_layers_correct(a),
+        (
+            "Correct broad attached mesh templates with bounded deterministic "
+            "root-pinned lift. Direction is in growth-object space; process "
+            "layer/order/root sequence, check full triangle clearance against "
+            "earlier elements and explicit mesh colliders, plus upper-side "
+            "vertex/centroid probes for overlap intent. Coordinate conservative "
+            "per-element lift across uniform fractional-time samples; preserve "
+            "roots and publish offsets atomically only if "
+            "all samples solve. Unresolved conflict returns valid=false without "
+            "mutation. replace=true recomputes. Native output realizes corrected "
+            "templates; prototypes remain shared. Authored Path output is "
+            "unchanged. No physics or continuous collision guarantee: verify "
+            "interpolated motion with adaptive geometry.inspect."
+        ),
+        tags=("layers", "collision", "cache", "deformation"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.growth.layers.inspect",
+        LayerObjectArguments,
+        LayerCache,
+        lambda b, a, q: b.growth_layers_inspect(a),
+        (
+            "Inspect broad-template correction cache range, settings, bounds, "
+            "displacement, work, hash, stale state and unresolved conflicts. "
+            "Outside its range authored growth is used. Saved offset cache persists "
+            "in the native document; motion edits invalidate it."
+        ),
+        tags=("layers", "collision", "cache", "deformation"),
+        effect="read_only",
+        execution="synchronous",
+    ),
+    _operation(
+        "blender.growth.layers.clear",
+        LayerObjectArguments,
+        LayerCache,
+        lambda b, a, q: b.growth_layers_clear(a),
+        (
+            "Remove owned broad-template correction offsets and restore authored "
+            "native output. Preserve externally shared resources; clear before "
+            "growth revision/removal."
+        ),
+        tags=("layers", "collision", "cache", "deformation"),
         effect="mutating",
         execution="synchronous",
     ),
