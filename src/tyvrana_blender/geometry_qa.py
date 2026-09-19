@@ -241,9 +241,7 @@ def proximity(
                 # triangles in a dense self-query have disjoint individual
                 # bounds: reject those before expensive exact triangle math.
                 threshold = (
-                    args.tolerance**2
-                    if same
-                    else max(minimum**2, args.tolerance**2)
+                    args.tolerance**2 if same else max(minimum**2, args.tolerance**2)
                 )
                 lower = sum(
                     max(0, a.lo[i][k] - b.hi[j][k], b.lo[j][k] - a.hi[i][k]) ** 2
