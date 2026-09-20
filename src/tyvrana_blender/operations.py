@@ -1,20 +1,12 @@
 """Validated operation dispatch independent of Blender's Python module."""
 
-import logging
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Literal, Protocol, cast
+from typing import Protocol
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 from tyvrana_protocol import (
     AdapterRegistration,
     ArtifactDescriptor,
-    JsonValue,
-    OperationContract,
-    OperationFailure,
     OperationRequest,
-    OperationSuccess,
-    ProtocolError,
     ResourceInspectionRequest,
     ResourceInspectionResult,
 )
@@ -88,7 +80,7 @@ from .dynamics_models import (
     DynamicsJobStatus,
     DynamicsObjectArguments,
 )
-from .errors import OperationError
+from .errors import OperationError as OperationError
 from .extension_models import (
     ExtensionInspectArguments,
     ExtensionReloadArguments,
@@ -101,6 +93,16 @@ from .file_models import (
     FileOpenArguments,
     FileSaveArguments,
     FileState,
+)
+from .form_models import (
+    FormConfigureArguments,
+    FormCreateArguments,
+    FormInspectArguments,
+    FormJobArguments,
+    FormJobStatus,
+    FormResult,
+    ReferenceCompareArguments,
+    ReferenceCompareResult,
 )
 from .geometry_qa_models import GeometryInspectArguments, GeometryInspectResult
 from .growth_layers_models import (
@@ -124,6 +126,8 @@ from .image_models import (
     ImageCreateArguments,
     ImageFromArtifactArguments,
     ImageInspectResult,
+    ImagePreviewArguments,
+    ImagePreviewResult,
     ImageSummary,
 )
 from .instance_models import (
@@ -210,6 +214,8 @@ from .modifier_models import (
     EvaluatedMeshSummary,
     ModifierApplyArguments,
     ModifierApplyResult,
+    ModifierBatchCreateArguments,
+    ModifierBatchCreateResult,
     ModifierConfigureArguments,
     ModifierCreateArguments,
     ModifierInspectArguments,
@@ -236,6 +242,27 @@ from .motion_models import (
     TimelineArguments,
     TimelineInspectArguments,
     TimelineState,
+)
+from .operation_dispatch import (
+    OperationSpec as OperationSpec,
+)
+from .operation_dispatch import (
+    Response as Response,
+)
+from .operation_dispatch import (
+    _operation,
+)
+from .operation_dispatch import (
+    argument_schema as argument_schema,
+)
+from .operation_dispatch import (
+    execute as dispatch,
+)
+from .operation_dispatch import (
+    failure as failure,
+)
+from .operation_dispatch import (
+    logger as logger,
 )
 from .organization_models import (
     CollectionConfigureArguments,
@@ -294,6 +321,7 @@ from .render_models import (
     RenderJobStatus,
     RenderStatusArguments,
 )
+from .render_operations import DECLARATIONS as _RENDER_DECLARATIONS
 from .retopo_models import (
     RetopoBridgeArguments,
     RetopoCollapseArguments,
@@ -420,9 +448,6 @@ from .weight_transfer_models import (
     WeightsTransferResult,
 )
 
-logger = logging.getLogger(__name__)
-type Response = OperationSuccess | OperationFailure
-
 
 class SceneBackend(Protocol):
     def mesh_cleanup(self, arguments: CleanupArguments) -> CleanupResult: ...
@@ -515,6 +540,20 @@ class SceneBackend(Protocol):
     def surface_inspect(
         self, arguments: SurfaceNetworkInspectArguments
     ) -> SurfaceResult: ...
+
+    def reference_compare(
+        self, arguments: ReferenceCompareArguments
+    ) -> tuple[ReferenceCompareResult, ArtifactDescriptor | None]: ...
+
+    def form_create(self, arguments: FormCreateArguments) -> FormJobStatus: ...
+
+    def form_configure(self, arguments: FormConfigureArguments) -> FormJobStatus: ...
+
+    def form_status(self, arguments: FormJobArguments) -> FormJobStatus: ...
+
+    def form_cancel(self, arguments: FormJobArguments) -> FormJobStatus: ...
+
+    def form_inspect(self, arguments: FormInspectArguments) -> FormResult: ...
 
     def loft_create(self, arguments: LoftCreateArguments) -> LoftResult: ...
 
@@ -828,6 +867,10 @@ class SceneBackend(Protocol):
     def modifier_inspect(
         self, arguments: ModifierInspectArguments
     ) -> ModifierInspectResult: ...
+    def modifier_create_batch(
+        self, arguments: ModifierBatchCreateArguments
+    ) -> ModifierBatchCreateResult: ...
+
     def modifier_create(
         self, arguments: ModifierCreateArguments
     ) -> ModifierSummary: ...
@@ -863,6 +906,9 @@ class SceneBackend(Protocol):
     def bake_status(self, arguments: BakeStatusArguments) -> BakeJobStatus: ...
     def bake_inspect(self, arguments: BakeInspectArguments) -> BakeInspectResult: ...
     def bake_image(self, arguments: BakeImageArguments) -> BakeJobStatus: ...
+    def image_preview(
+        self, arguments: ImagePreviewArguments
+    ) -> tuple[ImagePreviewResult, ArtifactDescriptor]: ...
     def image_save(
         self, arguments: ImageSaveArguments
     ) -> tuple[ImageSaveResult, ArtifactDescriptor]: ...
@@ -938,93 +984,6 @@ class SceneBackend(Protocol):
     ) -> tuple[RenderJobStatus, ArtifactDescriptor]: ...
 
 
-def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure:
-    return OperationFailure(
-        type="operation.failure", request_id=request.request_id, error=error
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class OperationSpec:
-    contract: OperationContract
-    parse: Callable[[JsonValue], BaseModel]
-    invoke: Callable[
-        [SceneBackend, BaseModel, OperationRequest],
-        tuple[BaseModel, tuple[ArtifactDescriptor, ...]],
-    ]
-
-
-def argument_schema(validator: TypeAdapter[Any]) -> dict[str, Any]:
-    """Discriminated unions require their tag before branch defaults are applied."""
-    schema = validator.json_schema()
-
-    def visit(value: Any) -> None:
-        if isinstance(value, dict):
-            discriminator = value.get("discriminator")
-            if isinstance(discriminator, dict):
-                tag = discriminator.get("propertyName")
-                if isinstance(tag, str):
-                    required = value.setdefault("required", [])
-                    if tag not in required:
-                        required.append(tag)
-            for child in value.values():
-                visit(child)
-        elif isinstance(value, list):
-            for child in value:
-                visit(child)
-
-    visit(schema)
-    return schema
-
-
-def _operation[A: BaseModel, R: BaseModel](
-    name: str,
-    arguments: type[A] | TypeAdapter[A],
-    result_model: type[R] | TypeAdapter[R],
-    handler: Callable[
-        [SceneBackend, A, OperationRequest], R | tuple[R, ArtifactDescriptor | None]
-    ],
-    description: str,
-    *,
-    effect: Literal["read_only", "mutating", "transient", "lifecycle"],
-    execution: Literal["synchronous", "job_start", "job_status", "lifecycle"],
-    requires_interactive: bool = False,
-    tags: tuple[str, ...] = (),
-    input_artifacts: Literal["none", "required"] = "none",
-    output_artifacts: Literal["none", "optional", "required"] = "none",
-) -> OperationSpec:
-    validator = TypeAdapter(arguments) if isinstance(arguments, type) else arguments
-    result_validator = (
-        TypeAdapter(result_model) if isinstance(result_model, type) else result_model
-    )
-    contract = OperationContract(
-        name=name,
-        description=description,
-        category=name.split(".")[1],
-        tags=tags,
-        arguments_schema=argument_schema(validator),
-        result_schema=result_validator.json_schema(mode="serialization"),
-        effect=effect,
-        execution=execution,
-        requires_interactive=requires_interactive,
-        input_artifacts=input_artifacts,
-        output_artifacts=output_artifacts,
-    )
-
-    def invoke(
-        backend: SceneBackend, parsed: BaseModel, request: OperationRequest
-    ) -> tuple[BaseModel, tuple[ArtifactDescriptor, ...]]:
-        value = handler(backend, cast(A, parsed), request)
-        if isinstance(value, tuple):
-            result, artifact = value
-            artifacts = (artifact,) if artifact is not None else ()
-        else:
-            result, artifacts = value, ()
-        return result_validator.validate_python(result), artifacts
-
-    return OperationSpec(contract, validator.validate_python, invoke)
-
-
 _DECLARATIONS = (
     _operation(
         "blender.mesh.cleanup",
@@ -1052,19 +1011,15 @@ _DECLARATIONS = (
         AssemblyCreateArguments,
         AssemblyResult,
         lambda b, a, q: b.assembly_create(a),
-        "Create a mixed structural assembly from sparse loft/surface templates "
-        "and varied "
-        "families. Up to64 named mesh components,16 templates,32 families,131072 "
-        "vertices; "
-        "256KiB input. Paths place members by arc length; interpolate "
-        "scale/rotation and "
-        "feature strength, with named per-member exceptions and mirrored families. "
-        "Native hierarchy, resource IDs, construction regions and provenance persist. "
-        "No source mesh, explicit topology or scripting. Atomic create; inspect "
-        "compact "
-        "inventory and revise family/member rules with assembly.configure. Use "
-        "individual "
-        "loft/surface operations for single standalone forms.",
+        "Create mixed loft/surface/constructive-form families with stable identities. "
+        "Up to64 components,16 templates,32 families and256KiB intent. Default131072 "
+        "vertices; explicit max_vertices supports bounded detailed assemblies. "
+        "Paths place members by arc length. Morph corresponding shape handles through "
+        "related templates, then apply indexed exceptions and bilateral reflection. "
+        "Shape variation is distinct from scale/rotation; preserve discrete topology "
+        "settings for corresponding loft cages. Native volume forms may retessellate. "
+        "Atomic construction; inspect compact inventory and revise with "
+        "assembly.configure.",
         tags=(
             "modeling",
             "structural",
@@ -1089,7 +1044,7 @@ _DECLARATIONS = (
         "changed tessellation requires topology_policy=rebuild and no protected "
         "downstream "
         "data. Externally edited base meshes are protected. Atomic staged rollback. "
-        "Use members.shape for section/feature/opening/thickness changes; "
+        "Use members.shape for section/feature/opening/thickness/form-part changes; "
         "refresh_placements re-evaluates saved landmark/interface rules. "
         "Returns totals, all changed names and at most16 changed member rows; "
         "unchanged inventory is omitted.",
@@ -1121,7 +1076,9 @@ _DECLARATIONS = (
         "Atomically place/fit up to64 mesh components: between named landmarks/object "
         "points, align a local anchor/axis to a target frame, fit selected local "
         "dimensions, "
-        "or reflect a source transform across a plane. Math runs in Blender. "
+        "reflect a source transform, or align local origin/unit-axis points to four "
+        "measured datums (including mirrored/scaled orthogonal frames). Math runs "
+        "in Blender; no caller matrix or Euler conversion is needed. "
         "Between fits bounding end planes, not arbitrary curved centerline length; "
         "dimensions are local-axis extents, world scene units. Preserve geometry and "
         "resource IDs. refresh re-evaluates stored rules. Static constraints, not live "
@@ -2096,6 +2053,83 @@ _DECLARATIONS = (
         effect="read_only",
     ),
     _operation(
+        "blender.form.create",
+        FormCreateArguments,
+        FormJobStatus,
+        lambda b, a, q: b.form_create(a),
+        "Build bounded editable irregular forms from calibrated section "
+        "masks or orthographic silhouettes, existing typed loft/surface "
+        "intent and named local features. Smoothly fuse branches, cut "
+        "openings/recesses and blend interfaces using native volume "
+        "meshing. Silhouettes do not recover hidden concavities: use "
+        "section evidence and local refinement. Optional surface_fit aligns "
+        "local shape to complementary planar contours within a movement bound. "
+        "No explicit mesh payload; "
+        "inspect closeups and compare references before acceptance. "
+        "Regeneration changes connectivity; finish form before production "
+        "topology. Returns an incremental atomic job; inspect form.status until "
+        "completed before using geometry. Cancel leaves no partial batch.",
+        tags=("modeling", "organic", "reference", "form", "blending"),
+        execution="job_start",
+        effect="mutating",
+    ),
+    _operation(
+        "blender.form.configure",
+        FormConfigureArguments,
+        FormJobStatus,
+        lambda b, a, q: b.form_configure(a),
+        "Atomically replace/add/remove named constructive parts or change "
+        "sampling/reference fitting while preserving object identities. "
+        "Expected revision "
+        "required. Regeneration changes connectivity and rejects "
+        "downstream mesh edits, modifiers, groups, UVs, shape keys and "
+        "shared data. Use local features to refine visible reference "
+        "mismatches, then review and compare again. Returns an atomic incremental "
+        "job; inspect form.status until completed. Cancellation preserves "
+        "original forms.",
+        tags=("modeling", "organic", "reference", "form", "blending"),
+        execution="job_start",
+        effect="mutating",
+    ),
+    _operation(
+        "blender.form.status",
+        FormJobArguments,
+        FormJobStatus,
+        lambda b, a, q: b.form_status(a),
+        "Read incremental form job progress/result/error. Latest four jobs persist "
+        "until reload. One job at a time; only status/cancel/extension inspection "
+        "are available while preparing an atomic batch. Allow useful elapsed time "
+        "between checks; no partial geometry is committed.",
+        tags=("modeling", "form", "job", "inspection"),
+        execution="job_status",
+        effect="read_only",
+    ),
+    _operation(
+        "blender.form.cancel",
+        FormJobArguments,
+        FormJobStatus,
+        lambda b, a, q: b.form_cancel(a),
+        "Cancel an active form job at its next native step and discard uncommitted "
+        "meshes. Original forms remain intact; completed jobs cannot be rolled back "
+        "by cancellation.",
+        tags=("modeling", "form", "job"),
+        execution="synchronous",
+        effect="mutating",
+    ),
+    _operation(
+        "blender.form.inspect",
+        FormInspectArguments,
+        FormResult,
+        lambda b, a, q: b.form_inspect(a),
+        "Inspect compact form identity/revision, bounds, part handles, "
+        "sampling work and reference/mesh freshness. Optional full "
+        "semantic specification; no generated coordinates. Mesh integrity "
+        "does not establish visual reference fidelity.",
+        tags=("modeling", "organic", "reference", "form", "blending"),
+        execution="synchronous",
+        effect="read_only",
+    ),
+    _operation(
         "blender.loft.create",
         LoftCreateArguments,
         LoftResult,
@@ -2420,6 +2454,24 @@ _DECLARATIONS = (
         "partial progress. Selection independent.",
         effect="mutating",
         execution="synchronous",
+    ),
+    _operation(
+        "blender.reference.compare",
+        ReferenceCompareArguments,
+        ReferenceCompareResult,
+        lambda b, a, q: b.reference_compare(a),
+        "Compare evaluated meshes with registered foreground masks: "
+        "orthographic silhouettes or planar cross-sections. Return compact "
+        "overlap and bidirectional boundary deviations plus an optional "
+        "overlay artifact. Sampling uncertainty is explicit; "
+        "calibration/source error remains conditional. Perspective "
+        "photographs are qualitative evidence, never metric proof. Closed "
+        "surfaces required for section occupancy; actual selected "
+        "dependencies and ray/triangle work remain bounded.",
+        tags=("reference", "shape", "comparison", "quality", "silhouette"),
+        execution="synchronous",
+        effect="read_only",
+        output_artifacts="optional",
     ),
     _operation(
         "blender.reference.create",
@@ -3020,6 +3072,20 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.image.preview",
+        ImagePreviewArguments,
+        ImagePreviewResult,
+        lambda b, a, q: b.image_preview(a),
+        "Visually inspect up to16 loaded reference images in one bounded artifact. "
+        "Preserves source color interpretation, files, packing and calibration. "
+        "sRGB, linear Rec.709 and data images are supported; "
+        "row/column metadata identifies tiles.",
+        effect="read_only",
+        execution="synchronous",
+        output_artifacts="required",
+        tags=("reference", "image", "visual", "preview"),
+    ),
+    _operation(
         "blender.image.inspect",
         InspectArguments,
         ImageInspectResult,
@@ -3043,7 +3109,7 @@ _DECLARATIONS = (
         ImageSaveArguments,
         ImageSaveResult,
         lambda b, a, q: b.image_save(a),
-        "Write and optionally pack a named image, then return a bounded "
+        "Write and optionally pack a non-color data image, then return a bounded "
         "preview artifact from verified file pixels. Overwrite and output "
         "format are explicit.",
         effect="mutating",
@@ -3378,15 +3444,32 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.modifier.create_batch",
+        ModifierBatchCreateArguments,
+        ModifierBatchCreateResult,
+        lambda b, a, q: b.modifier_create_batch(a),
+        "Atomically add one typed modifier to each of up to64 mesh objects. "
+        "Reuse modifier.create settings for smoothing/polish, subdivision, "
+        "solidify and other supported native modifiers. Each object retains "
+        "its own settings; any failure removes every modifier added by this "
+        "batch. Prefer this for a shared finishing intent across components.",
+        tags=("modifier", "smooth", "polish", "batch", "modeling"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
         "blender.modifier.create",
         CREATE,
         ModifierSummary,
         lambda b, a, q: b.modifier_create(a),
-        "Corrective Smooth uses original coordinates before constructive modifiers, "
+        "Corrective Smooth uses original coordinates before constructive modifiers; "
+        "only_smooth instead fairs the evaluated surface without restoring detail. "
         "bounded iterations/factor/scale and optional native group mask; "
         "smoothing may lose volume and is not an authored corrective. "
         "Create a supported typed object-owned modifier. Type-specific "
-        "properties belong in settings; stack order is significant.",
+        "properties belong in settings; stack order is significant."
+        " For multiple objects use modifier.create_batch.",
+        tags=("modifier", "modeling"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -3486,7 +3569,8 @@ _DECLARATIONS = (
         ObjectSummary,
         lambda b, a, q: b.transform(a),
         "Patch object-local location/rotation/scale; omitted channels stay "
-        "unchanged. This does not edit authored mesh coordinates.",
+        "unchanged. This does not edit authored mesh coordinates."
+        " For measured dimensions/alignment across objects, use object_set.place.",
         effect="mutating",
         execution="synchronous",
     ),
@@ -3503,90 +3587,7 @@ _DECLARATIONS = (
         effect="read_only",
         execution="synchronous",
     ),
-    _operation(
-        "blender.render.image",
-        RenderArguments,
-        RenderJobStatus,
-        lambda b, a, q: b.render(a, q.request_id),
-        "For structural multiview QA, inspection={} renders a bounded auto-framed "
-        "Workbench contact sheet; per-view object lists add regional closeups. "
-        "No camera "
-        "or light setup needed, native state restored. Otherwise render in the "
-        "connected host "
-        "using its live scene/resources; no second "
-        "Blender process or project snapshot. Interactive hosts use native async "
-        "jobs. One active job; only render jobs and extension identity remain "
-        "available during work. Current scene camera/frame/engine "
-        "or temporary Cycles/diagnostic settings. PNG 8/16, EXR half/full float or "
-        "multilayer passes/AOVs; dimensions 64..16384 within explicit pixel/buffer/"
-        "artifact/time budgets. Sequences (max64 frames) return ZIP+manifest. "
-        "Optional wait_seconds 0..5 (default 5) returns inline image on success "
-        "or job ID for render.status. Deadline is checked at frame boundaries; "
-        "Cycles also uses native time_limit. A running frame drains before cleanup. "
-        "Jobs/results survive disconnect, not host/reload/file-open; "
-        "retain 16 job records/4 result files. Optional output persists an artifact "
-        "atomically to an explicit destination; temporary output is not saved "
-        "in the project. Temporary settings and frame are restored after completion. "
-        "show_result needs an interactive host and a still. Frame progress and "
-        "color/channel metadata are inspectable. Additional passes need multilayer; "
-        "AOV outputs are authored with shader nodes.",
-        tags=("render", "production", "exr", "sequence", "artifact"),
-        effect="mutating",
-        execution="job_start",
-        output_artifacts="optional",
-    ),
-    _operation(
-        "blender.render.status",
-        RenderStatusArguments,
-        RenderJobStatus,
-        lambda b, a, q: b.render_status(a),
-        "Compact render-job metadata only, never image bytes. Omit job_id to "
-        "recover the active or most recent job after a lost submit reply. Bounded "
-        "event wait 0..20s: return when revision differs from after_revision "
-        "or job terminates; omitted revision observes current state then waits. "
-        "Timeout returns unchanged status. Use 20s waits for long jobs. Running "
-        "means native render entered; no sample percentage is claimed. Latest "
-        "16 records retained until host/reload/file-open; result availability is "
-        "separate. "
-        "Unknown/evicted job: render_job_not_found; disconnected host has no "
-        "queryable jobs. Cancelling this request only stops waiting.",
-        tags=("render", "job", "progress"),
-        effect="read_only",
-        execution="job_status",
-    ),
-    _operation(
-        "blender.render.cancel",
-        RenderJobArguments,
-        RenderJobStatus,
-        lambda b, a, q: b.render_cancel(a),
-        "Request frame-boundary cancellation; returns promptly with cancel_requested. "
-        "A running native frame drains, remaining frames/output are discarded, "
-        "then state becomes cancelled after host restoration. No unsafe native-job "
-        "preemption, process signals or host termination. "
-        "Repeated or terminal cancel is idempotent and preserves terminal "
-        "state. Completion already committed wins; otherwise cancellation "
-        "discards output. Unknown job: render_job_not_found.",
-        tags=("render", "job", "cancellation"),
-        effect="transient",
-        execution="job_status",
-    ),
-    _operation(
-        "blender.render.result",
-        RenderJobArguments,
-        RenderJobStatus,
-        lambda b, a, q: b.render_result(a),
-        "Retrieve succeeded PNG/EXR/sequence ZIP through binary artifact transfer. "
-        "Only this operation and completed short submits deliver output bytes. "
-        "Core releases inline images; export/release retained_artifact_ids. "
-        "Retained source permits retries until evicted by four newer results "
-        "or host/reload/file-open shutdown. Metadata retains success after eviction, "
-        "with result_available=false. Unfinished/failed/cancelled/evicted "
-        "output: render_result_unavailable. Explicit saved output persists.",
-        tags=("render", "artifact", "production"),
-        effect="read_only",
-        execution="job_status",
-        output_artifacts="required",
-    ),
+    *_RENDER_DECLARATIONS,
     _operation(
         "blender.retopo.bridge_loops",
         RetopoBridgeArguments,
@@ -3784,12 +3785,16 @@ _DECLARATIONS = (
         SculptFilterArguments,
         SculptFilterResult,
         lambda b, a, q: b.sculpt_filter(a),
-        "Apply a bounded native sculpt filter with preserved context and "
-        "masks. Requires interactive View3D; failure after native mutation "
-        "can leave partial sculpt changes.",
+        "Apply a bounded sculpt filter. Native modes require interactive "
+        "View3D and may leave partial changes on failure. Fair mode works "
+        "in Object Mode without View3D: atomic local base-mesh fairing, "
+        "explicit displacement/work bounds, native masks, pinned boundaries "
+        "and sharp edges, thickness/contact checks. Apply existing modifiers "
+        "explicitly first. Scope with fairing.regions, a named vertex_group "
+        "or an existing local sculpt mask; protect_vertex_group pins features.",
         effect="mutating",
         execution="synchronous",
-        requires_interactive=True,
+        requires_interactive=False,
     ),
     _operation(
         "blender.sculpt.inspect",
@@ -3847,7 +3852,8 @@ _DECLARATIONS = (
         SculptStrokeArguments,
         SculptStrokeResult,
         lambda b, a, q: b.sculpt_stroke(a),
-        "Apply bounded native brush dabs at object-local surface locations "
+        "Apply bounded native brush dabs at object-local surface locations or "
+        "an image_path using an inspection tile's captured view projection "
         "with radius/pressure/symmetry. Requires interactive View3D and unit "
         "inherited scale; native failure can leave partial displacement.",
         effect="mutating",
@@ -4078,83 +4084,5 @@ def registration(
     )
 
 
-def _safe_text(value: str, limit: int) -> str:
-    return value.encode("utf-8", "backslashreplace").decode("utf-8")[:limit]
-
-
 def execute(backend: SceneBackend, request: OperationRequest) -> Response:
-    if not backend.operation_allowed(request.operation):
-        return failure(
-            request,
-            ProtocolError(
-                code="adapter_busy",
-                message=(
-                    "A native bake/dynamics job owns temporary scene resources; "
-                    "inspect its status first"
-                ),
-            ),
-        )
-    spec = REGISTRY.get(request.operation)
-    if spec is None:
-        return failure(
-            request,
-            ProtocolError(
-                code="operation_unsupported", message="Operation is not advertised"
-            ),
-        )
-    try:
-        arguments = spec.parse(request.arguments)
-    except ValidationError as exc:
-        details: list[JsonValue] = []
-        for item in exc.errors(include_context=False, include_url=False)[:8]:
-            received = item.get("input")
-            preview = (
-                str(received)[:120]
-                if isinstance(received, (str, int, float, bool)) or received is None
-                else f"{type(received).__name__} with {len(received)} items"
-                if isinstance(received, (list, dict))
-                else type(received).__name__
-            )
-            details.append(
-                {
-                    "field": _safe_text(".".join(map(str, item["loc"])), 500),
-                    "message": _safe_text(item["msg"], 500),
-                    "reason": item["type"],
-                    "received": _safe_text(preview, 120),
-                }
-            )
-        return failure(
-            request,
-            ProtocolError(
-                code="invalid_arguments",
-                message=(
-                    f"Invalid arguments for {request.operation} "
-                    f"({exc.error_count()} errors; up to 8 shown)"
-                ),
-                details=details,
-            ),
-        )
-    try:
-        if spec.contract.input_artifacts == "none" and request.artifacts:
-            raise OperationError(
-                "invalid_arguments", "This operation accepts no input artifacts"
-            )
-        result, artifacts = spec.invoke(backend, arguments, request)
-        return OperationSuccess(
-            type="operation.success",
-            request_id=request.request_id,
-            result=result.model_dump(mode="json"),
-            artifacts=artifacts,
-        )
-    except OperationError as exc:
-        logger.info("Operation %s failed: %s", request.operation, exc.error.code)
-        return failure(request, exc.error)
-    except Exception:
-        logger.exception("Unexpected failure executing %s", request.operation)
-        return failure(
-            request,
-            ProtocolError(
-                code="operation_failed",
-                message="Blender operation failed; see the application log",
-            ),
-        )
+    return dispatch(backend, request, REGISTRY)

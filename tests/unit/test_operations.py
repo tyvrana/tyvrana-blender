@@ -99,6 +99,16 @@ from tyvrana_blender.file_models import (
     FileSaveArguments,
     FileState,
 )
+from tyvrana_blender.form_models import (
+    FormConfigureArguments,
+    FormCreateArguments,
+    FormInspectArguments,
+    FormJobArguments,
+    FormJobStatus,
+    FormResult,
+    ReferenceCompareArguments,
+    ReferenceCompareResult,
+)
 from tyvrana_blender.geometry_qa_models import (
     GeometryInspectArguments,
     GeometryInspectResult,
@@ -124,6 +134,8 @@ from tyvrana_blender.image_models import (
     ImageCreateArguments,
     ImageFromArtifactArguments,
     ImageInspectResult,
+    ImagePreviewArguments,
+    ImagePreviewResult,
     ImageSummary,
 )
 from tyvrana_blender.instance_models import (
@@ -209,6 +221,8 @@ from tyvrana_blender.modifier_models import (
     MeshSurfaceBasis,
     ModifierApplyArguments,
     ModifierApplyResult,
+    ModifierBatchCreateArguments,
+    ModifierBatchCreateResult,
     ModifierConfigureArguments,
     ModifierCreateArguments,
     ModifierInspectArguments,
@@ -506,6 +520,26 @@ class Backend:
     def surface_inspect(
         self, arguments: SurfaceNetworkInspectArguments
     ) -> SurfaceResult:
+        raise NotImplementedError
+
+    def reference_compare(
+        self, arguments: ReferenceCompareArguments
+    ) -> tuple[ReferenceCompareResult, ArtifactDescriptor | None]:
+        raise NotImplementedError
+
+    def form_create(self, arguments: FormCreateArguments) -> FormJobStatus:
+        raise NotImplementedError
+
+    def form_configure(self, arguments: FormConfigureArguments) -> FormJobStatus:
+        raise NotImplementedError
+
+    def form_status(self, arguments: FormJobArguments) -> FormJobStatus:
+        raise NotImplementedError
+
+    def form_cancel(self, arguments: FormJobArguments) -> FormJobStatus:
+        raise NotImplementedError
+
+    def form_inspect(self, arguments: FormInspectArguments) -> FormResult:
         raise NotImplementedError
 
     def loft_create(self, arguments: LoftCreateArguments) -> LoftResult:
@@ -1265,6 +1299,11 @@ class Backend:
         self.calls.append("modifier_inspect")
         return ModifierInspectResult(object_name=arguments.object_name, modifiers=[])
 
+    def modifier_create_batch(
+        self, arguments: ModifierBatchCreateArguments
+    ) -> ModifierBatchCreateResult:
+        raise NotImplementedError
+
     def modifier_create(self, arguments: ModifierCreateArguments) -> ModifierSummary:
         self.calls.append("modifier_create")
         return ModifierSummary(
@@ -1486,6 +1525,11 @@ class Backend:
         raise NotImplementedError
 
     def bake_image(self, arguments: BakeImageArguments) -> BakeJobStatus:
+        raise NotImplementedError
+
+    def image_preview(
+        self, arguments: ImagePreviewArguments
+    ) -> tuple[ImagePreviewResult, ArtifactDescriptor]:
         raise NotImplementedError
 
     def image_save(

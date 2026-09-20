@@ -1,12 +1,14 @@
 """Native image empties and persistent datum points; no vision inference."""
 
 import math
+from contextlib import nullcontext
 from typing import Any, cast
 
 import bpy  # type: ignore[import-not-found]
 from mathutils import Matrix, Vector  # type: ignore[import-not-found]
 
 from .errors import OperationError
+from .image_buffers import decoded
 from .inspection import page
 from .raster import image_dimensions_supported
 from .reference_models import (
@@ -69,7 +71,28 @@ def xyz(value: Any) -> list[float]:
 
 
 def matrix(obj: Any) -> Any:
-    value = obj.matrix_world.copy()
+    # Excluded objects have no evaluated world matrix after loading a file.
+    # Their native transform channels remain authoritative for static reference
+    # frames. Compose ordinary parenting without changing display state.
+    def world(item: Any, seen: set[int]) -> Any:
+        key = item.as_pointer()
+        if key in seen or len(seen) >= 256:
+            fail("Reference transform hierarchy exceeds bounded acyclic scope")
+        seen.add(key)
+        if (
+            item.constraints
+            or item.animation_data
+            or (item.parent and item.parent_type != "OBJECT")
+        ):
+            if item.hide_viewport or item.hide_get() or not item.visible_get():
+                fail("Hidden animated/constrained reference frames require evaluation")
+            return item.matrix_world.copy()
+        value = item.matrix_basis.copy()
+        if item.parent:
+            value = world(item.parent, seen) @ item.matrix_parent_inverse @ value
+        return value
+
+    value = world(obj, set())
     for row in value:
         if any(not math.isfinite(v) or abs(v) > 1e12 for v in row):
             fail("Object transform exceeds finite measurement bounds")
@@ -157,6 +180,11 @@ def pixel_point(obj: Any, pixel: list[float]) -> Any:
 
 def reference_summary(obj: Any) -> ReferenceSummary:
     image = obj.data if obj.empty_display_type == "IMAGE" else None
+    with decoded(image) if image is not None else nullcontext():
+        return _reference_summary(obj, image)
+
+
+def _reference_summary(obj: Any, image: Any) -> ReferenceSummary:
     valid = image_valid(image)
     corners: list[list[float]] = []
     size = [0.0, 0.0, 0.0]
@@ -668,10 +696,12 @@ def calibrate(arguments: ReferenceCalibrateArguments) -> ReferenceCalibrateResul
     size = float(obj.empty_display_size) * factor
     if not 0.0001 <= size <= 1000:
         fail("Calibrated display size must remain in 0.0001..1000 Blender units")
-    old_size, old_location = obj.empty_display_size, obj.location.copy()
+    old_size, old_matrix = obj.empty_display_size, matrix(obj)
     try:
         obj.empty_display_size = size
-        obj.location += a - pixel_point(obj, arguments.a)
+        transform = matrix(obj)
+        transform.translation += a - pixel_point(obj, arguments.a)
+        obj.matrix_world = transform
         bpy.context.view_layer.update()
         anchor = pixel_point(obj, arguments.a)
         after = float((pixel_point(obj, arguments.b) - anchor).length) * factor_unit
@@ -692,6 +722,6 @@ def calibrate(arguments: ReferenceCalibrateArguments) -> ReferenceCalibrateResul
             anchor_world=xyz(anchor),
         )
     except BaseException:
-        obj.empty_display_size, obj.location = old_size, old_location
+        obj.empty_display_size, obj.matrix_world = old_size, old_matrix
         bpy.context.view_layer.update()
         raise

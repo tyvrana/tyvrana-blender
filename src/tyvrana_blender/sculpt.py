@@ -202,9 +202,15 @@ def execute(obj: Any, arguments: SculptFilterArguments) -> SculptFilterResult: .
 def execute(
     obj: Any, arguments: NativeArguments
 ) -> SculptStrokeResult | MaskStrokeResult | SculptMaskSummary | SculptFilterResult:
+    if isinstance(arguments, SculptFilterArguments) and arguments.type == "fair":
+        from .surface_fairing import execute as fair
+
+        return fair(obj, arguments)
     stroke_arguments = arguments if isinstance(arguments, StrokeArguments) else None
     requested_symmetry = stroke_arguments.symmetry if stroke_arguments else Symmetry()
     sample_count = len(stroke_arguments.samples) if stroke_arguments else 1
+    if isinstance(arguments, SculptStrokeArguments) and arguments.image_path:
+        sample_count = len(arguments.image_path.samples)
     work = (
         arguments.iterations * 4
         if isinstance(arguments, SculptFilterArguments)
@@ -349,6 +355,16 @@ def execute(
             mod.levels = level
         context.view_layer.update()
         tree, minimum, maximum, before_hash = surface(obj)
+        if isinstance(arguments, SculptStrokeArguments) and arguments.image_path:
+            from .image_stroke import samples
+
+            arguments = arguments.model_copy(
+                update={
+                    "samples": samples(obj, tree, arguments.image_path),
+                    "image_path": None,
+                }
+            )
+            stroke_arguments = arguments
         locations, normals, distances = [], [], []
         for i, sample in enumerate(
             stroke_arguments.samples if stroke_arguments else []
@@ -461,6 +477,10 @@ def execute(
             bpy.ops.object.mode_set(mode="OBJECT")  # Flush Multires displacement.
         window.scene = original_scene
         window.view_layer = original_layer
+        # Native sculpt updates coordinates in the temporary scene. Invalidate
+        # the original scene's cached normals/render batches before inspection.
+        obj.data.update()
+        obj.update_tag()
         context.view_layer.update()
         _, after_minimum, after_maximum, after_hash = surface(obj)
         if isinstance(arguments, (MaskClearArguments, MaskInvertArguments)):

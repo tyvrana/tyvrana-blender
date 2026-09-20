@@ -55,14 +55,14 @@ class WireframeTests(NativeCase):
         )
 
     def test_budget_rejection_leaves_no_copies(self) -> None:
+        self.obj.modifiers.new("Detailed", "SUBSURF").levels = 1
         before = tuple(
             len(x) for x in (bpy.data.objects, bpy.data.meshes, bpy.data.materials)
         )
-        options = models.WireframeRenderOptions(objects=[self.obj.name])
-        with patch.object(wireframe, "MAX_WIRE_EDGES", 1):
-            with self.assertRaises(operations.OperationError):
-                with wireframe.display(options):
-                    self.fail("Limit was not enforced")
+        options = models.WireframeRenderOptions(objects=[self.obj.name], max_edges=12)
+        with self.assertRaises(operations.OperationError):
+            with wireframe.display(options):
+                self.fail("Limit was not enforced")
         self.assertFalse(self.obj.hide_render)
         self.assertEqual(
             tuple(

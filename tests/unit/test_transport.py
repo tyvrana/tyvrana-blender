@@ -1,5 +1,7 @@
 import asyncio
 import os
+import subprocess
+import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
@@ -177,6 +179,27 @@ def test_backoff_is_bounded_and_resets_only_after_healthy_connection() -> None:
     backoff = Backoff()
     assert [backoff.next_delay() for _ in range(8)] == [0.25, 0.5, 1, 2, 4, 8, 8, 8]
     assert backoff.next_delay(healthy=True) == 0.25
+
+
+def test_idle_worker_does_not_load_authoring_dispatch() -> None:
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from pathlib import Path; "
+            "import tyvrana_blender.worker; "
+            "from tyvrana_protocol import OperationRequest; "
+            "from tyvrana_blender.render_jobs import RenderJobs; "
+            "request = OperationRequest(type='operation.request', request_id='probe', "
+            "operation='blender.render.image', arguments={'width': 0}); "
+            "response = RenderJobs(Path('.'), None).begin(request); "
+            "assert response.error.code == 'invalid_arguments'; "
+            "assert 'tyvrana_blender.operations' not in sys.modules; "
+            "assert 'bpy' not in sys.modules",
+        ],
+        check=True,
+        timeout=10,
+    )
 
 
 def test_stop_before_initial_timer_tick_is_clean() -> None:

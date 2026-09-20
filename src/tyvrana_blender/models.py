@@ -125,15 +125,44 @@ class DeleteResult(Model):
 
 
 class CyclesRenderOptions(Model):
-    device: Literal["cpu", "gpu"] = "cpu"
+    device: Literal["cpu", "gpu"] = Field(
+        default="cpu",
+        description="Explicit execution device. GPU requires an enabled available "
+        "device on the host's configured backend (see render.devices); unavailable "
+        "GPU fails, never silently falls back to CPU. Omit cycles entirely to use "
+        "scene settings.",
+    )
     samples: int = Field(default=16, ge=1, le=4096)
     denoise: bool = False
 
 
+class WireframeRegion(Model):
+    minimum: Vector
+    maximum: Vector
+
+    @model_validator(mode="after")
+    def positive_extent(self) -> Self:
+        if any(a >= b for a, b in zip(self.minimum, self.maximum, strict=True)):
+            raise ValueError("Wire region requires positive extent on every axis")
+        return self
+
+
 class WireframeRenderOptions(Model):
-    objects: list[ObjectName] = Field(min_length=1, max_length=16)
+    objects: list[ObjectName] = Field(
+        min_length=1,
+        max_length=32,
+        description="Selected meshes only; max_edges bounds their displayed region.",
+    )
     thickness: FiniteFloat = Field(default=0.001, ge=0.000001, le=1)
     surface_offset: FiniteFloat = Field(default=0, ge=-1, le=1)
+    max_edges: int = Field(default=8192, ge=12, le=65536)
+    region: WireframeRegion | None = Field(
+        default=None,
+        description="Optional world-space box. Keep evaluated faces whose bounds "
+        "intersect it before applying the edge budget. Source evaluation remains "
+        "bounded; original geometry is unchanged. Inspection focus supplies this "
+        "automatically for regional wire views.",
+    )
 
     @field_validator("objects")
     @classmethod
@@ -236,26 +265,71 @@ RenderPass = Literal[
 ]
 
 
+class InspectionFocus(Model):
+    minimum: Annotated[
+        list[Annotated[FiniteFloat, Field(ge=0, le=1)]],
+        Field(min_length=3, max_length=3),
+    ]
+    maximum: Annotated[
+        list[Annotated[FiniteFloat, Field(ge=0, le=1)]],
+        Field(min_length=3, max_length=3),
+    ]
+
+    @model_validator(mode="after")
+    def extent(self) -> Self:
+        if any(a >= b for a, b in zip(self.minimum, self.maximum, strict=True)):
+            raise ValueError("Focus bounds must have positive extent")
+        return self
+
+
 class InspectionView(Model):
     name: str = Field(min_length=1, max_length=64)
     orientation: Literal[
         "left", "right", "top", "bottom", "front", "rear", "oblique", "reverse_oblique"
     ]
-    objects: list[ObjectName] = Field(default_factory=list, max_length=128)
+    objects: list[ObjectName] = Field(default_factory=list, max_length=256)
+    projection: Literal["orthographic", "perspective"] = "orthographic"
+    wireframe: bool = False
+    wire_edge_limit: int = Field(default=8192, ge=12, le=65536)
+    focus: InspectionFocus | None = Field(
+        default=None,
+        description="Frame this normalized region of the selected world bounding box; "
+        "geometry remains intact and may extend outside the image. Wire views "
+        "filter temporary faces to this region before applying wire_edge_limit.",
+    )
+
+
+class InspectionPacket(Model):
+    directory: str = Field(min_length=1, max_length=4096)
+    overwrite: bool = False
+    preview_size: int = Field(default=384, ge=128, le=1024)
 
 
 class InspectionRenderOptions(Model):
-    objects: list[ObjectName] = Field(default_factory=list, max_length=128)
+    max_objects: int = Field(
+        default=128,
+        ge=1,
+        le=256,
+        description="Per-view selection budget; unrelated objects do not count.",
+    )
+    objects: list[ObjectName] = Field(default_factory=list, max_length=256)
     views: list[InspectionView] = Field(
         default_factory=lambda: [
             InspectionView(name=n, orientation=n)
             for n in ("left", "right", "top", "bottom", "front", "rear", "oblique")
         ],
         min_length=1,
-        max_length=12,
+        max_length=24,
     )
     columns: int = Field(default=3, ge=1, le=4)
     margin: FiniteFloat = Field(default=0.1, ge=0.01, le=1)
+    packet: InspectionPacket | None = Field(
+        default=None,
+        description="Persist native per-view PNGs, overview and checksummed manifest "
+        "in one directory; return only a compact preview artifact. Up to2048px per "
+        "view; set max_total_pixels for the full view count. Existing directories "
+        "must contain only an intact Tyvrana review packet to overwrite.",
+    )
 
     @model_validator(mode="after")
     def unique(self) -> Self:
@@ -264,7 +338,26 @@ class InspectionRenderOptions(Model):
         for names in [self.objects, *(v.objects for v in self.views)]:
             if len(set(names)) != len(names):
                 raise ValueError("Inspection object names must be unique")
+        if any(len(v.objects or self.objects) > self.max_objects for v in self.views):
+            raise ValueError("Inspection selection exceeds max_objects")
+        if any(v.wireframe and len(v.objects or self.objects) > 32 for v in self.views):
+            raise ValueError("Wireframe views support at most32 selected meshes")
         return self
+
+
+type ProjectionRow = Annotated[list[FiniteFloat], Field(min_length=4, max_length=4)]
+type ProjectionMatrix = Annotated[
+    list[ProjectionRow], Field(min_length=4, max_length=4)
+]
+
+
+class RenderViewProjection(Model):
+    """Captured image framing, independent of a persistent camera object."""
+
+    width: int = Field(ge=1, le=16384)
+    height: int = Field(ge=1, le=16384)
+    camera_world: ProjectionMatrix
+    projection_matrix: ProjectionMatrix
 
 
 class InspectionTile(Model):
@@ -273,6 +366,10 @@ class InspectionTile(Model):
     column: int
     row: int
     object_count: int
+    projection: str = "orthographic"
+    wireframe: bool = False
+    filename: str | None = None
+    view: RenderViewProjection
 
 
 class RenderArguments(Model):
@@ -332,15 +429,41 @@ class RenderArguments(Model):
                 raise ValueError(
                     "Inspection contact sheets cannot combine with other render modes"
                 )
+            edge_limit = 2048 if self.inspection.packet else 1024
             if (
                 self.format != "png"
                 or self.bit_depth != 8
-                or max(self.width, self.height) > 1024
+                or max(self.width, self.height) > edge_limit
             ):
-                raise ValueError("Inspection tiles require PNG8 and dimensions64..1024")
+                raise ValueError(
+                    f"Inspection requires PNG8 and dimensions64..{edge_limit}"
+                )
             columns = min(self.inspection.columns, len(self.inspection.views))
             rows = (len(self.inspection.views) + columns - 1) // columns
-            pixels *= columns * rows
+            if self.inspection.packet:
+                scale = min(
+                    1,
+                    self.inspection.packet.preview_size / max(self.width, self.height),
+                )
+                preview = (
+                    max(1, round(self.width * scale))
+                    * max(1, round(self.height * scale))
+                    * columns
+                    * rows
+                )
+                total_pixels = pixels * len(self.inspection.views) + preview
+                if total_pixels > self.budget.max_total_pixels:
+                    raise ValueError(
+                        f"Review packet requires {total_pixels} total pixels "
+                        f"including its overview; max_total_pixels="
+                        f"{self.budget.max_total_pixels}. Set an explicit bounded "
+                        "view budget"
+                    )
+                if (pixels + preview) * 16 > self.budget.max_buffer_bytes:
+                    raise ValueError("Review packet buffers exceed max_buffer_bytes")
+                pixels = max(pixels, preview)
+            else:
+                pixels *= columns * rows
         if (
             pixels > self.budget.max_pixels
             or pixels * len(self.frames or [0]) > self.budget.max_total_pixels
@@ -401,6 +524,13 @@ class RenderColorMetadata(Model):
     output_encoding: Literal["display_referred", "scene_linear"]
 
 
+class RenderDeviceMetadata(Model):
+    requested: Literal["scene", "cpu", "gpu"]
+    effective: Literal["cpu", "gpu"]
+    compute_backend: str | None = None
+    enabled_devices: list[str] = Field(default_factory=list, max_length=128)
+
+
 class RenderResult(Model):
     width: int
     height: int
@@ -409,4 +539,6 @@ class RenderResult(Model):
     color_mode: Literal["RGB", "RGBA"] = "RGBA"
     color_management: RenderColorMetadata | None = None
     output_channels: list[str] = Field(default_factory=list, max_length=256)
-    inspection_tiles: list[InspectionTile] = Field(default_factory=list, max_length=12)
+    inspection_tiles: list[InspectionTile] = Field(default_factory=list, max_length=24)
+    device: RenderDeviceMetadata | None = None
+    review_directory: str | None = None

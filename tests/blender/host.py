@@ -27,6 +27,9 @@ if os.environ.get("TYVRANA_TEST_CPU_RENDER") == "1":
     scene.cycles.device = "CPU"
     scene.cycles.samples = 16
     scene.cycles.use_denoising = False
+if os.environ.get("TYVRANA_TEST_VISUAL") == "1":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    importlib.import_module("tests.blender.visual_scene").prepare_scene()
 if os.environ.get("TYVRANA_TEST_RENDER") == "1":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     importlib.import_module("tests.blender.scene").prepare_scene()

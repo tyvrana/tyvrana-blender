@@ -2,13 +2,12 @@
 
 import colorsys
 import math
-import struct
-import zlib
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
 from typing import Any
 
+from .raster import png_rgb
 from .uv_models import UVLayoutResult, UVMetricSummary
 
 type Point = tuple[float, float]
@@ -571,20 +570,4 @@ def png_layout(
         for i, a in enumerate(pts):
             line(a, pts[(i + 1) % 3], (205, 216, 224))
 
-    def chunk(kind: bytes, data: bytes) -> bytes:
-        return (
-            struct.pack("!I", len(data))
-            + kind
-            + data
-            + struct.pack("!I", zlib.crc32(kind + data))
-        )
-
-    raw = b"".join(
-        b"\0" + pixels[y * size * 3 : (y + 1) * size * 3] for y in range(size)
-    )
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", struct.pack("!2I5B", size, size, 8, 2, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(raw))
-        + chunk(b"IEND", b"")
-    )
+    return png_rgb(size, size, pixels)

@@ -94,3 +94,30 @@ class ImageFromArtifactArguments(Model):
         if value is None:
             raise ValueError("Omit an optional property; null is invalid")
         return value
+
+
+class ImagePreviewArguments(Model):
+    names: list[ObjectName] = Field(min_length=1, max_length=16)
+    tile_size: int = Field(default=512, ge=128, le=1024)
+    columns: int = Field(default=3, ge=1, le=4)
+
+    @model_validator(mode="after")
+    def unique(self) -> Self:
+        if len(set(self.names)) != len(self.names):
+            raise ValueError("Preview image names must be unique")
+        return self
+
+
+class ImagePreviewTile(Model):
+    name: str
+    width: int
+    height: int
+    color_space: str
+    row: int
+    column: int
+
+
+class ImagePreviewResult(Model):
+    width: int
+    height: int
+    tiles: list[ImagePreviewTile]

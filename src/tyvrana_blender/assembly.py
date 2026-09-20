@@ -9,7 +9,7 @@ import bpy  # type: ignore[import-not-found]
 from mathutils import Euler, Matrix, Vector  # type: ignore[import-not-found]
 from pydantic import ValidationError
 
-from . import loft, organization, placement, surfaces
+from . import form_geometry, forms, loft, organization, placement, surfaces
 from .assembly_models import (
     AssemblyComponent,
     AssemblyConfigureArguments,
@@ -23,6 +23,7 @@ from .assembly_models import (
 )
 from .bindings import RESOURCE_KEY
 from .errors import OperationError, constraint_error
+from .form_models import FormEdit, FormSpec
 from .loft_models import LoftRevision, LoftSpec
 from .surface_models import SurfaceRevision, SurfaceSpec
 
@@ -41,8 +42,34 @@ def digest(value: Any) -> str:
 
 
 def shape(
-    spec: LoftSpec | SurfaceSpec, override: ShapeOverride, factor: float
-) -> LoftSpec | SurfaceSpec:
+    spec: LoftSpec | SurfaceSpec | FormSpec, override: ShapeOverride, factor: float
+) -> LoftSpec | SurfaceSpec | FormSpec:
+    if isinstance(spec, FormSpec):
+        if (
+            override.sections
+            or override.features
+            or override.nodes
+            or override.openings
+            or override.thickness
+            or override.ends
+            or factor != 1
+        ):
+            fail(
+                "Form families use form_parts and morph templates "
+                "for local shape variation"
+            )
+        return (
+            forms.revised(
+                spec,
+                FormEdit(
+                    name=spec.name, expected_revision=1, parts=override.form_parts
+                ),
+            )
+            if override.form_parts
+            else spec
+        )
+    if override.form_parts:
+        fail("Form parts require a form template")
     data = spec.model_dump()
     features = {f["id"]: f for f in data["features"]}
     for feature in features.values():
@@ -77,6 +104,55 @@ def shape(
             ),
         )
     return surface_spec
+
+
+def interpolate(a: Any, b: Any, t: float, path: str = "") -> Any:
+    """Interpolate typed shape values with explicit topology and correspondence."""
+    if isinstance(a, dict) and isinstance(b, dict) and a.keys() == b.keys():
+        return {
+            key: a[key]
+            if key == "name"
+            else interpolate(a[key], b[key], t, path + "." + key)
+            for key in a
+        }
+    if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+        return [interpolate(x, y, t, path) for x, y in zip(a, b, strict=True)]
+    if (
+        isinstance(a, (int, float))
+        and isinstance(b, (int, float))
+        and not isinstance(a, bool)
+        and not isinstance(b, bool)
+        and (isinstance(a, float) or isinstance(b, float))
+    ):
+        return a * (1 - t) + b * t
+    if a != b:
+        fail(f"Morph templates require matching discrete values and handles at {path}")
+    return a
+
+
+def morphed(templates: dict[str, Any], family: AssemblyFamily, t: float) -> Any:
+    assert family.template is not None
+    base = templates[family.template].spec
+    keys = [(m.position, templates[m.template].spec) for m in family.morphs]
+    if not keys:
+        return base
+    if keys[0][0] > 0:
+        keys.insert(0, (0, base))
+    for _, other in keys:
+        if type(other) is not type(base):
+            fail("Family morphs require one construction kind")
+        interpolate(base.model_dump(), other.model_dump(), 0)
+    if t <= keys[0][0]:
+        return keys[0][1]
+    if t >= keys[-1][0]:
+        return keys[-1][1]
+    for (a, first), (b, second) in zip(keys, keys[1:], strict=False):
+        if a <= t <= b:
+            data = interpolate(
+                first.model_dump(), second.model_dump(), (t - a) / (b - a)
+            )
+            return type(base).model_validate(data)
+    raise AssertionError("Unreachable morph interval")
 
 
 def sample_path(points: list[list[float]], fraction: float) -> tuple[Any, Any]:
@@ -145,7 +221,7 @@ def expand(spec: AssemblySpec) -> list[dict[str, Any]]:
                     transform = transform @ Matrix.Diagonal((*override.scale, 1.0))
             else:
                 assert family.template is not None
-                base = templates[family.template].spec
+                base = morphed(templates, family, t)
                 location, direction = sample_path(family.path, t)
                 location += Vector(override.offset)
                 scale = override.scale or [
@@ -206,7 +282,10 @@ def expand(spec: AssemblySpec) -> list[dict[str, Any]]:
     return [output[(f.id, i)] for f in spec.families for i in range(f.count)]
 
 
-def build(spec: LoftSpec | SurfaceSpec) -> tuple[Any, Any, Any]:
+def build(spec: LoftSpec | SurfaceSpec | FormSpec) -> tuple[Any, Any, Any]:
+    if isinstance(spec, FormSpec):
+        mesh, stats = form_geometry.build(spec)
+        return mesh, None, stats
     if isinstance(spec, SurfaceSpec):
         return surfaces.build(spec)
     points, faces = loft.geometry(spec)
@@ -228,7 +307,9 @@ def set_geometry_state(
     obj: Any, item: dict[str, Any], previous: dict[str, Any] | None = None
 ) -> None:
     spec = item["spec"]
-    if isinstance(spec, SurfaceSpec):
+    if isinstance(spec, FormSpec):
+        obj[forms.KEY] = forms.state(spec, obj.data, item["stats"], previous)
+    elif isinstance(spec, SurfaceSpec):
         obj[surfaces.KEY] = surfaces.state(
             spec,
             obj.data,
@@ -251,7 +332,7 @@ def set_geometry_state(
 def content(obj: Any) -> str:
     return (
         surfaces.content_hash(obj.data)
-        if surfaces.KEY in obj
+        if surfaces.KEY in obj or forms.KEY in obj
         else loft.signature(obj.data)
     )
 
@@ -297,7 +378,11 @@ def record(
                     index=i["index"],
                     signature=content(o),
                     spec_hash=digest(i["spec"].model_dump()),
-                    kind="surface" if isinstance(i["spec"], SurfaceSpec) else "loft",
+                    kind="form"
+                    if isinstance(i["spec"], FormSpec)
+                    else "surface"
+                    if isinstance(i["spec"], SurfaceSpec)
+                    else "loft",
                     mirrored_from=i["mirrored_from"],
                 )
                 for i, o in zip(items, objects, strict=True)
@@ -316,8 +401,10 @@ def inspect(
     rows = []
     valid = True
     for record, obj in zip(meta["members"], objects, strict=True):
-        managed = surfaces.KEY in obj or loft.KEY in obj
+        managed = surfaces.KEY in obj or loft.KEY in obj or forms.KEY in obj
         current = managed and content(obj) == record["signature"]
+        if forms.KEY in obj:
+            current = current and forms.summary(obj).valid
         if placement.KEY in obj:
             current = current and placement.summary(obj).valid
         valid = valid and current
@@ -326,13 +413,23 @@ def inspect(
         if args.families and record["family"] not in args.families:
             continue
         geometry = (
-            json.loads(obj[surfaces.KEY if surfaces.KEY in obj else loft.KEY])
+            json.loads(
+                obj[
+                    forms.KEY
+                    if forms.KEY in obj
+                    else surfaces.KEY
+                    if surfaces.KEY in obj
+                    else loft.KEY
+                ]
+            )
             if managed
             else None
         )
         regions = (
             (
-                list(geometry["regions"])
+                [p["id"] for p in geometry["spec"]["parts"]]
+                if forms.KEY in obj
+                else list(geometry["regions"])
                 if surfaces.KEY in obj
                 else [s["id"] for s in geometry["spec"]["sections"] if s["id"]]
                 + [f["id"] for f in geometry["spec"]["features"]]
@@ -382,8 +479,21 @@ def inspect(
     )
 
 
-def prepare(items: list[dict[str, Any]], old: dict[str, Any] | None = None) -> None:
+def prepare(
+    items: list[dict[str, Any]],
+    old: dict[str, Any] | None = None,
+    maximum: int = 131072,
+) -> None:
     total = 0
+    if (
+        sum(
+            i["spec"].max_voxels * len(i["spec"].parts)
+            for i in items
+            if isinstance(i["spec"], FormSpec)
+        )
+        > 268435456
+    ):
+        fail("Assembly exceeds268435456 form voxel-part evaluations")
     for item in items:
         previous = old.get(item["name"]) if old else None
         item["changed"] = (
@@ -408,8 +518,11 @@ def prepare(items: list[dict[str, Any]], old: dict[str, Any] | None = None) -> N
             total += len(mesh.vertices)
         else:
             total += len(bpy.data.objects[item["name"]].data.vertices)
-        if total > 131072:
-            fail("Assembly exceeds131072 generated vertices", "assembly_limit_exceeded")
+        if total > maximum:
+            fail(
+                f"Assembly exceeds{maximum} generated vertices",
+                "assembly_limit_exceeded",
+            )
 
 
 def discard(items: list[dict[str, Any]]) -> None:
@@ -461,7 +574,7 @@ def create(args: AssemblyCreateArguments) -> AssemblyResult:
         organization.named_available(name, bpy.data.objects)
     made = []
     try:
-        prepare(items)
+        prepare(items, maximum=spec.max_vertices)
         root = bpy.data.objects.new(spec.name, None)
         made.append(root)
         root[RESOURCE_KEY] = uuid.uuid4().hex
@@ -498,6 +611,8 @@ def create(args: AssemblyCreateArguments) -> AssemblyResult:
 
 def revision_spec(old: AssemblySpec, args: AssemblyConfigureArguments) -> AssemblySpec:
     data = old.model_dump(exclude_none=True)
+    if args.max_vertices is not None:
+        data["max_vertices"] = args.max_vertices
     for field in ("templates", "families"):
         existing = {v["id"]: v for v in data[field]}
         for value in getattr(args, field):
@@ -586,7 +701,9 @@ def configure(args: AssemblyConfigureArguments) -> AssemblyResult:
     raw = root[KEY]
     changed = []
     try:
-        prepare(items, {r["name"]: r for r in meta["members"]})
+        prepare(
+            items, {r["name"]: r for r in meta["members"]}, maximum=spec.max_vertices
+        )
         for item, obj in zip(items, objects, strict=True):
             if not item["changed"]:
                 continue
@@ -621,7 +738,13 @@ def configure(args: AssemblyConfigureArguments) -> AssemblyResult:
                 ):
                     fail("Topology rebuild would discard downstream data")
         for item, obj in zip(items, objects, strict=True):
-            key = surfaces.KEY if surfaces.KEY in obj else loft.KEY
+            key = (
+                forms.KEY
+                if forms.KEY in obj
+                else surfaces.KEY
+                if surfaces.KEY in obj
+                else loft.KEY
+            )
             backup = (
                 obj.data.copy()
                 if item["changed"] and not item["topology_changed"]
@@ -686,7 +809,7 @@ def configure(args: AssemblyConfigureArguments) -> AssemblyResult:
                     a.use_smooth = b.use_smooth
                 old.update()
                 bpy.data.meshes.remove(backup)
-            for key in (loft.KEY, surfaces.KEY, placement.KEY):
+            for key in (loft.KEY, surfaces.KEY, forms.KEY, placement.KEY):
                 if key in props:
                     obj[key] = props[key]
                 elif key in obj:

@@ -139,10 +139,8 @@ def graph(source: Any, target: Any | None = None) -> Any:
         raise OperationError(
             "invalid_context", "Retopology requires Object Mode outside rendering"
         )
-    roots = list(bpy.context.view_layer.objects)
-    if len(roots) > 256:
-        raise OperationError("retopo_geometry_limit", "View layer exceeds 256 objects")
-    for obj in [source, *([target] if target is not None else [])]:
+    roots = [source, *([target] if target is not None else [])]
+    for obj in roots:
         if obj.name not in bpy.context.view_layer.objects or obj.data.is_editmode:
             raise OperationError(
                 "invalid_context",
@@ -189,9 +187,10 @@ def graph(source: Any, target: Any | None = None) -> Any:
         raise OperationError(
             "retopo_dependency_invalid", "The source must not depend on the target"
         )
+    # Bound the requested evaluated objects and their actual dependencies. Unrelated
+    # visible objects are not diagnostic inputs; counting them defeats regional QA.
     for obj in roots:
-        if obj.visible_get() or obj in {source, target}:
-            visit(obj)
+        visit(obj)
     return bpy.context.evaluated_depsgraph_get()
 
 

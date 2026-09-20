@@ -125,6 +125,16 @@ from .file_models import (
     FileSaveArguments,
     FileState,
 )
+from .form_models import (
+    FormConfigureArguments,
+    FormCreateArguments,
+    FormInspectArguments,
+    FormJobArguments,
+    FormJobStatus,
+    FormResult,
+    ReferenceCompareArguments,
+    ReferenceCompareResult,
+)
 from .geometry_qa_models import GeometryInspectArguments, GeometryInspectResult
 from .growth_layers_models import (
     LayerCache,
@@ -148,6 +158,8 @@ from .image_models import (
     ImageCreateArguments,
     ImageFromArtifactArguments,
     ImageInspectResult,
+    ImagePreviewArguments,
+    ImagePreviewResult,
     ImageSummary,
 )
 from .incoming import input_path
@@ -234,6 +246,8 @@ from .modifier_models import (
     EvaluatedMeshSummary,
     ModifierApplyArguments,
     ModifierApplyResult,
+    ModifierBatchCreateArguments,
+    ModifierBatchCreateResult,
     ModifierConfigureArguments,
     ModifierCreateArguments,
     ModifierInspectArguments,
@@ -770,27 +784,32 @@ def material_index_snapshot(data: Any) -> list[tuple[Any, str, int]]:
 
 def image_summary(image: Any) -> ImageSummary:
     main_thread()
-    return ImageSummary(
-        name=str(image.name),
-        source=str(image.source).lower(),
-        width=int(image.size[0]),
-        height=int(image.size[1]),
-        channels=int(image.channels),
-        has_alpha=image.depth // (32 if image.is_float else 8) in {2, 4},
-        is_float=bool(image.is_float),
-        color_space=(
-            None if image.source == "VIEWER" else str(image.colorspace_settings.name)
-        ),
-        alpha_mode=next(
-            key for key, value in ALPHA_MODES.items() if value == image.alpha_mode
-        ),
-        packed=bool(image.packed_files),
-        users=int(image.users),
-        dirty=bool(image.is_dirty),
-        generated_type=image.generated_type.lower()
-        if image.source == "GENERATED"
-        else None,
-    )
+    from .image_buffers import decoded
+
+    with decoded(image):
+        return ImageSummary(
+            name=str(image.name),
+            source=str(image.source).lower(),
+            width=int(image.size[0]),
+            height=int(image.size[1]),
+            channels=int(image.channels),
+            has_alpha=image.depth // (32 if image.is_float else 8) in {2, 4},
+            is_float=bool(image.is_float),
+            color_space=(
+                None
+                if image.source == "VIEWER"
+                else str(image.colorspace_settings.name)
+            ),
+            alpha_mode=next(
+                key for key, value in ALPHA_MODES.items() if value == image.alpha_mode
+            ),
+            packed=bool(image.packed_files),
+            users=int(image.users),
+            dirty=bool(image.is_dirty),
+            generated_type=image.generated_type.lower()
+            if image.source == "GENERATED"
+            else None,
+        )
 
 
 def find_image(name: str) -> Any:
@@ -999,6 +1018,38 @@ class BlenderBackend:
         from . import surfaces
 
         return surfaces.inspect(arguments)
+
+    def reference_compare(
+        self, arguments: ReferenceCompareArguments
+    ) -> tuple[ReferenceCompareResult, ArtifactDescriptor | None]:
+        from . import reference_compare
+
+        return reference_compare.compare(arguments, self.spool)
+
+    def form_create(self, arguments: FormCreateArguments) -> FormJobStatus:
+        from . import form_jobs
+
+        return form_jobs.start(arguments)
+
+    def form_configure(self, arguments: FormConfigureArguments) -> FormJobStatus:
+        from . import form_jobs
+
+        return form_jobs.start(arguments)
+
+    def form_status(self, arguments: FormJobArguments) -> FormJobStatus:
+        from . import form_jobs
+
+        return form_jobs.status(arguments.job_id)
+
+    def form_cancel(self, arguments: FormJobArguments) -> FormJobStatus:
+        from . import form_jobs
+
+        return form_jobs.cancel(arguments.job_id)
+
+    def form_inspect(self, arguments: FormInspectArguments) -> FormResult:
+        from . import forms
+
+        return forms.inspect(arguments)
 
     def loft_create(self, arguments: LoftCreateArguments) -> LoftResult:
         from . import loft
@@ -1456,6 +1507,12 @@ class BlenderBackend:
         main_thread()
         return modifiers.inspect(modifiers.object_mesh(arguments.object_name))
 
+    def modifier_create_batch(
+        self, arguments: ModifierBatchCreateArguments
+    ) -> ModifierBatchCreateResult:
+        main_thread()
+        return modifiers.create_batch(arguments)
+
     def modifier_create(self, arguments: ModifierCreateArguments) -> ModifierSummary:
         main_thread()
         return modifiers.create(modifiers.object_mesh(arguments.object_name), arguments)
@@ -1775,7 +1832,14 @@ class BlenderBackend:
         return mesh.edit(uv.mesh_object(arguments.object_name), arguments)
 
     def operation_allowed(self, operation: str) -> bool:
-        from . import bake_jobs, growth_dynamics, render_host
+        from . import bake_jobs, form_jobs, growth_dynamics, render_host
+
+        if form_jobs.busy():
+            return operation in {
+                "blender.form.status",
+                "blender.form.cancel",
+                "blender.extension.inspect",
+            }
 
         if render_host.busy():
             return operation == "blender.extension.inspect"
@@ -1807,6 +1871,18 @@ class BlenderBackend:
         from . import bake_jobs
 
         return bake_jobs.start(arguments)
+
+    def image_preview(
+        self, arguments: ImagePreviewArguments
+    ) -> tuple[ImagePreviewResult, ArtifactDescriptor]:
+        main_thread()
+        from . import image_preview
+
+        if self.spool is None:
+            raise OperationError(
+                "invalid_context", "Image artifact storage is unavailable"
+            )
+        return image_preview.preview(arguments, self.spool)
 
     def image_save(
         self, arguments: ImageSaveArguments
@@ -2946,8 +3022,9 @@ def preferences_config() -> ConnectionConfig:
 def stop() -> None:
     global _runtime
     main_thread()
-    from . import growth_dynamics, render_host
+    from . import form_jobs, growth_dynamics, render_host
 
+    form_jobs.shutdown()
     render_host.shutdown()
     growth_dynamics.shutdown()
     if _runtime is not None:
@@ -2975,8 +3052,9 @@ def pump() -> float | None:
             restart()
         if _runtime is not None:
             _runtime.tick()
-            from . import growth_dynamics
+            from . import form_jobs, growth_dynamics
 
+            form_jobs.tick()
             growth_dynamics.tick()
             _status = _runtime.status
     except Exception:

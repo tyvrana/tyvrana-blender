@@ -106,6 +106,15 @@ def prepare(
             "render_engine_unavailable",
             "Host rendering supports built-in Cycles, Eevee and Workbench",
         )
+    device = None
+    if engine == "CYCLES":
+        import _cycles  # type: ignore[import-not-found]
+
+        from .render_devices import requested_device
+
+        device = requested_device(
+            bpy.context, arguments.cycles, _cycles.available_devices
+        )
     directory = spool.root / "jobs" / identifier
     directory.mkdir(parents=True, exist_ok=True)
     write(directory, "config.json", {"destination": destination})
@@ -131,6 +140,7 @@ def prepare(
         host_background=bpy.app.background,
         scene_name=scene.name,
         document_filepath=bpy.data.filepath or None,
+        device=device,
     )
 
 

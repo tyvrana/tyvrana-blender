@@ -2213,9 +2213,10 @@ public access to Multires masks. The adapter does not approximate those grids or
 alter hidden state to simulate a bridge. Broad automasking and sculpt visibility
 controls remain deferred.
 
-## Native sculpt filters
+## Sculpt filters
 
-`blender.sculpt.filter` executes Blender's native Sculpt Mesh Filter:
+`blender.sculpt.filter` supports native Sculpt Mesh Filter modes and atomic local
+base-mesh fairing. The native modes use Blender's Sculpt Mesh Filter:
 
 ```json
 {
@@ -2264,6 +2265,62 @@ strokes applies: a post-start failure reports `sculpt_failed` with
 Sphere, sharpen, random, detail enhancement, displacement erasure and Face Set
 boundary relaxation are not exposed in this layer. Dyntopo and production
 retopology remain separate workflows. Explicit voxel remeshing is documented below.
+
+### Local surface fairing
+
+Use the same `blender.sculpt.filter` operation with `type: "fair"` for a bounded
+local finish on opening rims, socket lips, recesses and junctions:
+
+```json
+{
+  "object_name": "Socket",
+  "type": "fair",
+  "strength": 1.0,
+  "iterations": 30,
+  "fairing": {
+    "vertex_group": "Rim",
+    "protect_vertex_group": "Crest",
+    "max_distance": 0.01
+  }
+}
+```
+
+This mode works in Object Mode without View3D. It requires an editable,
+unanimated base mesh with unit scale; apply existing modifiers explicitly first.
+Choose a named vertex group, up to eight existing rest-frame `regions`, or omit
+both to use a native sculpt mask containing fully protected points. Native mask
+weights always reduce influence. A protected group, hidden geometry, open mesh
+boundaries, sharp/creased edges and the selection boundary remain fixed. A
+three-ring smooth falloff avoids a hard selection seam (`boundary_rings`: 1–8).
+
+Fixed inverse-edge-length Taubin passes regularize local sampling while
+compensating shrinkage. Strength is positive and at most one; iterations are
+1–40. `max_distance` caps every point's total movement in object units, hence
+the change in any corresponding point-pair distance is at most twice this cap.
+Choose it below the allowable opening-width and feature displacement error.
+No target reconstruction, hole filling, remeshing or vertex-coordinate payload
+is involved. Protected features must be represented by masks, groups or marked
+sharp/creased edges; the filter does not infer artistic intent from curvature.
+
+The candidate uses the same authored topology and is rejected on triangle
+inversion/degeneracy, nonincident triangle contact, lost opposite-wall support
+or excessive thinning at corresponding moved vertices. Opposing face orientation
+and side membership are fixed from the source mesh. Spatial distance and relative
+motion bounds certify unchanged opposing branches; uncertain anchors use exact
+nearest distances against those same faces in the candidate. The reported minimum
+ratio is a conservative lower bound. The worst sample is independently checked
+with native spatial queries. `max_thinning` defaults to 0.1 and cannot
+exceed it. These are local samples, not an exact medial-axis thickness certificate;
+inspect narrow features and reference views.
+The operation bounds points (262144), edge/pass work (64000000 maximum;
+16000000 default), and exact triangle tests (2000000 maximum; 200000 default).
+Insufficient budgets fail without publishing a mesh. The `fairing` result adds
+affected/pinned counts, displacement, thickness coverage/ratio and triangle tests.
+
+All checks and result validation precede publication of a copied mesh. Failure
+retains the original mesh; shared meshes are isolated on success. The native
+filter modes above retain their documented native mutation behavior. A successful
+fairing call is not proof of reference fidelity: inspect before/after close views.
 
 ## Voxel-remesh blockout
 
@@ -3919,3 +3976,7 @@ membership in the native file. All construction/revision batches prepare and che
 meshes first, then commit with rollback. Errors distinguish invalid contours,
 openings, junctions, features, degeneracy, self-intersection, limits, unknown
 handles, stale revisions/geometry and required topology changes.
+
+See [reference-driven constructive forms](docs/constructive_forms.md) for calibrated contour/section
+authoring, smooth structural fusion, family shape interpolation, reference comparison
+and native review packets.

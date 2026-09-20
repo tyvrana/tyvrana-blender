@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from tyvrana_protocol import OperationFailure, OperationRequest, OperationSuccess
 
 from tyvrana_blender.operations import OPERATIONS, execute
@@ -14,6 +15,56 @@ from tyvrana_blender.sculpt_models import (
 )
 
 from .test_operations import Backend
+
+
+def image_path() -> dict[str, Any]:
+    identity = [[float(i == j) for j in range(4)] for i in range(4)]
+    return {
+        "view": {
+            "width": 640,
+            "height": 480,
+            "camera_world": identity,
+            "projection_matrix": identity,
+        },
+        "samples": [{"u": 0.5, "v": 0.5}],
+    }
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.1, True, "0.5", float("nan")])
+def test_image_stroke_rejects_invalid_image_coordinates(bad: Any) -> None:
+    path = image_path()
+    path["samples"][0]["u"] = bad
+    with pytest.raises(ValidationError):
+        SculptStrokeArguments.model_validate(
+            {
+                "object_name": "Surface",
+                "brush": "draw",
+                "radius": 0.1,
+                "strength": 0.5,
+                "image_path": path,
+            }
+        )
+
+
+def test_image_stroke_exclusive_bounded_target_and_motion() -> None:
+    data: dict[str, Any] = {
+        "object_name": "Surface",
+        "brush": "draw",
+        "radius": 0.1,
+        "strength": 0.5,
+        "image_path": image_path(),
+    }
+    assert not SculptStrokeArguments.model_validate(data).samples
+    with pytest.raises(ValidationError, match="exclusively"):
+        SculptStrokeArguments.model_validate(
+            {**data, "samples": [{"location": [0, 0, 0]}]}
+        )
+    with pytest.raises(ValidationError, match="distinct"):
+        SculptStrokeArguments.model_validate({**data, "brush": "flatten"})
+    data["image_path"]["samples"] *= 257
+    with pytest.raises(ValidationError):
+        SculptStrokeArguments.model_validate(data)
+
 
 VALID: dict[str, dict[str, Any]] = {
     "sculpt.mask.inspect": {"object_name": "Surface"},

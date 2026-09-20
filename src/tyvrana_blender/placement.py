@@ -47,6 +47,8 @@ def dependencies(rule: PlacementRule) -> set[str]:
         if rule.kind == "between"
         else [rule.target]
         if rule.kind == "frame"
+        else [rule.origin, rule.x_axis, rule.y_axis, rule.z_axis]
+        if rule.kind == "datums"
         else []
     )
     return {
@@ -85,6 +87,24 @@ def frame(direction: Any, up: Any) -> Any:
 
 def solve(obj: Any, rule: PlacementRule, matrices: dict[str, Any] | None = None) -> Any:
     matrices = matrices or {}
+    if rule.kind == "datums":
+        bounds(obj)
+        origin = point(rule.origin, matrices)
+        axes = [
+            point(p, matrices) - origin for p in (rule.x_axis, rule.y_axis, rule.z_axis)
+        ]
+        if any(a.length < 1e-6 for a in axes):
+            fail("Datum axis points must be distinct from the origin")
+        if any(
+            abs(axes[i].normalized().dot(axes[j].normalized())) > 1e-5
+            for i, j in ((0, 1), (0, 2), (1, 2))
+        ):
+            fail("Datum axes must be orthogonal; sheared frames are unsupported")
+        result = Matrix(axes).transposed().to_4x4()
+        result.translation = origin
+        if any(not math.isfinite(v) or abs(v) > 1e8 for row in result for v in row):
+            fail("Placement exceeds supported finite scene scale")
+        return result
     if rule.kind == "mirror":
         source = organization.object_named(rule.source)
         normal = Vector(rule.plane_normal).normalized()

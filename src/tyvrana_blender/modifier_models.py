@@ -203,6 +203,13 @@ class CorrectiveSmoothPatch(Arguments):
     iterations: Annotated[int, Field(ge=1, le=100)] | None = None
     scale: Annotated[Number, Field(gt=0, le=3)] | None = None
     smooth_type: Literal["simple", "length_weighted"] | None = None
+    only_smooth: bool | None = Field(
+        default=None,
+        description="Use native surface smoothing without restoring original "
+        "detail. Suitable for reconstruction noise; may shrink or erase features, "
+        "so compare local shape afterward. Otherwise correct deformation "
+        "against the original coordinates.",
+    )
     pin_boundaries: bool | None = None
     vertex_group: str | None = Field(default=None, max_length=63)
 
@@ -323,6 +330,16 @@ CONFIGURE: TypeAdapter[ModifierConfigureArguments] = TypeAdapter(
 )
 
 
+class ModifierBatchCreateArguments(Model):
+    modifiers: list[ModifierCreateArguments] = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        if len({m.object_name for m in self.modifiers}) != len(self.modifiers):
+            raise ValueError("Use one modifier creation per object in a batch")
+        return self
+
+
 # Snapshots describe native state, including values outside input safety limits and
 # incomplete modifiers made in Blender. Inspection must not "repair" that state.
 class MirrorSettings(Model):
@@ -398,6 +415,7 @@ class CorrectiveSmoothSettings(Model):
     iterations: int
     scale: float
     smooth_type: str
+    only_smooth: bool
     pin_boundaries: bool
     vertex_group: str
     rest_source: Literal["original"] = "original"
@@ -429,6 +447,10 @@ class ModifierSummary(Model):
 class ModifierInspectResult(Model):
     object_name: str
     modifiers: list[ModifierSummary]
+
+
+class ModifierBatchCreateResult(Model):
+    created: list[ModifierInspectResult]
 
 
 class ModifierRemoveResult(ModifierInspectResult):

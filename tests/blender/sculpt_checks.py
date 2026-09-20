@@ -3,6 +3,7 @@
 import importlib
 import math
 import unittest
+from array import array
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from unittest.mock import patch
@@ -114,6 +115,47 @@ class NativeCase(unittest.TestCase):
 
 
 class RaycastTests(NativeCase):
+    def test_reference_objects_do_not_consume_surface_capacity(self) -> None:
+        scene = bpy.context.scene
+        empties = []
+        for index in range(360):
+            obj = bpy.data.objects.new(f"Reference{index}", None)
+            obj.empty_display_type = "IMAGE"
+            scene.collection.objects.link(obj)
+            empties.append(obj)
+        bpy.context.view_layer.update()
+        result = self.call(
+            "scene.raycast", mode="world", origin=[0, 0, 5], direction=[0, 0, -1]
+        )
+        self.assertTrue(result["hit"])
+        self.assertEqual(result["object_name"], self.obj.name)
+        collection = bpy.data.collections.new("InstancedSurface")
+        try:
+            for obj in empties[:256]:
+                obj.instance_type = "COLLECTION"
+                obj.instance_collection = collection
+            self.error(
+                "scene.raycast",
+                "invalid_context",
+                mode="world",
+                origin=[0, 0, 5],
+                direction=[0, 0, -1],
+            )
+            for obj in empties:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            for index in range(256):
+                obj = bpy.data.objects.new(f"Surface{index}", self.obj.data)
+                scene.collection.objects.link(obj)
+            self.error(
+                "scene.raycast",
+                "invalid_context",
+                mode="world",
+                origin=[0, 0, 5],
+                direction=[0, 0, -1],
+            )
+        finally:
+            bpy.data.collections.remove(collection)
+
     def test_world_normalization_distance_and_miss(self) -> None:
         result = self.call(
             "scene.raycast", mode="world", origin=[0, 0, 5], direction=[0, 0, -20]
@@ -467,6 +509,123 @@ class MultiresTests(NativeCase):
 
 
 class SculptTests(NativeCase):
+    def test_render_normals_are_fresh_after_native_stroke(self) -> None:
+        self.sphere()
+        for face in self.obj.data.polygons:
+            face.use_smooth = True
+        self.call(
+            "sculpt.stroke",
+            brush="crease",
+            samples=[
+                {"location": [x, 0, math.sqrt(1 - x * x)]}
+                for x in (-0.4, -0.2, 0, 0.2, 0.4)
+            ],
+            radius=0.2,
+            strength=0.7,
+        )
+        package = sculpt.__package__
+        assert package is not None
+        renderer = importlib.import_module(package + ".render")
+        schema = importlib.import_module(package + ".models")
+        artifacts = importlib.import_module(package + ".artifacts")
+        options = schema.RenderArguments.model_validate(
+            {
+                "width": 256,
+                "height": 256,
+                "inspection": {
+                    "objects": [self.obj.name],
+                    "views": [{"name": "top", "orientation": "top"}],
+                },
+            }
+        )
+        spool = artifacts.ArtifactSpool()
+
+        def pixels(descriptor: Any) -> array[float]:
+            image = bpy.data.images.load(
+                str(artifacts.artifact_path(spool.root, descriptor)),
+                check_existing=False,
+            )
+            try:
+                data = array("f", [0.0]) * (256 * 256 * 4)
+                image.pixels.foreach_get(data)
+                return data
+            finally:
+                bpy.data.images.remove(image)
+
+        try:
+            _, first = renderer.render_image(options, spool)
+            before = pixels(first)
+            positions = coordinates(self.obj)
+            self.obj.data.update()
+            self.obj.update_tag()
+            bpy.context.view_layer.update()
+            _, second = renderer.render_image(options, spool)
+            after = pixels(second)
+            self.assertEqual(coordinates(self.obj), positions)
+            self.assertTrue(
+                before == after, "Rendered pixels changed after mesh refresh"
+            )
+        finally:
+            spool.close()
+
+    def test_image_path_projection_and_rejection_before_mutation(self) -> None:
+        for kind in ("PERSP", "ORTHO"):
+            with self.subTest(kind=kind):
+                self.setUp()
+                self.sphere()
+                camera = self.camera(kind)
+                view = {
+                    "width": 640,
+                    "height": 480,
+                    "camera_world": [list(row) for row in camera.matrix_world],
+                    "projection_matrix": [
+                        list(row)
+                        for row in camera.calc_matrix_camera(
+                            bpy.context.evaluated_depsgraph_get(), x=640, y=480
+                        )
+                    ],
+                }
+                before = authored(self.obj)
+                self.error(
+                    "sculpt.stroke",
+                    "sculpt_image_miss",
+                    brush="draw",
+                    image_path={
+                        "view": view,
+                        "samples": [{"u": 0.5, "v": 0.5}, {"u": 0, "v": 0}],
+                    },
+                    radius=0.3,
+                    strength=0.5,
+                )
+                self.assertEqual(authored(self.obj), before)
+                self.error(
+                    "sculpt.stroke",
+                    "invalid_arguments",
+                    brush="draw",
+                    image_path={
+                        "view": {**view, "projection_matrix": [[0] * 4] * 4},
+                        "samples": [{"u": 0.5, "v": 0.5}],
+                    },
+                    radius=0.3,
+                    strength=0.5,
+                )
+                self.assertEqual(authored(self.obj), before)
+                before_max = max(v.co.z for v in self.obj.data.vertices)
+                result = self.call(
+                    "sculpt.stroke",
+                    brush="draw",
+                    image_path={
+                        "view": view,
+                        "samples": [{"u": 0.5, "v": 0.5}] * 8,
+                    },
+                    radius=0.3,
+                    strength=0.5,
+                )
+                self.assertTrue(result["changed"])
+                self.assertGreater(
+                    max(v.co.z for v in self.obj.data.vertices), before_max + 0.02
+                )
+
     def stroke(
         self,
         brush: str = "draw",

@@ -16,6 +16,8 @@ from .modifier_models import (
     EvaluatedMeshSummary,
     MirrorSettings,
     ModifierApplyResult,
+    ModifierBatchCreateArguments,
+    ModifierBatchCreateResult,
     ModifierConfigureArguments,
     ModifierCreateArguments,
     ModifierInspectResult,
@@ -56,6 +58,7 @@ FIELDS = {
         "iterations": "iterations",
         "scale": "scale",
         "smooth_type": "smooth_type",
+        "only_smooth": "use_only_smooth",
         "pin_boundaries": "use_pin_boundary",
         "vertex_group": "vertex_group",
     },
@@ -130,6 +133,7 @@ ENUMS = {
 }
 DEFAULTS: dict[str, Any] = {
     "rest_source": "ORCO",
+    "use_only_smooth": False,
     "vertex_group": "",
     "show_viewport": True,
     "show_render": True,
@@ -456,7 +460,9 @@ def budget(
             continue
         kind = patch.get("type", mod.type if mod is not None else None)
         if kind == "CORRECTIVE_SMOOTH":
-            if constructive_seen or value(mod, patch, "rest_source") != "ORCO":
+            if value(mod, patch, "rest_source") != "ORCO" or (
+                constructive_seen and not value(mod, patch, "use_only_smooth")
+            ):
                 raise OperationError(
                     "invalid_context",
                     "Corrective Smooth requires original coordinates "
@@ -680,6 +686,25 @@ def create(obj: Any, arguments: ModifierCreateArguments) -> ModifierSummary:
         return summary(obj, mod)
     except BaseException:
         obj.modifiers.remove(mod)
+        raise
+
+
+def create_batch(arguments: ModifierBatchCreateArguments) -> ModifierBatchCreateResult:
+    objects = [object_mesh(item.object_name) for item in arguments.modifiers]
+    created = []
+    try:
+        for obj, item in zip(objects, arguments.modifiers, strict=True):
+            value = create(obj, item)
+            created.append((obj, value))
+        return ModifierBatchCreateResult(
+            created=[
+                ModifierInspectResult(object_name=obj.name, modifiers=[value])
+                for obj, value in created
+            ]
+        )
+    except BaseException:
+        for obj, value in reversed(created):
+            obj.modifiers.remove(obj.modifiers[value.name])
         raise
 
 

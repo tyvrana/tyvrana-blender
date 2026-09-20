@@ -45,6 +45,14 @@ class FitPlacement(Model):
     dimensions: Dimensions
 
 
+class DatumPlacement(Model):
+    kind: Literal["datums"]
+    origin: PointSource
+    x_axis: PointSource
+    y_axis: PointSource
+    z_axis: PointSource
+
+
 class MirrorPlacement(Model):
     kind: Literal["mirror"]
     source: Name
@@ -59,7 +67,7 @@ class MirrorPlacement(Model):
 
 
 type PlacementRule = Annotated[
-    BetweenPlacement | FramePlacement | FitPlacement | MirrorPlacement,
+    BetweenPlacement | FramePlacement | FitPlacement | MirrorPlacement | DatumPlacement,
     Field(discriminator="kind"),
 ]
 

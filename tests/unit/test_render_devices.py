@@ -96,3 +96,38 @@ def test_discovery_dispatch_and_probe_failures_remain_visible() -> None:
 
     with pytest.raises(RuntimeError, match="Driver probe failed"):
         inspect_devices(context(), broken)
+
+
+def test_gpu_intent_never_silently_downgrades() -> None:
+    from tyvrana_blender.errors import OperationError
+    from tyvrana_blender.models import CyclesRenderOptions
+    from tyvrana_blender.render_devices import requested_device
+
+    with pytest.raises(OperationError, match="No enabled available Cycles GPU"):
+        requested_device(
+            context(),
+            CyclesRenderOptions(device="gpu"),
+            lambda _: [("CPU", "CPU", "cpu")],
+        )
+    value = requested_device(
+        context(),
+        CyclesRenderOptions(device="gpu"),
+        lambda _: [("RTX", "OPTIX", "gpu")],
+    )
+    assert value.effective == "gpu" and value.compute_backend == "OPTIX"
+    assert value.enabled_devices == ["RTX"] and value.requested == "gpu"
+
+
+def test_explicit_cpu_and_scene_device_reporting() -> None:
+    from tyvrana_blender.models import CyclesRenderOptions
+    from tyvrana_blender.render_devices import requested_device
+
+    value = requested_device(
+        context(),
+        CyclesRenderOptions(device="cpu"),
+        lambda _: pytest.fail("CPU needs no GPU probe"),
+    )
+    assert value.requested == value.effective == "cpu"
+    assert value.compute_backend is None
+    value = requested_device(context(), None, lambda _: [("RTX", "OPTIX", "gpu")])
+    assert value.requested == "scene" and value.effective == "gpu"

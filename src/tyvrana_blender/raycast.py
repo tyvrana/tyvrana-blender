@@ -25,8 +25,17 @@ def graph() -> Any:
             "invalid_context",
             "Picking requires Object or Sculpt Mode outside rendering",
         )
-    if len(context.view_layer.objects) > 256:
-        raise OperationError("invalid_context", "Picking exceeds the 256-object limit")
+    # Reference images and other non-surface objects cannot be ray hits. Keep
+    # instancers in the admission count even when the owning object is an Empty.
+    non_surfaces = {"EMPTY", "CAMERA", "LIGHT", "LIGHT_PROBE", "ARMATURE", "SPEAKER"}
+    surfaces = sum(
+        obj.type not in non_surfaces or obj.is_instancer
+        for obj in context.view_layer.objects
+    )
+    if surfaces > 256:
+        raise OperationError(
+            "invalid_context", "Picking exceeds the 256-surface-object limit"
+        )
     # A scene raycast evaluates the view layer, not just the eventual hit object.
     for obj in context.view_layer.objects:
         if obj.type == "MESH" and obj.visible_get():

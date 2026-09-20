@@ -6,8 +6,9 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from .mesh_models import Arguments, FaceArguments, MeshVector
-from .models import Model, Vector
+from .models import Model, RenderViewProjection, Vector
 from .modifier_models import Name, Number
+from .region_models import FrameRegion
 
 MAX_MULTIRES_LEVEL = 6
 MAX_STROKE_SAMPLES = 256
@@ -140,15 +141,39 @@ class StrokeArguments(SculptInspectArguments):
     symmetry: Symmetry = Field(default_factory=Symmetry)
 
 
+class ImageStrokeSample(Arguments):
+    u: Unit
+    v: Unit
+    pressure: Unit = 1.0
+
+
+class ImageStrokePath(Arguments):
+    view: RenderViewProjection
+    samples: list[ImageStrokeSample] = Field(min_length=1, max_length=256)
+
+
 class SculptStrokeArguments(StrokeArguments):
+    samples: list[StrokeSample] = Field(default_factory=list, max_length=256)
+    image_path: ImageStrokePath | None = Field(
+        default=None,
+        description="Alternative to object-space samples: use an inspection tile's "
+        "view and normalized image coordinates (u rightward, v downward). All "
+        "samples must hit the named object's current evaluated surface. Other "
+        "objects do not occlude this target. Rerender after changing geometry.",
+    )
     brush: Brush
     invert: bool = False
 
     @model_validator(mode="after")
     def flatten_needs_motion(self) -> Self:
-        if self.brush == "flatten" and all(
-            sample.location == self.samples[0].location for sample in self.samples
-        ):
+        if bool(self.samples) == (self.image_path is not None):
+            raise ValueError("Supply object-space samples or image_path, exclusively")
+        points = (
+            [(p.u, p.v) for p in self.image_path.samples]
+            if self.image_path is not None
+            else [tuple(p.location) for p in self.samples]
+        )
+        if self.brush == "flatten" and all(p == points[0] for p in points):
             raise ValueError("Flatten requires a path with distinct surface locations")
         return self
 
@@ -287,7 +312,46 @@ class FilterAxes(Arguments):
         return self
 
 
-type FilterType = Literal["smooth", "surface_smooth", "relax", "inflate", "scale"]
+type FilterType = Literal[
+    "smooth", "surface_smooth", "relax", "inflate", "scale", "fair"
+]
+
+
+class SurfaceFairing(Arguments):
+    """Local base-mesh fairing; no vertex indices or coordinate payloads."""
+
+    regions: list[FrameRegion] = Field(default_factory=list, max_length=8)
+    vertex_group: Name | None = None
+    protect_vertex_group: Name | None = None
+    max_distance: Positive
+    # This ratio is compared in Python, not assigned to a Blender float32 RNA
+    # property. Rounding 0.1 to float32 would exceed its own public upper bound.
+    max_thinning: Annotated[float, Field(gt=0, le=0.1, allow_inf_nan=False)] = 0.1
+    boundary_rings: Annotated[int, Field(ge=1, le=8)] = 3
+    max_points: Annotated[int, Field(ge=1, le=262144)] = 262144
+    max_work: Annotated[int, Field(ge=1, le=64000000)] = 16000000
+    max_triangle_tests: Annotated[int, Field(ge=1, le=2000000)] = 200000
+
+    @model_validator(mode="after")
+    def local(self) -> Self:
+        if self.regions and self.vertex_group:
+            raise ValueError("Choose regions or a vertex group, not both")
+        return self
+
+
+class SurfaceFairingSummary(Model):
+    affected_points: int
+    pinned_points: int
+    maximum_displacement: Number
+    thickness_samples: int
+    minimum_thickness_ratio: Number | None = Field(
+        description=(
+            "Conservative lower bound on corresponding local thickness ratios; "
+            "uncertain anchors and the worst case are checked independently"
+        )
+    )
+    triangle_tests: int
+    mesh_isolated: bool
 
 
 class SculptFilterArguments(SculptInspectArguments):
@@ -296,15 +360,31 @@ class SculptFilterArguments(SculptInspectArguments):
     iterations: Annotated[int, Field(ge=1, le=100)] = 1
     axes: FilterAxes = Field(default_factory=FilterAxes)
     orientation: Literal["local", "world"] = "local"
+    fairing: SurfaceFairing | None = None
 
     @model_validator(mode="after")
     def refinement_strength(self) -> Self:
-        if self.type in {"smooth", "surface_smooth", "relax"} and self.strength < 0:
+        if (
+            self.type in {"smooth", "surface_smooth", "relax", "fair"}
+            and self.strength < 0
+        ):
             raise ValueError("Refinement filters require nonnegative strength")
         if self.type in {"inflate", "scale"} and self.iterations != 1:
             raise ValueError("Inflate and scale support one iteration per operation")
         if self.type == "scale" and self.strength <= -1:
             raise ValueError("Scale strength must be greater than -1")
+        if (self.type == "fair") != (self.fairing is not None):
+            raise ValueError("Fair mode requires fairing settings exclusively")
+        if self.type == "fair" and (
+            self.iterations > 40
+            or self.strength <= 0
+            or not all(self.axes.model_dump().values())
+            or self.orientation != "local"
+        ):
+            raise ValueError(
+                "Fair mode needs all local axes, positive strength "
+                "and at most 40 iterations"
+            )
         return self
 
 
@@ -322,3 +402,4 @@ class SculptFilterResult(Model):
     bounds_after_max: Vector
     changed: bool
     mask: SculptMaskSummary
+    fairing: SurfaceFairingSummary | None = None

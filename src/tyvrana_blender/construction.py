@@ -17,6 +17,7 @@ from . import references as refs
 from .bindings import RESOURCE_KEY
 from .construction_math import Equation, solve
 from .errors import OperationError
+from .image_buffers import decoded
 from .inspection import page
 from .reference_models import (
     ConstructionPointResult,
@@ -196,19 +197,22 @@ def frame_basis(name: str | None) -> str:
 
 
 def source(obj: Any) -> dict[str, Any]:
-    refs.dimensions(obj)
     image = obj.data
-    if image.is_dirty or len(image.packed_files) != 1:
-        fail(
-            "source_image_unavailable",
-            "Source observations require one unchanged packed static image;"
-            " save/reimport edited image bytes explicitly",
-        )
-    return {
-        "sha256": hashlib.sha256(image.packed_files[0].packed_file.data).hexdigest(),
-        "dimensions": list(image.size),
-        "aspect": list(image.display_aspect),
-    }
+    with decoded(image):
+        refs.dimensions(obj)
+        if image.is_dirty or len(image.packed_files) != 1:
+            fail(
+                "source_image_unavailable",
+                "Source observations require one unchanged packed static image;"
+                " save/reimport edited image bytes explicitly",
+            )
+        return {
+            "sha256": hashlib.sha256(
+                image.packed_files[0].packed_file.data
+            ).hexdigest(),
+            "dimensions": list(image.size),
+            "aspect": list(image.display_aspect),
+        }
 
 
 def basis(obj: Any, source_state: dict[str, Any] | None = None) -> str:
@@ -291,9 +295,11 @@ def register(arguments: RegistrationArguments) -> RegistrationResult:
                     unit=spec.calibration.unit,
                 )
             )
-            obj.location += frame(spec.frame) @ Vector(spec.origin) - refs.pixel_point(
-                obj, spec.origin_pixel
-            )
+            transform = refs.matrix(obj)
+            transform.translation += frame(spec.frame) @ Vector(
+                spec.origin
+            ) - refs.pixel_point(obj, spec.origin_pixel)
+            obj.matrix_world = transform
             bpy.context.view_layer.update()
             identity(obj)
             record = {

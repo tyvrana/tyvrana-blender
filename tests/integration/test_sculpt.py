@@ -6,7 +6,7 @@ import pytest
 from .conftest import ROOT
 
 
-@pytest.mark.parametrize("ui,count", [(False, 24), (True, 21)])
+@pytest.mark.parametrize("ui,count", [(False, 25), (True, 23)])
 def test_native_sculpt_foundation(
     profile: dict[str, str], tmp_path: Path, ui: bool, count: int
 ) -> None:

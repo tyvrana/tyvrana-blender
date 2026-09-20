@@ -266,3 +266,8 @@ def prepare_sculpt_scene(kind: str) -> None:
     light.data.size = 1.5
     scene.cycles.samples = 24
     scene.cycles.seed = 0
+    if kind == "draw_references":
+        for index in range(360):
+            reference = bpy.data.objects.new(f"Reference{index}", None)
+            reference.empty_display_type = "IMAGE"
+            scene.collection.objects.link(reference)

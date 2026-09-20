@@ -4,13 +4,34 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+import bmesh  # type: ignore[import-not-found]
 import bpy  # type: ignore[import-not-found]
 
 from . import modifiers, retopo_geometry
 from .errors import OperationError
-from .models import WireframeRenderOptions
+from .models import WireframeRegion, WireframeRenderOptions
 
-MAX_WIRE_EDGES = 8192
+
+def retain_region(data: Any, region: WireframeRegion) -> None:
+    """Discard distant faces on a temporary world-space copy, without cutting edges."""
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(data)
+        outside = [
+            face
+            for face in bm.faces
+            if any(
+                max(v.co[k] for v in face.verts) < region.minimum[k]
+                or min(v.co[k] for v in face.verts) > region.maximum[k]
+                for k in range(3)
+            )
+        ]
+        bmesh.ops.delete(bm, geom=outside, context="FACES")
+        unused = [v for v in bm.verts if not v.link_faces]
+        bmesh.ops.delete(bm, geom=unused, context="VERTS")
+        bm.to_mesh(data)
+    finally:
+        bm.free()
 
 
 @contextmanager
@@ -36,15 +57,18 @@ def display(options: WireframeRenderOptions | None) -> Iterator[None]:
         # Validate/evaluate before changing visibility or constructing helpers.
         for obj in originals:
             with retopo_geometry.evaluated_mesh(obj, depsgraph) as (data, transform):
-                edge_count += len(data.edges)
-                if edge_count > MAX_WIRE_EDGES:
-                    raise OperationError(
-                        "work_limit_exceeded",
-                        "Wire display exceeds 8192 evaluated edges",
-                    )
                 copied = data.copy()
                 data_copies.append(copied)
                 copied.transform(transform)
+                if options.region is not None:
+                    retain_region(copied, options.region)
+                edge_count += len(copied.edges)
+                if edge_count > options.max_edges:
+                    raise OperationError(
+                        "work_limit_exceeded",
+                        f"Wire display exceeds {options.max_edges} evaluated edges; "
+                        "select fewer objects or a smaller inspection focus/region",
+                    )
                 copied.update()
         material = bpy.data.materials.new("Wire display")
         node = material.node_tree.nodes.get("Principled BSDF")

@@ -1,14 +1,14 @@
 # Structural families and assembly
 
-`assembly.create` combines the existing loft and connected-surface generators.
+`assembly.create` combines loft, connected-surface and constructive-form generators.
 Templates define sparse shape controls; families place independent members along
 an authored polyline at equal arc-length intervals. Scale, Euler rotation and
 feature strength interpolate between endpoints. Named member overrides handle
 exceptions. A family may mirror another same-count family across a plane while
 retaining independent geometry, identities and subsequent asymmetric edits.
 
-One request admits 16 templates, 32 families, 64 mesh components, 131072 generated
-vertices and 256 KiB of constraints. Each assembly has an empty root, family
+One request admits 16 templates, 32 families, 64 mesh components, a default 131072 generated
+vertices (explicitly bounded up to1048576) and 256 KiB of constraints. Each assembly has an empty root, family
 empties and named mesh children. Construction metadata lives with native objects;
 it does not replace the core semantic project model. Generated object names must
 fit Blender's 63-byte limit without truncation or collision.
@@ -88,10 +88,11 @@ or select an appropriate remesh workflow explicitly.
 ## Multiview diagnostics
 
 Use the existing `render.image` operation with `inspection={}` for seven automatically
-framed Workbench views in one PNG contact sheet. Select objects and up to 12 named
+framed Workbench views in one PNG contact sheet. Select objects and up to24 named
 views, including per-view object subsets for regional closeups. Width and height
-are per-tile dimensions, at most 1024; pixel/memory budgets bound the complete
-sheet. Result metadata gives final dimensions and each tile's row/column/name.
+are per-tile dimensions, at most1024 for a sheet or2048 for a native review packet.
+Pixel/memory budgets bound the complete output. Normalized per-view focus bounds
+frame a detail within one object without changing its geometry. Result metadata gives final dimensions and each tile's row/column/name.
 Camera, visibility, render/display settings and helper data are restored on success
 and failure. Diagnostic rendering works in background and interactive hosts.
 
@@ -108,3 +109,7 @@ individual exceptions and their named shape handles.
 Geometry QA accepts up to 128 objects or pairs in one request within its shared
 128 query/frame, 256 finding, vertex, triangle and triangle-test budgets. Use a
 small `worst_limit` for broad inspection and request detailed failures separately.
+
+See [reference-driven constructive forms](constructive_forms.md) for calibrated contour/section
+authoring, smooth structural fusion, family shape interpolation, reference comparison
+and native review packets.

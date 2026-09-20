@@ -37,7 +37,7 @@ def test_native_assembly(profile: dict[str, str], tmp_path: Path) -> None:
     log = result.stdout + result.stderr
     (tmp_path / "assembly-native.log").write_text(log)
     assert result.returncode == 0, log
-    assert "ASSEMBLY_NATIVE_PASSED 11" in log
+    assert "ASSEMBLY_NATIVE_PASSED 12" in log
 
 
 async def test_assembly_mcp_reload_and_diagnostics(

@@ -3,7 +3,37 @@
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from .errors import OperationError
+from .models import CyclesRenderOptions, RenderDeviceMetadata
 from .render_models import RenderDevice, RenderDevicesResult
+
+
+def requested_device(
+    context: Any,
+    options: CyclesRenderOptions | None,
+    available_devices: Callable[[str], Sequence[Sequence[Any]]],
+) -> RenderDeviceMetadata:
+    """Validate actual hardware against intent; never silently downgrade GPU."""
+    effective = options.device if options else str(context.scene.cycles.device).lower()
+    if effective == "cpu":
+        return RenderDeviceMetadata(
+            requested=options.device if options else "scene",
+            effective="cpu",
+            enabled_devices=["CPU"],
+        )
+    state = inspect_devices(context, available_devices)
+    if not state.configured_gpu_available:
+        raise OperationError(
+            "render_device_unavailable",
+            "No enabled available Cycles GPU on the configured backend; inspect "
+            "blender.render.devices, configure the host, or explicitly request CPU",
+        )
+    return RenderDeviceMetadata(
+        requested=options.device if options else "scene",
+        effective="gpu",
+        compute_backend=state.compute_backend,
+        enabled_devices=[d.name for d in state.devices if d.enabled],
+    )
 
 
 def inspect_devices(

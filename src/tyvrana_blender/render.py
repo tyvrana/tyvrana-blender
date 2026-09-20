@@ -151,6 +151,19 @@ def render_steps(
                 ),
             ]
         )
+    device = None
+    if arguments.cycles is not None or (
+        scene.render.engine == "CYCLES"
+        and arguments.uv_checker is None
+        and arguments.surface is None
+    ):
+        import _cycles  # type: ignore[import-not-found]
+
+        from .render_devices import requested_device
+
+        device = requested_device(
+            bpy.context, arguments.cycles, _cycles.available_devices
+        )
     # File Output nodes are side effects, not part of the requested PNG. Preserve
     # compositor image processing while preventing writes to user output paths.
     overrides.extend(
@@ -272,6 +285,7 @@ def render_steps(
                 color_mode=arguments.color_mode,
                 color_management=metadata,
                 output_channels=channels,
+                device=device,
             ), descriptor
     except OperationError:
         raise

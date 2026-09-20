@@ -5,6 +5,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
+from .form_models import FormPart, FormSpec
 from .loft_models import LoftEnds, LoftSectionEdit, LoftSpec
 from .models import Model
 from .numeric import Float32, Vector32
@@ -38,8 +39,14 @@ class SurfaceTemplate(Model):
     spec: SurfaceSpec
 
 
+class FormTemplate(Model):
+    kind: Literal["form"]
+    id: Handle
+    spec: FormSpec
+
+
 type AssemblyTemplate = Annotated[
-    LoftTemplate | SurfaceTemplate, Field(discriminator="kind")
+    LoftTemplate | SurfaceTemplate | FormTemplate, Field(discriminator="kind")
 ]
 
 
@@ -49,6 +56,7 @@ class FeatureStrength(Model):
 
 
 class ShapeOverride(Model):
+    form_parts: list[FormPart] = Field(default_factory=list, max_length=32)
     sections: list[LoftSectionEdit] = Field(default_factory=list, max_length=32)
     features: list[FeatureStrength] = Field(default_factory=list, max_length=32)
     nodes: list[SurfaceNode] = Field(default_factory=list, max_length=32)
@@ -58,7 +66,13 @@ class ShapeOverride(Model):
 
     @model_validator(mode="after")
     def handles(self) -> Self:
-        for values in (self.sections, self.features, self.nodes, self.openings):
+        for values in (
+            self.sections,
+            self.features,
+            self.nodes,
+            self.openings,
+            self.form_parts,
+        ):
             if len({v.id for v in values}) != len(values):
                 raise ValueError("Override handles must be unique within each kind")
         return self
@@ -73,9 +87,24 @@ class FamilyMemberOverride(Model):
     placement: PlacementRule | None = None
 
 
+class FamilyMorph(Model):
+    position: Float32 = Field(ge=0, le=1)
+    template: Handle
+
+
 class AssemblyFamily(Model):
     id: Handle
     template: Handle | None = None
+    morphs: list[FamilyMorph] = Field(
+        default_factory=list,
+        max_length=8,
+        description=(
+            "Interpolate corresponding numeric shape handles through related "
+            "templates along the family. Keep construction kind, handles and "
+            "discrete topology settings compatible; member overrides apply "
+            "after interpolation."
+        ),
+    )
     mirror_of: Handle | None = None
     count: int = Field(
         default=1, ge=1, le=64, description="Mirrors inherit source count when omitted."
@@ -100,6 +129,11 @@ class AssemblyFamily(Model):
     def members(self) -> Self:
         if (self.template is None) == (self.mirror_of is None):
             raise ValueError("A family requires exactly one template or mirror_of")
+        positions = [v.position for v in self.morphs]
+        if positions != sorted(set(positions)) or (self.mirror_of and self.morphs):
+            raise ValueError(
+                "Morph positions must increase; mirrors inherit source morphology"
+            )
         indices = [v.index for v in self.overrides]
         unresolved_mirror = self.mirror_of and "count" not in self.model_fields_set
         if len(set(indices)) != len(indices) or (
@@ -126,6 +160,7 @@ class AssemblyFamily(Model):
 
 
 class AssemblySpec(Model):
+    max_vertices: int = Field(default=131072, ge=1024, le=1048576)
     name: Name
     templates: list[AssemblyTemplate] = Field(min_length=1, max_length=16)
     families: list[AssemblyFamily] = Field(min_length=1, max_length=32)
@@ -169,6 +204,8 @@ class AssemblySpec(Model):
         for f in self.families:
             if f.template and f.template not in templates:
                 raise ValueError("Family references an unknown template")
+            if any(m.template not in templates for m in f.morphs):
+                raise ValueError("Morph references an unknown template")
             resolve(f)
         object.__setattr__(
             self,
@@ -201,6 +238,7 @@ class AssemblyFamilyEdit(AssemblyFamily):
 
 
 class AssemblyConfigureArguments(Model):
+    max_vertices: int | None = Field(default=None, ge=1024, le=1048576)
     name: Name
     expected_revision: int = Field(ge=1)
     templates: list[AssemblyTemplate] = Field(default_factory=list, max_length=16)
@@ -244,7 +282,7 @@ class AssemblyComponent(Model):
     resource_id: str
     family: str
     index: int
-    kind: Literal["loft", "surface"]
+    kind: Literal["loft", "surface", "form"]
     revision: int
     vertex_count: int
     face_count: int

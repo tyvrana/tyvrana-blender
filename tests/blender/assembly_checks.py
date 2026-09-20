@@ -238,6 +238,7 @@ class AssemblyTests(unittest.TestCase):
         )
         self.assertEqual(identity, loft.metadata(obj)["id"])
         self.assertEqual(signature, loft.signature(obj.data))
+
         result = call(
             "landmark.derive",
             landmarks=[
@@ -268,6 +269,49 @@ class AssemblyTests(unittest.TestCase):
             ],
         )
         self.assertFalse(construction.freshness(bpy.data.objects["Contact"]))
+
+    def test_measured_datum_frames_mirror_scale_and_preserve_source(self) -> None:
+        call("loft.create", components=[compact_member("DatumPart")])
+        obj = bpy.data.objects["DatumPart"]
+        signature = loft.signature(obj.data)
+        values = {
+            "origin": [2, 3, 4],
+            "x_axis": [2, 1, 4],
+            "y_axis": [-1, 3, 4],
+            "z_axis": [2, 3, 8],
+        }
+        call(
+            "landmark.set",
+            landmarks=[{"name": k, "point": v} for k, v in values.items()],
+        )
+        rule = {
+            "kind": "datums",
+            **{k: {"kind": "landmark", "name": k} for k in values},
+        }
+        result = call("object_set.place", placements=[{"name": obj.name, "rule": rule}])
+        self.assertTrue(result["placements"][0]["valid"])
+        self.assertLess(obj.matrix_world.determinant(), 0)
+        for name, local in {
+            "origin": (0, 0, 0),
+            "x_axis": (1, 0, 0),
+            "y_axis": (0, 1, 0),
+            "z_axis": (0, 0, 1),
+        }.items():
+            self.assertLess(
+                (obj.matrix_world @ Vector(local) - Vector(values[name])).length, 1e-5
+            )
+        before = obj.matrix_world.copy()
+        call("landmark.set", landmarks=[{"name": "x_axis", "point": [2.5, 1, 4]}])
+        self.assertFalse(placement.summary(obj).valid)
+        self.assertNotIsInstance(
+            execute("object_set.place", refresh=[obj.name]), OperationSuccess
+        )
+        self.assertEqual(obj.matrix_world, before)
+        call("landmark.set", landmarks=[{"name": "x_axis", "point": [2, 0, 4]}])
+        self.assertTrue(
+            call("object_set.place", refresh=[obj.name])["placements"][0]["valid"]
+        )
+        self.assertEqual(signature, loft.signature(obj.data))
 
     def test_create_and_revision_injected_rollback(self) -> None:
         spec = small_spec()

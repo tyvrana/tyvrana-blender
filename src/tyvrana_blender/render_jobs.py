@@ -1,5 +1,7 @@
 """Render-specific async service in the networking process; never imports bpy."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -10,7 +12,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from tyvrana_protocol import (
@@ -24,7 +26,7 @@ from . import render_output
 from .artifacts import ArtifactSpool
 from .errors import OperationError
 from .models import RenderArguments, RenderResult
-from .operations import Response, SceneBackend, execute
+from .operation_dispatch import Response
 from .render_models import (
     TERMINAL,
     RenderJobArguments,
@@ -32,6 +34,10 @@ from .render_models import (
     RenderJobStatus,
     RenderStatusArguments,
 )
+from .render_operations import execute
+
+if TYPE_CHECKING:
+    from .operations import SceneBackend
 
 log = logging.getLogger(__name__)
 OPERATIONS = frozenset(
@@ -207,7 +213,7 @@ class RenderJobs:
             pass
 
     def begin(self, request: OperationRequest) -> Response:
-        return execute(cast(SceneBackend, self), request)
+        return execute(cast("SceneBackend", self), request)
 
     async def handle(
         self, request: OperationRequest, response: Response | None = None
@@ -227,7 +233,7 @@ class RenderJobs:
             if job.status.state == "succeeded":
                 # Reuse normal typed result dispatch, without submitting again.
                 return execute(
-                    cast(SceneBackend, self),
+                    cast("SceneBackend", self),
                     request.model_copy(
                         update={
                             "operation": "blender.render.result",
@@ -372,6 +378,8 @@ class RenderJobs:
                 ).inspection_tiles
                 if "output" in report
                 else [],
+                device=report.get("output", {}).get("device"),
+                review_directory=report.get("output", {}).get("review_directory"),
             )
         except asyncio.CancelledError:
             (job.directory / "cancel.request").touch()

@@ -137,3 +137,7 @@ are per-output solve statuses, not successful trusted geometry.
 Use justified planar/orthographic evidence. Automatic camera estimation, nonlinear
 distance constraints, lens correction, feature recognition, deforming frames and
 an unrestricted constraint language are intentionally unsupported.
+
+See [reference-driven constructive forms](constructive_forms.md) for calibrated contour/section
+authoring, smooth structural fusion, family shape interpolation, reference comparison
+and native review packets.

@@ -4,6 +4,8 @@ Local pipes carry newline-framed canonical Tyvrana messages. Only connection
 state events are local to the parent; they are not sent to core.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -11,6 +13,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from tyvrana_protocol import (
@@ -39,9 +42,11 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 from .artifacts import artifact_path
 from .incoming import InputError, InputStore
-from .operations import Response
 from .render_jobs import OPERATIONS as RENDER_OPERATIONS
 from .render_jobs import RenderJobs
+
+if TYPE_CHECKING:
+    from .operations import Response
 
 logger = logging.getLogger(__name__)
 MAX_FRAME = 4 * 1024 * 1024

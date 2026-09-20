@@ -8,17 +8,20 @@ from tyvrana_protocol import JsonValue
 
 from ..png import mean_pixel_difference
 from .conftest import running_blender
+from .rendering import complete_render
 from .test_cameras import render
 from .test_e2e import core_client, discover, operation
 from .test_modifier_render import fixed_scene
 
 
 @pytest.mark.interactive
-@pytest.mark.parametrize("brush", ["draw", "smooth"])
+@pytest.mark.parametrize("brush", ["draw", "smooth", "image_draw"])
 async def test_render_pick_sculpt_and_verify_through_mcp(
     profile: dict[str, str], tmp_path: Path, brush: str
 ) -> None:
-    profile["TYVRANA_TEST_SCULPT"] = brush
+    profile["TYVRANA_TEST_SCULPT"] = (
+        "smooth" if brush == "smooth" else "draw_references"
+    )
     async with core_client(tmp_path) as (client, port):
         profile["TYVRANA_TEST_PORT"] = str(port)
         async with running_blender(profile, tmp_path, ui=True):
@@ -52,16 +55,53 @@ async def test_render_pick_sculpt_and_verify_through_mcp(
             assert state["view3d_available"] and state["scale_applied"]
             assert state["effective_sculpt_level"] == 2
             before = await render(client, identifier)
-            hit = await call(
-                "scene.raycast", mode="camera", u=0.55, v=0.47, width=256, height=256
-            )
-            assert hit["hit"] and hit["object_name"] == "Surface"
+            hit = None
+            if brush == "image_draw":
+                inspection = await client.call_tool(
+                    "tyvrana_execute_operation",
+                    {
+                        "adapter_id": identifier,
+                        "operation": "blender.render.image",
+                        "arguments": {
+                            "width": 256,
+                            "height": 256,
+                            "inspection": {
+                                "objects": ["Surface"],
+                                "views": [{"name": "top", "orientation": "top"}],
+                            },
+                        },
+                    },
+                )
+                inspection = await complete_render(client, identifier, inspection)
+                assert any(c.type == "image" for c in inspection.content)
+                view = inspection.structured_content["result"]["inspection_tiles"][0][
+                    "view"
+                ]
+                target: dict[str, JsonValue] = {
+                    "image_path": {
+                        "view": view,
+                        "samples": [{"u": 0.55, "v": 0.47}] * 8,
+                    }
+                }
+            else:
+                hit = await call(
+                    "scene.raycast",
+                    mode="camera",
+                    u=0.55,
+                    v=0.47,
+                    width=256,
+                    height=256,
+                )
+                assert hit["hit"] and hit["object_name"] == "Surface"
+                target = {
+                    "samples": [{"location": hit["location_object"]}]
+                    * (40 if brush == "smooth" else 8)
+                }
             result = await call(
                 "sculpt.stroke",
                 object_name="Surface",
-                brush=brush,
-                samples=[{"location": hit["location_object"]}]
-                * (40 if brush == "smooth" else 8),
+                brush="draw" if brush == "image_draw" else brush,
+                **target,
                 radius=0.4,
                 strength=0.5,
             )
@@ -88,7 +128,7 @@ async def test_render_pick_sculpt_and_verify_through_mcp(
                 "image_difference",
                 difference,
                 "hit",
-                hit["location_object"],
+                hit["location_object"] if hit else "inspection image path",
                 "result",
                 result,
             )
