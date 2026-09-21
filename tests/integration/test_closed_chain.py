@@ -24,7 +24,7 @@ def test_native_closed_chain(profile: dict[str, str], tmp_path: Path) -> None:
     log = result.stdout + result.stderr
     (tmp_path / "closed-chain-native.log").write_text(log)
     assert result.returncode == 0, log
-    assert "CLOSED_CHAIN_NATIVE_PASSED 6" in log
+    assert "CLOSED_CHAIN_NATIVE_PASSED 7" in log
 
 
 async def test_closed_chain_mcp(profile: dict[str, str], tmp_path: Path) -> None:

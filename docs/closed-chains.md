@@ -111,5 +111,6 @@ across rename/save/reopen; removed owners fail explicitly rather than rebinding 
 another object with the same name. Remove the coupling before deleting its resources.
 
 The native and MCP qualification fixtures cover a 33-sample slider-crank, a rotated
-slider-driven linkage solving two rotations, incompatible limits, near-toggle
+offset linkage solving rotation and translation together, an inverse slider-driven
+linkage solving two rotations, incompatible limits, near-toggle
 conditioning, branch rejection, injected failures and a 324-object scene.

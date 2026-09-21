@@ -138,6 +138,31 @@ class ClosedChainTests(unittest.TestCase):
         self.assertEqual(r["violation_count"], 0, r)
         metrics["spatial_inverted_drive"] = r["mechanism"]
 
+    def test_spatial_offset_mixed_unknowns(self) -> None:
+        self.build()
+        root = bpy.data.objects.new("OffsetFrame", None)
+        bpy.context.scene.collection.objects.link(root)
+        root.location = (3, 2, 1)
+        root.rotation_euler = (0.4, 0.6, 0.3)
+        for name in ["Rig", "Slider", "Rail"]:
+            bpy.data.objects[name].parent = root
+        slider = bpy.data.objects["Slider"]
+        slider.location.y = 0.3
+        limit = next(c for c in slider.constraints if c.type == "LIMIT_LOCATION")
+        limit.min_y = limit.max_y = 0.3
+        slider.update_tag()
+        bpy.data.objects["Rail"].location.y += 0.3
+        spec = mechanisms.definition("Linkage")
+        solved_types = {v.channel.property for v in spec.variables if v.role == "solve"}
+        self.assertEqual(solved_types, {"rotation", "location"})
+        before = snapshot()
+        result = call("motion.sample", **sample_args(17))
+        self.assertEqual(snapshot(), before)
+        self.assertEqual(result["mechanism"]["solved_samples"], 17, result)
+        self.assertEqual(result["violation_count"], 0, result)
+        self.assertEqual(result["contacts"][0]["counts"]["PERMITTED_CONTACT"], 17)
+        metrics["spatial_offset_mixed_unknowns"] = result["mechanism"]
+
     def test_incompatible_limits_restore(self) -> None:
         self.build()
         spec = definition()
