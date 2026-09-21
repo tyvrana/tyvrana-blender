@@ -259,12 +259,13 @@ from tyvrana_blender.organization_models import (
     CollectionRemoveArguments,
     CollectionResult,
     ObjectSetConfigureArguments,
+    ObjectSetConfigureResult,
     ObjectSetCreateArguments,
     ObjectSetCreateResult,
     ObjectSetInspectArguments,
     ObjectSetInspectResult,
     ObjectSetRemoveArguments,
-    ObjectSetResult,
+    ObjectSetRemoveResult,
     OrganizationRemoveResult,
 )
 from tyvrana_blender.placement_models import PlacementArguments, PlacementResult
@@ -605,7 +606,7 @@ class Backend:
 
     def object_set_configure(
         self, arguments: ObjectSetConfigureArguments
-    ) -> ObjectSetResult:
+    ) -> ObjectSetConfigureResult:
         raise NotImplementedError
 
     def object_set_inspect(
@@ -615,7 +616,7 @@ class Backend:
 
     def object_set_remove(
         self, arguments: ObjectSetRemoveArguments
-    ) -> OrganizationRemoveResult:
+    ) -> ObjectSetRemoveResult:
         raise NotImplementedError
 
     def reference_create(self, arguments: ReferenceCreateArguments) -> ReferenceResult:

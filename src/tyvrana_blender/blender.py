@@ -284,12 +284,13 @@ from .organization_models import (
     CollectionRemoveArguments,
     CollectionResult,
     ObjectSetConfigureArguments,
+    ObjectSetConfigureResult,
     ObjectSetCreateArguments,
     ObjectSetCreateResult,
     ObjectSetInspectArguments,
     ObjectSetInspectResult,
     ObjectSetRemoveArguments,
-    ObjectSetResult,
+    ObjectSetRemoveResult,
     OrganizationRemoveResult,
 )
 from .placement_models import PlacementArguments, PlacementResult
@@ -1144,7 +1145,7 @@ class BlenderBackend:
 
     def object_set_configure(
         self, arguments: ObjectSetConfigureArguments
-    ) -> ObjectSetResult:
+    ) -> ObjectSetConfigureResult:
         from .organization import object_set_configure
 
         return object_set_configure(arguments)
@@ -1158,7 +1159,7 @@ class BlenderBackend:
 
     def object_set_remove(
         self, arguments: ObjectSetRemoveArguments
-    ) -> OrganizationRemoveResult:
+    ) -> ObjectSetRemoveResult:
         from .organization import object_set_remove
 
         return object_set_remove(arguments)
@@ -2900,27 +2901,11 @@ class BlenderBackend:
         return object_summary(obj)
 
     def delete(self, arguments: DeleteArguments) -> DeleteResult:
-        main_thread()
-        if bpy.context.mode != "OBJECT":
-            raise OperationError(
-                "invalid_context", "Object deletion requires Object Mode"
-            )
-        obj = find_object(arguments.name)
-        if "_tyvrana_growth_dynamics_owner" in obj:
-            raise OperationError(
-                "growth_invalid", "Use growth.dynamics.clear for owned caches"
-            )
-        if "tyvrana_growth" in obj:
-            raise OperationError(
-                "growth_invalid", "Use growth.remove for owned systems/root carriers"
-            )
-        if "tyvrana_curve" in obj or obj.get("tyvrana_curve_helper"):
-            raise OperationError(
-                "curve_invalid",
-                "Use curve.remove for managed curves and their owned anchors",
-            )
-        bpy.data.objects.remove(obj, do_unlink=True)
-        bpy.context.view_layer.update()
+        from .organization import object_set_remove
+
+        result = object_set_remove(ObjectSetRemoveArguments(names=[arguments.name]))
+        if result.error:
+            raise OperationError("operation_failed", result.error, result.model_dump())
         return DeleteResult(deleted=arguments.name)
 
 

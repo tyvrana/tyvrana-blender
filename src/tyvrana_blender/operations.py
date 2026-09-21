@@ -272,12 +272,13 @@ from .organization_models import (
     CollectionRemoveArguments,
     CollectionResult,
     ObjectSetConfigureArguments,
+    ObjectSetConfigureResult,
     ObjectSetCreateArguments,
     ObjectSetCreateResult,
     ObjectSetInspectArguments,
     ObjectSetInspectResult,
     ObjectSetRemoveArguments,
-    ObjectSetResult,
+    ObjectSetRemoveResult,
     OrganizationRemoveResult,
 )
 from .placement_models import PlacementArguments, PlacementResult
@@ -603,7 +604,7 @@ class SceneBackend(Protocol):
 
     def object_set_configure(
         self, arguments: ObjectSetConfigureArguments
-    ) -> ObjectSetResult: ...
+    ) -> ObjectSetConfigureResult: ...
 
     def object_set_inspect(
         self, arguments: ObjectSetInspectArguments
@@ -611,7 +612,7 @@ class SceneBackend(Protocol):
 
     def object_set_remove(
         self, arguments: ObjectSetRemoveArguments
-    ) -> OrganizationRemoveResult: ...
+    ) -> ObjectSetRemoveResult: ...
 
     def reference_create(
         self, arguments: ReferenceCreateArguments
@@ -2406,7 +2407,7 @@ _DECLARATIONS = (
     _operation(
         "blender.object_set.configure",
         ObjectSetConfigureArguments,
-        ObjectSetResult,
+        ObjectSetConfigureResult,
         lambda b, a, q: b.object_set_configure(a),
         "Atomically update 1..64 named objects: rename, exact "
         "collection memberships (link/unlink/move), plain parent "
@@ -2417,7 +2418,8 @@ _DECLARATIONS = (
         "unrepresentable parenting (animation/constraints/bone "
         "parents/nonidentity deltas/shear on clear). Native "
         "relationships persist through "
-        "rename/save/reopen; returned names are canonical. Use "
+        "rename/save/reopen. Return counts and changed names/fields only; "
+        "inspect exact state lazily with object_set.inspect. Use "
         "project.bind for saved resource IDs. Generic transforms remain "
         "object.set_transform.",
         tags=("organization", "ownership", "visibility", "batched"),
@@ -2443,12 +2445,15 @@ _DECLARATIONS = (
     _operation(
         "blender.object_set.remove",
         ObjectSetRemoveArguments,
-        OrganizationRemoveResult,
+        ObjectSetRemoveResult,
         lambda b, a, q: b.object_set_remove(a),
-        "Delete 1..64 named local objects after dependency preflight; "
+        "Delete 1..256 named local objects after dependency preflight; "
+        "assembly roots expand to their owned groups/members (256 total). "
+        "Standalone forms, lofts and surfaces are supported. Assembly members "
+        "require their root; specialized cleanup domains retain their removal tools. "
         "default rejects surviving children, explicit unparent "
         "preserves representable world transforms. Reject other "
-        "external dependencies and domain-owned objects. Retain "
+        "external dependencies. Retain "
         "mesh/material data, never purge orphans. Native deletion is "
         "irreversible: error and exact deleted/remaining names report "
         "partial progress. Selection independent.",

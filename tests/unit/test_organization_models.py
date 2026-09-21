@@ -129,3 +129,15 @@ def test_all_organization_contracts_registered_and_bounded() -> None:
     assert (
         len(registration("fixture", "5.2.1", "").model_dump_json().encode()) < MAX_FRAME
     )
+
+
+def test_removal_bounds_and_unique_names() -> None:
+    from tyvrana_blender.organization_models import ObjectSetRemoveArguments
+
+    assert (
+        len(ObjectSetRemoveArguments(names=[f"Part{i}" for i in range(256)]).names)
+        == 256
+    )
+    for names in [["Repeated", "Repeated"], [f"Part{i}" for i in range(257)]]:
+        with pytest.raises(ValueError):
+            ObjectSetRemoveArguments(names=names)

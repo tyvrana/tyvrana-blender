@@ -28,14 +28,16 @@ from .organization_models import (
     Member,
     MembershipInfo,
     MetadataInfo,
+    ObjectChange,
     ObjectRef,
     ObjectSetConfigureArguments,
+    ObjectSetConfigureResult,
     ObjectSetCreateArguments,
     ObjectSetCreateResult,
     ObjectSetInspectArguments,
     ObjectSetInspectResult,
     ObjectSetRemoveArguments,
-    ObjectSetResult,
+    ObjectSetRemoveResult,
     OrganizationRemoveResult,
     PrimitiveMember,
     SetObjectSummary,
@@ -676,7 +678,41 @@ def set_parent(obj: Any, parent: Any, world: Any) -> None:
         obj.matrix_world = world
 
 
-def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
+def configuration_result(
+    args: ObjectSetConfigureArguments, items: dict[str, Any], snapshots: dict[Any, Any]
+) -> ObjectSetConfigureResult:
+    changes = []
+    for patch in args.objects:
+        obj = items[patch.name]
+        before = snapshots[obj]
+        comparisons = {
+            "rename": str(obj.name) != before[0],
+            "parent": obj.parent != before[1],
+            "collections": set(obj.users_collection) != set(before[5]),
+            "role": obj.get(ROLE) != before[6],
+            "tags": list(obj.get(TAGS, [])) != before[7],
+            "hide_viewport": obj.hide_viewport != before[8][0],
+            "hide_render": obj.hide_render != before[8][1],
+            "hide_select": obj.hide_select != before[8][2],
+        }
+        fields = sorted(k for k, changed in comparisons.items() if changed)
+        if fields:
+            changes.append(
+                ObjectChange(
+                    name=str(obj.name),
+                    previous_name=before[0] if str(obj.name) != before[0] else None,
+                    fields=fields,
+                )
+            )
+    return ObjectSetConfigureResult(
+        matched_count=len(items),
+        changed_count=len(changes),
+        unchanged_count=len(items) - len(changes),
+        changes=changes,
+    )
+
+
+def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetConfigureResult:
     idle(mutate=True)
     items = {p.name: object_named(p.name) for p in args.objects}
     snapshots: dict[Any, Any] = {}
@@ -782,15 +818,7 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
                     "World transform preservation is not representable "
                     "at native precision"
                 )
-        return ObjectSetResult(
-            objects=[
-                object_summary(
-                    items[p.name],
-                    ["hierarchy", "memberships", "metadata", "visibility"],
-                )
-                for p in args.objects
-            ]
-        )
+        return configuration_result(args, items, snapshots)
     except Exception:
         for obj in target_parents:
             obj.parent = None
@@ -822,22 +850,84 @@ def object_set_configure(args: ObjectSetConfigureArguments) -> ObjectSetResult:
 
 
 def remove_object(obj: Any) -> None:
+    """Native primitive used by domains with their own cleanup transaction."""
     bpy.data.objects.remove(obj, do_unlink=True)
 
 
-def object_set_remove(args: ObjectSetRemoveArguments) -> OrganizationRemoveResult:
+def remove_objects(items: list[Any]) -> None:
+    bpy.data.batch_remove(ids=set(items))
+
+
+def removal_objects(names: list[str]) -> list[Any]:
+    from . import assembly, forms, loft, placement, surfaces
+
+    selected = {object_named(name) for name in names}
+    for root in list(selected):
+        if assembly.KEY not in root:
+            continue
+        meta = assembly.root_state(root)
+        members = assembly.get_members(meta)
+        groups = [
+            object_named(root.name + "." + f["id"]) for f in meta["spec"]["families"]
+        ]
+        if any(group.parent != root for group in groups):
+            fail("Assembly family ownership is damaged")
+        selected.update(members)
+        selected.update(groups)
+    if len(selected) > 256:
+        fail(
+            "Expanded removal exceeds 256 objects; "
+            "remove complete assemblies in batches"
+        )
+    allowed_keys = {
+        ROLE,
+        TAGS,
+        RESOURCE_KEY,
+        assembly.KEY,
+        assembly.MEMBER,
+        forms.KEY,
+        loft.KEY,
+        surfaces.KEY,
+        placement.KEY,
+    }
+    for obj in selected:
+        object_editable(obj)
+        if any(
+            str(k).startswith(("tyvrana_", "_tyvrana_")) and k not in allowed_keys
+            for k in obj.keys()
+        ):
+            fail(f'Object "{obj.name}" requires its domain cleanup operation')
+        owner = obj.get(assembly.MEMBER)
+        if owner and not any(
+            root.get(RESOURCE_KEY) == owner and assembly.KEY in root
+            for root in selected
+        ):
+            fail(f'Object "{obj.name}" belongs to an assembly; remove its root')
+        if obj.parent and assembly.KEY in obj.parent and obj.parent not in selected:
+            fail("Assembly family groups must be removed with their root")
+    return sorted(selected, key=lambda obj: str(obj.name))
+
+
+def object_set_remove(args: ObjectSetRemoveArguments) -> ObjectSetRemoveResult:
     idle(mutate=True)
-    items = [object_named(n) for n in args.names]
+    try:
+        items = removal_objects(list(args.names))
+    except OperationError as exc:
+        raise OperationError(
+            exc.error.code,
+            exc.error.message,
+            {
+                "requested_count": len(args.names),
+                "removed_count": 0,
+                "blocked_count": len(args.names),
+                "issue_count": 1,
+            },
+        ) from exc
+    names = [str(obj.name) for obj in items]
     deleting = set(items)
     children = {c for obj in items for c in obj.children if c not in deleting}
     if children and args.children == "reject":
         fail("Objects have surviving children; explicitly request unparenting")
-    for obj in items:
-        object_editable(obj)
-        if any(
-            str(k).startswith("tyvrana_") and k not in {ROLE, TAGS} for k in obj.keys()
-        ):
-            fail("Domain-owned objects require their typed removal operation")
     for child in children:
         object_editable(child)
         simple_transform(child)
@@ -888,22 +978,27 @@ def object_set_remove(args: ObjectSetRemoveArguments) -> OrganizationRemoveResul
         bpy.context.view_layer.update()
         raise
     parent_names = {c: str(values[0].name) for c, values in snapshots.items()}
-    deleted: list[str] = []
-    for obj, name in zip(items, args.names, strict=True):
-        try:
-            remove_object(obj)
-            deleted.append(name)
-        except Exception as exc:
-            # Restore unparented children whose original parents still exist.
-            for child, (parent, inverse, basis, _) in snapshots.items():
-                if parent_names[child] not in deleted:
-                    child.parent = parent
-                    child.matrix_parent_inverse = inverse
-                    child.matrix_basis = basis
-            return OrganizationRemoveResult(
-                deleted=deleted,
-                remaining=args.names[len(deleted) :],
-                error=f"Native object deletion failed ({type(exc).__name__})",
-            )
+    error = None
+    try:
+        remove_objects(items)
+    except Exception as exc:
+        error = f"Native object deletion failed ({type(exc).__name__})"
+    remaining = [name for name in names if bpy.data.objects.get(name) is not None]
+    deleted = [name for name in names if name not in remaining]
+    if error:
+        for child, (parent, inverse, basis, _) in snapshots.items():
+            if parent_names[child] in remaining:
+                child.parent = parent
+                child.matrix_parent_inverse = inverse
+                child.matrix_basis = basis
     bpy.context.view_layer.update()
-    return OrganizationRemoveResult(deleted=deleted, remaining=[])
+    return ObjectSetRemoveResult(
+        requested_count=len(args.names),
+        expanded_count=len(names),
+        removed_count=len(deleted),
+        blocked_count=len(remaining),
+        issue_count=int(error is not None),
+        deleted=deleted,
+        remaining=remaining,
+        error=error,
+    )

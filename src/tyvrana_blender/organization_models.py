@@ -315,6 +315,21 @@ class ObjectSetConfigureArguments(Model):
         return self
 
 
+class ObjectChange(Model):
+    name: str
+    previous_name: str | None = Field(default=None, exclude_if=lambda v: v is None)
+    fields: list[str]
+
+
+class ObjectSetConfigureResult(Model):
+    matched_count: int
+    changed_count: int
+    unchanged_count: int
+    skipped_count: int = 0
+    issue_count: int = 0
+    changes: list[ObjectChange] = Field(max_length=64)
+
+
 type InspectField = Literal[
     "hierarchy",
     "memberships",
@@ -420,7 +435,12 @@ class ObjectSetInspectResult(ObjectSetResult):
 
 
 class ObjectSetRemoveArguments(Model):
-    names: list[Name] = Field(min_length=1, max_length=64)
+    names: list[Name] = Field(
+        min_length=1,
+        max_length=256,
+        description="Explicit objects or complete assembly roots. Roots include their "
+        "owned groups/members; expanded removal is limited to 256 objects.",
+    )
     children: Literal["reject", "unparent"] = Field(
         default="reject",
         description=(
@@ -447,3 +467,12 @@ class OrganizationRemoveResult(Model):
         ),
     )
     retained_data: Literal[True] = True
+
+
+class ObjectSetRemoveResult(OrganizationRemoveResult):
+    requested_count: int
+    expanded_count: int
+    removed_count: int
+    skipped_count: int = 0
+    blocked_count: int = 0
+    issue_count: int = 0

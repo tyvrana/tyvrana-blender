@@ -403,7 +403,9 @@ class OrganizationTests(unittest.TestCase):
             ],
         )
         self.assertNotIn(org.ROLE, bpy.data.objects["A"])
-        with patch.object(org, "object_summary", side_effect=RuntimeError("injected")):
+        with patch.object(
+            org, "configuration_result", side_effect=RuntimeError("injected")
+        ):
             reject(
                 "object_set.configure",
                 objects=[
@@ -464,7 +466,9 @@ class OrganizationTests(unittest.TestCase):
             reject(
                 "object_set.configure", objects=[dict(name="Surface", **patch_fields)]
             )
-        with patch.object(org, "object_summary", side_effect=RuntimeError("injected")):
+        with patch.object(
+            org, "configuration_result", side_effect=RuntimeError("injected")
+        ):
             reject(
                 "object_set.configure",
                 objects=[dict(name="Surface", role="wrong", tags=[])],
@@ -481,6 +485,94 @@ class OrganizationTests(unittest.TestCase):
         call("object_set.configure", objects=[dict(name="Surface", role=None, tags=[])])
         self.assertNotIn(org.ROLE, obj)
         self.assertNotIn(org.TAGS, obj)
+
+    def test_compact_configuration_reports_only_actual_changes(self) -> None:
+        self.create(part("A"), part("B"))
+        result = call(
+            "object_set.configure",
+            objects=[
+                dict(name="A", rename="Renamed", hide_render=True),
+                dict(name="B", hide_render=False),
+            ],
+        )
+        self.assertEqual(result["matched_count"], 2)
+        self.assertEqual(result["changed_count"], 1)
+        self.assertEqual(result["unchanged_count"], 1)
+        self.assertEqual(
+            result["changes"],
+            [
+                {
+                    "name": "Renamed",
+                    "previous_name": "A",
+                    "fields": ["hide_render", "rename"],
+                }
+            ],
+        )
+        self.assertNotIn("objects", result)
+        no_op = call(
+            "object_set.configure", objects=[dict(name="Renamed", hide_render=True)]
+        )
+        self.assertEqual(no_op["changed_count"], 0)
+        self.assertEqual(no_op["changes"], [])
+        detail = call("object_set.inspect", names=["Renamed"], fields=["visibility"])
+        self.assertTrue(detail["objects"][0]["visibility"]["hide_render"])
+
+    def test_complete_managed_assembly_removal_and_dependency_preflight(self) -> None:
+        for z in [0, 2]:
+            call(
+                "assembly.create",
+                name="Rack" + str(z),
+                templates=[
+                    {
+                        "id": "bar",
+                        "kind": "loft",
+                        "spec": {
+                            "name": "Bar",
+                            "sides": 8,
+                            "subdivisions": 1,
+                            "sections": [
+                                {"center": [0, 0, 0], "radii": [0.1] * 4},
+                                {"center": [0, 1, 0], "radii": [0.1] * 4},
+                            ],
+                        },
+                    }
+                ],
+                families=[
+                    {
+                        "id": key,
+                        "template": "bar",
+                        "count": 50,
+                        "path": [[0, 0, z], [100, 0, z]],
+                    }
+                    for key in ["bars"]
+                ],
+            )
+        meshes = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
+        self.assertEqual(len(meshes), 100)
+        reject("object_set.remove", names=[meshes[0].name])
+        reject("object.delete", name=meshes[0].name)
+        self.create(dict(key="Dependent", name="Dependent", kind="empty"))
+        dependent = bpy.data.objects["Dependent"]
+        constraint = dependent.constraints.new("COPY_LOCATION")
+        constraint.target = meshes[0]
+        before = set(bpy.data.objects.keys())
+        reject("object_set.remove", names=["Rack0", "Rack2"])
+        self.assertEqual(set(bpy.data.objects.keys()), before)
+        dependent.constraints.remove(constraint)
+        result = call("object_set.remove", names=["Rack0", "Rack2", meshes[0].name])
+        self.assertEqual(result["requested_count"], 3)
+        self.assertEqual(result["expanded_count"], 104)
+        self.assertEqual(result["removed_count"], 104)
+        self.assertEqual(result["blocked_count"], 0)
+        self.assertEqual(set(bpy.data.objects.keys()), {"Dependent"})
+        self.assertGreaterEqual(len(bpy.data.meshes), 100)
+
+    def test_specialized_owned_resources_still_require_cleanup(self) -> None:
+        self.create(part("Plain"), part("Protected"))
+        bpy.data.objects["Protected"]["_tyvrana_growth_dynamics_owner"] = "system"
+        reject("object_set.remove", names=["Plain", "Protected"])
+        self.assertIn("Plain", bpy.data.objects)
+        self.assertIn("Protected", bpy.data.objects)
 
     def test_safe_deletion_and_data_retention(self) -> None:
         self.create(part("A"), part("B", parent={"key": "A"}, location=[3, 4, 5]))
@@ -590,14 +682,12 @@ class OrganizationTests(unittest.TestCase):
             part("C", parent={"key": "A"}),
             part("D", parent={"key": "B"}),
         )
-        original = org.remove_object
 
-        def injected(obj: Any) -> None:
-            if obj.name == "B":
-                raise RuntimeError("injected")
-            original(obj)
+        def injected(items: list[Any]) -> None:
+            bpy.data.objects.remove(items[0], do_unlink=True)
+            raise RuntimeError("injected")
 
-        with patch.object(org, "remove_object", injected):
+        with patch.object(org, "remove_objects", injected):
             result = call("object_set.remove", names=["A", "B"], children="unparent")
         self.assertEqual(result["deleted"], ["A"])
         self.assertEqual(result["remaining"], ["B"])

@@ -19,7 +19,7 @@ requires editable local scene data.
 | `object_set.create` | Stage a coherent assembly with local transforms, parents, materials, memberships and roles | 1–64 declarations; returns request-key/name/type/parent mappings |
 | `object_set.configure` | Rename, change/clear parents, replace memberships, set/clear roles and tags | 1–64 patches; preserves world transforms during parenting |
 | `object_set.inspect` | Inspect a named set or collection subtree with selected fields | Default 32 / maximum 128 rows; role/tag filters |
-| `object_set.remove` | Delete a bounded set after dependency checks | 1–64 names; exact deleted/remaining results on native failure |
+| `object_set.remove` | Delete a bounded set after dependency checks | 1–256 expanded objects; exact deleted/remaining results on native failure |
 
 Operation names in the table have the `blender.` prefix. All collection membership
 lists accept up to 16 distinct entries; `null` denotes the scene master collection.
@@ -166,6 +166,23 @@ be preserved. Other external references still block removal. Mesh/material
 resources remain available after object deletion. Native ID deletion cannot be
 rolled back: always check `error`, `deleted` and `remaining` before proceeding or
 retrying. Do not assume an operation with non-null `error` completed its intent.
+
+
+Configuration results contain matched/changed/unchanged/skipped/issue counts and
+at most 64 changed name/field records. Renames include the previous name. No-op
+patches produce no change record; detailed state remains available through
+`object_set.inspect`. Preflight and rollback behavior are unchanged.
+
+Object-set removal accepts standalone managed lofts, surfaces and forms. An
+assembly root expands to its complete owned family groups and members; the total
+expanded set is capped at 256 objects. Members cannot be removed without their
+root. Native surviving dependencies block the entire preflight. Specialized
+cleanup domains (including growth systems/caches and managed curves) continue to
+require their domain removal operations. Single `object.delete` calls use this
+same preflight and deletion implementation. Mesh/material datablocks are retained.
+Deletion uses one native batch after preflight and reversible child-unparenting.
+No rollback of deleted native IDs is claimed: native failures report exact
+removed/remaining objects and counts; surviving children's parenting is restored.
 
 ## Validation and native references
 
