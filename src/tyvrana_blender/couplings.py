@@ -7,6 +7,7 @@ from typing import Any
 import bpy  # type: ignore[import-not-found]
 from pydantic import ValidationError
 
+from . import coupling_mechanisms as mechanisms
 from . import motion_channels as channels
 from .errors import OperationError
 from .inspection import page
@@ -18,8 +19,11 @@ from .motion_models import (
     CouplingInspectResult,
     CouplingSpec,
     CouplingSummary,
+    MechanismSolution,
+    MechanismSolveArguments,
     MotionNames,
     MotionRemoveArguments,
+    MotionSampleArguments,
     PropertiesArguments,
     TransformChannel,
 )
@@ -358,8 +362,16 @@ def configure(args: CouplingConfigureArguments) -> MotionNames:
     if len(identities) != len(set(identities)):
         channels.fail("A native scalar target can have only one coupling")
     cycle_guard(proposed)
+    mechanism_data = mechanisms.proposed(
+        args.mechanisms,
+        args.replace,
+        set(proposed),
+        {s.target.model_dump_json() for s in proposed.values()},
+    )
     previous_metadata = {
-        k: bpy.context.scene[k] for k in bpy.context.scene.keys() if k.startswith(KEY)
+        k: bpy.context.scene[k]
+        for k in bpy.context.scene.keys()
+        if k.startswith((KEY, mechanisms.KEY))
     }
     created: list[CouplingSpec] = []
     removed: list[CouplingSpec] = []
@@ -391,9 +403,10 @@ def configure(args: CouplingConfigureArguments) -> MotionNames:
                 "rolled back"
             )
         persist(proposed)
+        mechanisms.persist(mechanism_data)
     except BaseException:
         for key in list(bpy.context.scene.keys()):
-            if key.startswith(KEY):
+            if key.startswith((KEY, mechanisms.KEY)):
                 del bpy.context.scene[key]
         for key, value in previous_metadata.items():
             bpy.context.scene[key] = value
@@ -408,7 +421,9 @@ def configure(args: CouplingConfigureArguments) -> MotionNames:
                 channels.clear_empty_animation(owner)
         channels.refresh()
         raise
-    return MotionNames(names=[s.name for s in args.couplings])
+    return MotionNames(
+        names=[s.name for s in args.couplings] + [m.name for m in args.mechanisms]
+    )
 
 
 def set_value(target: channels.Resolved, value: float) -> None:
@@ -482,9 +497,12 @@ def summary(spec: CouplingSpec, data: dict[str, CouplingSpec]) -> CouplingSummar
 def inspect(args: CouplingInspectArguments) -> CouplingInspectResult:
     data = records()
     bpy.context.view_layer.update()
-    selected, info = page(list(data), args, lambda n: n)
+    mechanism_names = set(mechanisms.catalog())
+    selected, info = page(list(data) + sorted(mechanism_names), args, lambda n: n)
     return CouplingInspectResult(
-        couplings=[summary(data[n], data) for n in selected], page=info
+        couplings=[summary(data[n], data) for n in selected if n in data],
+        mechanisms=[mechanisms.summary(n) for n in selected if n in mechanism_names],
+        page=info,
     )
 
 
@@ -530,14 +548,19 @@ def removable(spec: CouplingSpec) -> bool:
 def remove(args: MotionRemoveArguments) -> MotionNames:
     channels.editable(bpy.context.scene)
     data = records()
+    mechanism_data = mechanisms.catalog()
     remove_native = set()
     for name in args.names:
+        if name in mechanism_data:
+            continue
         if name not in data:
             channels.fail(f'Coupling "{name}" is missing')
         if removable(data[name]):
             remove_native.add(name)
     previous_metadata = {
-        k: bpy.context.scene[k] for k in bpy.context.scene.keys() if k.startswith(KEY)
+        k: bpy.context.scene[k]
+        for k in bpy.context.scene.keys()
+        if k.startswith((KEY, mechanisms.KEY))
     }
     removed = []
     try:
@@ -546,9 +569,12 @@ def remove(args: MotionRemoveArguments) -> MotionNames:
                 delete_driver(data[name])
                 removed.append(data[name])
         persist({n: s for n, s in data.items() if n not in args.names})
+        mechanisms.persist(
+            {n: s for n, s in mechanism_data.items() if n not in args.names}
+        )
     except BaseException:
         for key in list(bpy.context.scene.keys()):
-            if key.startswith(KEY):
+            if key.startswith((KEY, mechanisms.KEY)):
                 del bpy.context.scene[key]
         for key, value in previous_metadata.items():
             bpy.context.scene[key] = value
@@ -559,6 +585,8 @@ def remove(args: MotionRemoveArguments) -> MotionNames:
     for spec in removed:
         channels.clear_empty_animation(channels.resolve(spec.target).owner)
     for name in args.names:
+        if name not in data:
+            continue
         for side, _ in pointer_items(data[name]):
             key = pointer(name, side)
             if key in bpy.context.scene:
@@ -637,3 +665,32 @@ def internal_driver_dependency(obj: Any, curve: Any) -> bool:
             except OperationError:
                 return False
     return False
+
+
+def solve(args: MechanismSolveArguments) -> MechanismSolution:
+    from . import coupling_solver, motion, motion_scope
+
+    spec = mechanisms.definition(args.name)
+    query = MotionSampleArguments(
+        frames=[bpy.context.scene.frame_current], mechanism=args.name
+    )
+    scope = motion_scope.restoration_objects(motion_scope.resolve(query, {}, {}))
+    result: MechanismSolution | None = None
+    with motion.restored_state(
+        scope,
+        commit=lambda: bool(
+            args.apply and result is not None and result.status == "SOLVED"
+        ),
+    ):
+        result, _ = coupling_solver.solve(
+            spec, coupling_solver.EvaluationBudget(args.max_evaluations)
+        )
+        result = result.model_copy(
+            update={
+                "applied": args.apply and result.status == "SOLVED",
+                "restored": not (args.apply and result.status == "SOLVED"),
+            }
+        )
+        if result.applied:
+            mechanisms.save_solution(spec, result)
+    return result

@@ -235,6 +235,8 @@ from .motion_models import (
     CouplingConfigureArguments,
     CouplingInspectArguments,
     CouplingInspectResult,
+    MechanismSolution,
+    MechanismSolveArguments,
     MotionNames,
     MotionRemoveArguments,
     MotionSampleArguments,
@@ -706,6 +708,10 @@ class SceneBackend(Protocol):
 
     def coupling_remove(self, arguments: MotionRemoveArguments) -> MotionNames: ...
 
+    def coupling_solve(
+        self, arguments: MechanismSolveArguments
+    ) -> MechanismSolution: ...
+
     def action_edit(self, arguments: ActionEditArguments) -> ActionResult: ...
 
     def action_assign(self, arguments: ActionAssignArguments) -> MotionNames: ...
@@ -1142,7 +1148,10 @@ _DECLARATIONS = (
         MotionNames,
         lambda b, a, q: b.coupling_configure(a),
         (
-            "Create/update 1..64 named owned native drivers, max 256/scene. "
+            "Configure scalar couplings and/or up to8 named mixed closed mechanisms "
+            "(16/scene). Mechanisms reuse native local rotation/location channels, "
+            "fixed native links/frames and point closures; solve with coupling.solve "
+            "or motion.sample.mechanism. Scalar couplings:1..64 drivers,256/scene. "
             "Typed weighted sources→linear/remap/piecewise→target: object/pose-bone "
             "transforms, relative shape values, existing constraint "
             "influence, owned scalar controls. Transform sources use "
@@ -1166,12 +1175,32 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.coupling.solve",
+        MechanismSolveArguments,
+        MechanismSolution,
+        lambda b, a, q: b.coupling_solve(a),
+        "Solve a named bounded mixed revolute/prismatic closed coupling using "
+        "projected damped least squares on existing local typed channels and "
+        "world endpoint closures. At most12 solved variables,12 closures,64 "
+        "iterations and4096 evaluations. Explicit rank/conditioning, limits, "
+        "residual and failure status. apply=false restores all state; apply=true "
+        "commits only a qualified solution. No expression or trajectory tables. "
+        "Use motion.sample.mechanism for continuation across a bounded range.",
+        tags=("mechanics", "closed_chain", "prismatic", "solver"),
+        effect="mutating",
+        execution="synchronous",
+    ),
+    _operation(
         "blender.coupling.inspect",
         CouplingInspectArguments,
         CouplingInspectResult,
         lambda b, a, q: b.coupling_inspect(a),
         (
-            "Paged owned relationship summaries: typed source/target/mapping,"
+            "Paged scalar and closed-mechanism relationships, definitions/variables/"
+            "ranges, "
+            "current values and closure/limit residuals; last committed numerical "
+            "condition/status is exposed only while its state fingerprint matches. "
+            "Scalar summaries: typed source/target/mapping,"
             " current source, mapped value, raw and evaluated target, "
             "absolute mapping/constrained error, saturation, validity and "
             "upstream relationships. No raw expression/FCurve dump. Native "
@@ -1188,7 +1217,8 @@ _DECLARATIONS = (
         MotionNames,
         lambda b, a, q: b.coupling_remove(a),
         (
-            "Remove 1..64 exact owned drivers after whole-batch ownership "
+            "Remove 1..64 scalar or closed coupling records and exact owned drivers "
+            "after whole-batch ownership "
             "validation. Retain unrelated drivers/actions and current scalar "
             "values. Externally modified native drivers are protected; no "
             "orphan purge."
@@ -1268,7 +1298,12 @@ _DECLARATIONS = (
         MotionSampleResult,
         lambda b, a, q: b.motion_sample(a),
         (
-            "Evaluate active scene actions/drivers over 1..128 explicit/range "
+            "Optionally solve one mixed closed mechanism with warm-start branch "
+            "continuity at each sampled frame before diagnostics. Aggregate solved/"
+            "failed/uncertain counts, closure/limits/conditioning and bounded worst "
+            "samples;50000 total solve evaluations maximum. Unsolved frames skip "
+            "downstream geometry/contact QA. Evaluate active actions over1..128 "
+            "explicit/range "
             "integer frames in one call. Never assigns actions. Reuse "
             "joint/deformation/target/volume/layer diagnostics and 32 typed "
             "distance/angle measurements (world Blender units/degrees), including "

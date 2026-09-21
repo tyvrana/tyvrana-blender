@@ -8,7 +8,7 @@ from .corrective_models import ComparisonPair
 from .layer_models import LayerInspectArguments
 from .mechanics_models import ContactEnvelope, EnvelopeAggregate
 from .models import InspectArguments, Model, PageInfo
-from .reference_models import Name, ScalarMeasurementQuery
+from .reference_models import Name, PointSource, ScalarMeasurementQuery
 from .volume_models import VolumeQuery
 
 type Scalar = Annotated[FiniteFloat, Field(ge=-1e9, le=1e9)]
@@ -136,8 +136,138 @@ class CouplingSpec(Model):
     )
 
 
+class MechanismVariable(Model):
+    name: ControlName
+    channel: TransformChannel
+    role: Literal["input", "solve"] = "solve"
+    minimum: Scalar
+    maximum: Scalar
+    continuity_limit: Annotated[FiniteFloat, Field(gt=0, le=1)] = 0.2
+
+    @model_validator(mode="after")
+    def bounds(self) -> Self:
+        if self.channel.property not in {"rotation", "location"}:
+            raise ValueError("Mechanisms use revolute rotation or prismatic location")
+        if self.maximum - self.minimum < 1e-5:
+            raise ValueError(
+                "Variable range must exceed 1e-5; use fixed native links otherwise"
+            )
+        if self.channel.property == "rotation" and (
+            self.minimum < -3.14149 or self.maximum > 3.14149
+        ):
+            raise ValueError("Revolute variables require principal XYZ radians")
+        return self
+
+
+class ClosureConstraint(Model):
+    name: ControlName
+    a: PointSource
+    b: PointSource
+
+
+class MechanismSpec(Model):
+    name: ControlName
+    variables: list[MechanismVariable] = Field(min_length=1, max_length=16)
+    closures: list[ClosureConstraint] = Field(min_length=1, max_length=12)
+    tolerance: FiniteFloat = Field(default=0.00001, ge=0.000001, le=0.01)
+    maximum_condition: FiniteFloat = Field(default=10000, ge=10, le=1000000)
+    iterations: int = Field(default=40, ge=1, le=64)
+
+    @model_validator(mode="after")
+    def unique(self) -> Self:
+        for values in [
+            [v.name for v in self.variables],
+            [v.channel.model_dump_json() for v in self.variables],
+            [c.name for c in self.closures],
+        ]:
+            if len(set(values)) != len(values):
+                raise ValueError(
+                    "Mechanism variables, channels and closures must be unique"
+                )
+        if not 1 <= sum(v.role == "solve" for v in self.variables) <= 12:
+            raise ValueError(
+                "Supply 1..12 solved variables; others are explicit inputs"
+            )
+        return self
+
+
+type SolveStatus = Literal[
+    "SOLVED",
+    "INFEASIBLE",
+    "LIMIT_BLOCKED",
+    "UNDERCONSTRAINED",
+    "SINGULAR",
+    "NO_CONVERGENCE",
+    "BRANCH_DISCONTINUITY",
+]
+
+
+class MechanismSolveArguments(Model):
+    name: ControlName
+    apply: bool = False
+    max_evaluations: int = Field(default=2048, ge=1, le=4096)
+
+
+class ClosureResidual(Model):
+    name: str
+    residual: float
+
+
+class MechanismSolution(Model):
+    name: str
+    status: SolveStatus
+    values: dict[str, float]
+    closure_residual: float
+    constraint_residuals: list[ClosureResidual]
+    limit_residual: float
+    condition: float | None
+    rank: int
+    iterations: int
+    evaluations: int
+    active_limits: list[str]
+    continuity: Literal["seed", "continuous", "rejected"]
+    reasons: list[str] = Field(default_factory=list, max_length=8)
+    applied: bool = False
+    restored: bool = True
+
+
+class MechanismSummary(Model):
+    active_limits: list[str] = Field(default_factory=list)
+    definition: MechanismSpec
+    values: dict[str, float]
+    closure_residual: float
+    limit_residual: float
+    last_solution: MechanismSolution | None = None
+    solution_current: bool = False
+
+
+class MechanismSampleFinding(Model):
+    frame: int
+    status: SolveStatus
+    closure_residual: float
+    limit_residual: float
+    condition: float | None
+    continuity: str
+
+
+class MechanismAggregate(Model):
+    name: str
+    solved_samples: int
+    failed_samples: int
+    uncertain_samples: int
+    maximum_closure_residual: float
+    maximum_limit_residual: float
+    maximum_condition: float | None
+    singular_samples: int
+    branch_discontinuities: int
+    total_iterations: int
+    evaluations: int
+    worst: list[MechanismSampleFinding] = Field(max_length=16)
+
+
 class CouplingConfigureArguments(Model):
-    couplings: list[CouplingSpec] = Field(min_length=1, max_length=64)
+    couplings: list[CouplingSpec] = Field(default_factory=list, max_length=64)
+    mechanisms: list[MechanismSpec] = Field(default_factory=list, max_length=8)
     replace: bool = Field(
         default=False,
         description=(
@@ -148,6 +278,11 @@ class CouplingConfigureArguments(Model):
 
     @model_validator(mode="after")
     def unique(self) -> Self:
+        if not self.couplings and not self.mechanisms:
+            raise ValueError("Supply scalar couplings or closed mechanisms")
+        names = [c.name for c in self.couplings] + [m.name for m in self.mechanisms]
+        if len(set(names)) != len(names):
+            raise ValueError("Relationship names must be unique")
         if len({c.name for c in self.couplings}) != len(self.couplings):
             raise ValueError("Coupling names must be unique")
         targets = [c.target.model_dump_json() for c in self.couplings]
@@ -197,6 +332,7 @@ class CouplingSummary(Model):
 
 
 class CouplingInspectResult(Model):
+    mechanisms: list[MechanismSummary] = Field(default_factory=list)
     couplings: list[CouplingSummary]
     page: PageInfo
 
@@ -444,6 +580,10 @@ class MotionThreshold(Model):
 
 
 class MotionSampleArguments(Model):
+    mechanism: ControlName | None = None
+    mechanism_max_evaluations: int = Field(default=10000, ge=1, le=50000)
+    mechanism_worst_limit: int = Field(default=4, ge=0, le=16)
+
     scope: list[Name] = Field(
         default_factory=list,
         max_length=64,
@@ -499,7 +639,8 @@ class MotionSampleArguments(Model):
         if self.bones and not self.armature_object:
             raise ValueError("Bone QA requires armature_object")
         if not (
-            self.contacts
+            self.mechanism
+            or self.contacts
             or self.channels
             or self.measurements
             or self.couplings
@@ -560,6 +701,8 @@ class MotionFrame(Model):
 
 
 class MotionSampleResult(Model):
+    mechanism: MechanismAggregate | None = None
+
     scoped_object_count: int = 0
     restoration_object_count: int = 0
     contacts: list[EnvelopeAggregate] = Field(default_factory=list)

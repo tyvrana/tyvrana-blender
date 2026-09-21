@@ -174,6 +174,10 @@ when required. No action is temporarily assigned. `reference_frame` supplies the
 **evaluated geometry baseline**, defaulting to the first sample, rather than an
 implicit rest pose.
 
+Optional `mechanism` solves one configured mixed closed-chain coupling at each
+sample before diagnostics. See [closed-chain solving](closed-chains.md) for
+limits, continuity, failed-sample behavior and transactional application.
+
 Request only relevant diagnostics:
 
 - Named scalar `channels` and `couplings`: source/output, mapping error, constrained

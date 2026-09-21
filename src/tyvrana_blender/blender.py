@@ -267,6 +267,8 @@ from .motion_models import (
     CouplingConfigureArguments,
     CouplingInspectArguments,
     CouplingInspectResult,
+    MechanismSolution,
+    MechanismSolveArguments,
     MotionNames,
     MotionRemoveArguments,
     MotionSampleArguments,
@@ -1616,6 +1618,12 @@ class BlenderBackend:
         from . import couplings
 
         return couplings.inspect(arguments)
+
+    def coupling_solve(self, arguments: MechanismSolveArguments) -> MechanismSolution:
+        main_thread()
+        from . import couplings
+
+        return couplings.solve(arguments)
 
     def coupling_remove(self, arguments: MotionRemoveArguments) -> MotionNames:
         main_thread()

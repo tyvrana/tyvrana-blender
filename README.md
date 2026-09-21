@@ -3891,6 +3891,9 @@ interfaces against explicit gap envelopes, including guarded open patches.
 without counting unrelated static scene objects. See [mechanics evidence](docs/mechanics.md)
 for quality, freshness, uncertainty, work limits and frame consumption.
 
+See [mixed closed-chain couplings](docs/closed-chains.md) for bounded rotational/
+prismatic closure solving, branch continuity and canonical motion sampling.
+
 ## Timeline, actions and coupling
 
 Batched native action channels and keys, typed scalar coupling, explicit timeline

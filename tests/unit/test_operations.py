@@ -247,6 +247,8 @@ from tyvrana_blender.motion_models import (
     CouplingConfigureArguments,
     CouplingInspectArguments,
     CouplingInspectResult,
+    MechanismSolution,
+    MechanismSolveArguments,
     MotionNames,
     MotionRemoveArguments,
     MotionSampleArguments,
@@ -725,6 +727,9 @@ class Backend:
         self, arguments: CouplingInspectArguments
     ) -> CouplingInspectResult:
         raise NotImplementedError("Native motion has dedicated integration coverage")
+
+    def coupling_solve(self, arguments: MechanismSolveArguments) -> MechanismSolution:
+        raise NotImplementedError
 
     def coupling_remove(self, arguments: MotionRemoveArguments) -> MotionNames:
         raise NotImplementedError("Native motion has dedicated integration coverage")

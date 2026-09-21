@@ -2,7 +2,7 @@
 
 import math
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -10,6 +10,8 @@ import bpy  # type: ignore[import-not-found]
 
 from . import (
     correctives,
+    coupling_mechanisms,
+    coupling_solver,
     couplings,
     deformation_qa,
     joints,
@@ -28,6 +30,9 @@ from .corrective_models import DeformationCompareArguments
 from .geometry_qa import Budget
 from .mechanics_models import ContactState, EnvelopeAggregate, EnvelopeSummary
 from .motion_models import (
+    MechanismAggregate,
+    MechanismSampleFinding,
+    MechanismSolution,
     MotionFrame,
     MotionMetric,
     MotionSampleArguments,
@@ -41,7 +46,9 @@ MAX_METRICS = 1024
 
 
 @contextmanager
-def restored_state(scope: list[Any] | None = None) -> Iterator[None]:
+def restored_state(
+    scope: list[Any] | None = None, *, commit: Callable[[], bool] | None = None
+) -> Iterator[None]:
     scene = bpy.context.scene
     objects = list(scene.objects) if scope is None else scope
     if scope is None and len(objects) > 256:
@@ -80,27 +87,33 @@ def restored_state(scope: list[Any] | None = None) -> Iterator[None]:
             )
     if len(transforms) + len(scalar) > 8192:
         channels.fail("Motion restoration exceeds8192 native channels/resources")
+    completed = False
     try:
         yield
+        completed = True
     finally:
-        scene.frame_set(frame, subframe=subframe)
-        for owner, mode, loc, euler, quat, axis, scale in transforms:
-            owner.rotation_mode = mode
-            owner.location = loc
-            owner.rotation_euler = euler
-            owner.rotation_quaternion = quat
-            owner.rotation_axis_angle = axis
-            owner.scale = scale
-        for owner, prop, value, custom in scalar:
-            if custom:
-                owner[prop] = value
-            else:
-                setattr(owner, prop, value)
-        for owner, position in positions:
-            owner.pose_position = position
-        bpy.context.view_layer.update()
-        if scene.frame_current != frame or abs(scene.frame_subframe - subframe) > 1e-6:
-            channels.fail("Native frame restoration failed")
+        if not (completed and commit is not None and commit()):
+            scene.frame_set(frame, subframe=subframe)
+            for owner, mode, loc, euler, quat, axis, scale in transforms:
+                owner.rotation_mode = mode
+                owner.location = loc
+                owner.rotation_euler = euler
+                owner.rotation_quaternion = quat
+                owner.rotation_axis_angle = axis
+                owner.scale = scale
+            for owner, prop, value, custom in scalar:
+                if custom:
+                    owner[prop] = value
+                else:
+                    setattr(owner, prop, value)
+            for owner, position in positions:
+                owner.pose_position = position
+            bpy.context.view_layer.update()
+            if (
+                scene.frame_current != frame
+                or abs(scene.frame_subframe - subframe) > 1e-6
+            ):
+                channels.fail("Native frame restoration failed")
 
 
 def aggregate(
@@ -202,10 +215,22 @@ def sample(args: MotionSampleArguments) -> MotionSampleResult:
         c.name: [] for c in args.contacts
     }
     contact_budget = Budget(args.contact_max_tests)
+    mechanism = (
+        coupling_mechanisms.definition(args.mechanism) if args.mechanism else None
+    )
+    solve_budget = coupling_solver.EvaluationBudget(args.mechanism_max_evaluations)
+    continuation = None
+    mechanism_rows: list[tuple[int, MechanismSolution]] = []
     with restored_state(restored_objects):
         scene = bpy.context.scene
         scene.frame_set(reference)
         bpy.context.view_layer.update()
+        if mechanism and objects:
+            reference_solution, _ = coupling_solver.solve(mechanism, solve_budget)
+            if reference_solution.status != "SOLVED":
+                channels.fail(
+                    "Reference mechanism is not solved: " + reference_solution.status
+                )
         rest = []
         for obj in objects:
             snapshot = rig.snapshot(obj, retopo_geometry.graph(obj))
@@ -217,6 +242,18 @@ def sample(args: MotionSampleArguments) -> MotionSampleResult:
             scene.frame_set(frame)
             bpy.context.view_layer.update()
             values: dict[str, float | None] = {}
+            if mechanism:
+                solved, continuation = coupling_solver.solve(
+                    mechanism, solve_budget, continuation
+                )
+                mechanism_rows.append((frame, solved))
+                prefix = "mechanism." + mechanism.name + "."
+                values[prefix + "valid"] = float(solved.status == "SOLVED")
+                values[prefix + "closure_residual"] = solved.closure_residual
+                values[prefix + "limit_residual"] = solved.limit_residual
+                if solved.status != "SOLVED":
+                    rows.append(MotionFrame(frame=frame, values=values))
+                    continue
             if measurement_args:
                 for row in references.measure(measurement_args).measurements:
                     prefix = "measurement." + row.name + "."
@@ -414,6 +451,8 @@ def sample(args: MotionSampleArguments) -> MotionSampleResult:
         "INVALID_PENETRATION": 3,
     }
     for name, evidence in contact_rows.items():
+        if not evidence:
+            continue
         worst_frame, worst = max(
             evidence,
             key=lambda item: (
@@ -448,7 +487,57 @@ def sample(args: MotionSampleArguments) -> MotionSampleResult:
                 ),
             )
         )
+    mechanism_result = None
+    if mechanism_rows:
+        assert mechanism is not None
+        solved_rows = [r for _, r in mechanism_rows]
+        conditions = [r.condition for r in solved_rows if r.condition is not None]
+        worst_mechanism = sorted(
+            mechanism_rows,
+            key=lambda row: (
+                row[1].status != "SOLVED",
+                row[1].closure_residual,
+                row[1].condition or 0,
+            ),
+            reverse=True,
+        )[: args.mechanism_worst_limit]
+        mechanism_result = MechanismAggregate(
+            name=mechanism.name,
+            solved_samples=sum(r.status == "SOLVED" for r in solved_rows),
+            failed_samples=sum(r.status != "SOLVED" for r in solved_rows),
+            uncertain_samples=sum(
+                r.status
+                in {
+                    "SINGULAR",
+                    "UNDERCONSTRAINED",
+                    "NO_CONVERGENCE",
+                    "BRANCH_DISCONTINUITY",
+                }
+                for r in solved_rows
+            ),
+            maximum_closure_residual=max(r.closure_residual for r in solved_rows),
+            maximum_limit_residual=max(r.limit_residual for r in solved_rows),
+            maximum_condition=max(conditions) if conditions else None,
+            singular_samples=sum(r.status == "SINGULAR" for r in solved_rows),
+            branch_discontinuities=sum(
+                r.status == "BRANCH_DISCONTINUITY" for r in solved_rows
+            ),
+            total_iterations=sum(r.iterations for r in solved_rows),
+            evaluations=solve_budget.used,
+            worst=[
+                MechanismSampleFinding(
+                    frame=f,
+                    status=r.status,
+                    closure_residual=r.closure_residual,
+                    limit_residual=r.limit_residual,
+                    condition=r.condition,
+                    continuity=r.continuity,
+                )
+                for f, r in worst_mechanism
+            ],
+        )
     result = MotionSampleResult(
+        mechanism=mechanism_result,
         scoped_object_count=len(scope),
         restoration_object_count=len(restored_objects),
         contacts=contact_aggregates,

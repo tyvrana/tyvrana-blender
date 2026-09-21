@@ -97,6 +97,10 @@ def resolve(args: MotionSampleArguments, catalog: Any, layer_catalog: Any) -> li
                 collect(item)
 
     collect(args.model_dump())
+    if args.mechanism:
+        from . import coupling_mechanisms
+
+        collect(coupling_mechanisms.definition(args.mechanism).model_dump())
     names.update(args.objects)
     for name in args.couplings:
         collect(catalog[name].model_dump())
