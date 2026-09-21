@@ -15,7 +15,9 @@ from . import (
     joints,
     layer_geometry,
     layers,
+    mechanics_contact,
     modifiers,
+    motion_scope,
     references,
     retopo_geometry,
     rig,
@@ -23,6 +25,8 @@ from . import (
 )
 from . import motion_channels as channels
 from .corrective_models import DeformationCompareArguments
+from .geometry_qa import Budget
+from .mechanics_models import ContactState, EnvelopeAggregate, EnvelopeSummary
 from .motion_models import (
     MotionFrame,
     MotionMetric,
@@ -37,15 +41,16 @@ MAX_METRICS = 1024
 
 
 @contextmanager
-def restored_state() -> Iterator[None]:
+def restored_state(scope: list[Any] | None = None) -> Iterator[None]:
     scene = bpy.context.scene
-    if len(scene.objects) > 256:
-        channels.fail("Motion restoration exceeds256 scene objects")
+    objects = list(scene.objects) if scope is None else scope
+    if scope is None and len(objects) > 256:
+        channels.fail("Unscoped restoration exceeds256 scene objects")
     frame, subframe = scene.frame_current, scene.frame_subframe
     transforms = []
     scalar: list[tuple[Any, str, Any, bool]] = []
     positions = []
-    for obj in scene.objects:
+    for obj in objects:
         owners = [obj, *list(obj.pose.bones)] if obj.type == "ARMATURE" else [obj]
         for owner in owners:
             transforms.append(
@@ -191,7 +196,13 @@ def sample(args: MotionSampleArguments) -> MotionSampleResult:
     layer_catalog = layers.records() if args.layers else {}
     samples = 0
     rows = []
-    with restored_state():
+    scope = motion_scope.resolve(args, catalog, layer_catalog)
+    restored_objects = motion_scope.restoration_objects(scope)
+    contact_rows: dict[str, list[tuple[int, EnvelopeSummary]]] = {
+        c.name: [] for c in args.contacts
+    }
+    contact_budget = Budget(args.contact_max_tests)
+    with restored_state(restored_objects):
         scene = bpy.context.scene
         scene.frame_set(reference)
         bpy.context.view_layer.update()
@@ -367,13 +378,80 @@ def sample(args: MotionSampleArguments) -> MotionSampleResult:
                                 float(value) if value is not None else None
                             )
                 samples += cache.vertices
+            if args.contacts:
+                with layer_geometry.SurfaceCache(
+                    max_work=MAX_VERTEX_SAMPLES - samples
+                ) as cache:
+                    for envelope in args.contacts:
+                        contact = mechanics_contact.evaluate(
+                            envelope, cache, contact_budget, 0
+                        )
+                        contact_rows[envelope.name].append((frame, contact))
+                        prefix = "contact." + envelope.name + "."
+                        values[prefix + "minimum_gap"] = contact.minimum_gap
+                        values[prefix + "maximum_gap"] = contact.maximum_gap
+                        values[prefix + "penetration_max"] = contact.penetration_max
+                        values[prefix + "valid"] = float(
+                            contact.classification == "PERMITTED_CONTACT"
+                        )
+                        values[prefix + "uncertain_samples"] = float(
+                            contact.uncertain_samples
+                        )
+                    samples += cache.vertices
+                if samples > MAX_VERTEX_SAMPLES:
+                    channels.fail("Motion exceeds2000000 evaluated vertex samples")
             if len(values) > MAX_METRICS:
                 channels.fail("Motion exceeds1024 scalar metrics; reduce diagnostics")
             rows.append(MotionFrame(frame=frame, values=values))
         if len(rows[0].values) * len(args.detail_frames) > 2048:
             channels.fail("Motion detail exceeds2048 scalars; reduce detail_frames")
         metrics, violations, count = aggregate(rows, args)
+    contact_aggregates = []
+    priorities: dict[ContactState, int] = {
+        "PERMITTED_CONTACT": 0,
+        "SEPARATED": 1,
+        "UNCERTAIN": 2,
+        "INVALID_PENETRATION": 3,
+    }
+    for name, evidence in contact_rows.items():
+        worst_frame, worst = max(
+            evidence,
+            key=lambda item: (
+                priorities[item[1].classification],
+                item[1].penetration_max or 0,
+                item[1].maximum_gap or 0,
+            ),
+        )
+        minima = [r.minimum_gap for _, r in evidence if r.minimum_gap is not None]
+        maxima = [r.maximum_gap for _, r in evidence if r.maximum_gap is not None]
+        depths = [
+            r.penetration_max for _, r in evidence if r.penetration_max is not None
+        ]
+        contact_aggregates.append(
+            EnvelopeAggregate(
+                name=name,
+                counts={
+                    state: sum(r.classification == state for _, r in evidence)
+                    for state in priorities
+                },
+                worst_classification=worst.classification,
+                worst_frame=worst_frame,
+                minimum_gap=min(minima) if minima else None,
+                maximum_gap=max(maxima) if maxima else None,
+                penetration_max=max(depths) if depths else None,
+                uncertain_samples=sum(
+                    r.classification == "UNCERTAIN" for _, r in evidence
+                ),
+                failed_samples=sum(
+                    r.classification in {"INVALID_PENETRATION", "SEPARATED"}
+                    for _, r in evidence
+                ),
+            )
+        )
     result = MotionSampleResult(
+        scoped_object_count=len(scope),
+        restoration_object_count=len(restored_objects),
+        contacts=contact_aggregates,
         sampled_frames=frames,
         reference_frame=reference,
         metrics=metrics,

@@ -187,6 +187,12 @@ from tyvrana_blender.material_models import (
     MaterialInspectResult,
     MaterialSummary,
 )
+from tyvrana_blender.mechanics_models import (
+    ContactArguments,
+    ContactResult,
+    FitArguments,
+    FitResult,
+)
 from tyvrana_blender.mesh_models import (
     BoundedIndices,
     EdgeQueryResult,
@@ -914,6 +920,12 @@ class Backend:
         self, arguments: ViewportInspectArguments
     ) -> ViewportInspection:
         return ViewportInspection(viewports=[])
+
+    def geometry_fit(self, arguments: FitArguments) -> FitResult:
+        raise NotImplementedError
+
+    def contact_inspect(self, arguments: ContactArguments) -> ContactResult:
+        raise NotImplementedError
 
     def geometry_inspect(
         self, arguments: GeometryInspectArguments

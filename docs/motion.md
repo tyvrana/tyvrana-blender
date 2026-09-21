@@ -184,6 +184,8 @@ Request only relevant diagnostics:
 - `objects`: existing deformation edge/area/angle/volume diagnostics versus baseline.
 - `targets`: existing corrective target RMS and maximum deviation.
 - `volumes`: closed-volume/path/reference ratios and guide attachment errors.
+- `contacts`: explicit regional contact envelopes with classification counts, gap
+  extrema and worst frames; see [mechanics evidence](mechanics.md).
 - `layers`: existing separation, contact, signed-normal proxy and saved sliding QA.
   Set `worst_limit=0`; inspect a reported worst frame separately for spatial details.
 
@@ -194,6 +196,10 @@ query. Unknown metric names fail. Missing requested diagnostics, invalid relatio
 and evaluated joint-limit violations are surfaced. Total violation count is exact;
 returned violations are bounded in metric/frame order. Detailed frame values require
 `detail_frames` and remain bounded. The response does not contain100 full mesh reports.
+
+Requested owners and their native dependencies form a bounded mechanics scope.
+Use `scope` to add explicit owners; unrelated static scene objects do not consume
+the dependency-object limit. See [scope and restoration limits](mechanics.md#scoped-motion-sampling).
 
 Sampling restores the original frame/subframe, transform modes/channels, pose-position
 state, shape/control values and constraint influences on success or failure. Action
@@ -219,7 +225,9 @@ remain. No anatomical, artistic or physical-simulation acceptance is inferred.
 | Evaluated vertex samples per motion request |2,000,000 |
 | Aggregate metrics / detail scalar values |1024 /2048 |
 | Returned violations / serialized motion result |64 /384KiB |
-| Scene objects / saved channel resources |256 /8192 |
+| Mechanics dependency objects / saved channel resources |256 /8192 |
+| Restoration objects, including off-scope animated owners |1024 |
+| Contact envelopes / shared contact tests |8 /2,000,000 |
 
 Errors identify absent channels, unsupported spaces/modes, invalid ranges, cycles,
 key/driver conflicts, external ownership and work/result budgets. Reduce the named

@@ -220,6 +220,7 @@ from .material_models import (
     PrincipledSummary,
     Surface,
 )
+from .mechanics_models import ContactArguments, ContactResult, FitArguments, FitResult
 from .mesh_models import (
     MeshEditResult,
     MeshInspectArguments,
@@ -1651,6 +1652,18 @@ class BlenderBackend:
         from . import motion
 
         return motion.sample(arguments)
+
+    def geometry_fit(self, arguments: FitArguments) -> FitResult:
+        main_thread()
+        from . import mechanics_fit
+
+        return mechanics_fit.inspect(arguments)
+
+    def contact_inspect(self, arguments: ContactArguments) -> ContactResult:
+        main_thread()
+        from . import mechanics_contact
+
+        return mechanics_contact.inspect(arguments)
 
     def geometry_inspect(
         self, arguments: GeometryInspectArguments

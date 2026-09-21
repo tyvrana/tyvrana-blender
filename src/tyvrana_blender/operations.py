@@ -178,6 +178,7 @@ from .material_models import (
     MaterialInspectResult,
     MaterialSummary,
 )
+from .mechanics_models import ContactArguments, ContactResult, FitArguments, FitResult
 from .mesh_models import (
     MeshBevelArguments,
     MeshDeleteArguments,
@@ -714,6 +715,10 @@ class SceneBackend(Protocol):
     def action_remove(self, arguments: ActionRemoveArguments) -> MotionNames: ...
 
     def motion_sample(self, arguments: MotionSampleArguments) -> MotionSampleResult: ...
+
+    def geometry_fit(self, arguments: FitArguments) -> FitResult: ...
+
+    def contact_inspect(self, arguments: ContactArguments) -> ContactResult: ...
 
     def geometry_inspect(
         self, arguments: GeometryInspectArguments
@@ -1274,7 +1279,12 @@ _DECLARATIONS = (
             "constrained/requested XYZ radians and world joint endpoints. At "
             "most 1024 metrics, 2M evaluated vertex samples, 8 detail frames, "
             "2048 detailed scalars, 384 KiB JSON output, 64 "
-            "returned violations, 256 scene objects. layers.worst_limit must "
+            "returned violations, 256 selected/dependent mechanics objects. "
+            "Unrelated static scene objects do not count. Scoped contacts "
+            "aggregate envelope classifications/worst frames; max2M contact tests"
+            " across the call. Off-scope animated channels restore within a "
+            "separate8192-channel budget. Unverified frame callbacks are "
+            "rejected. layers.worst_limit must "
             "be 0. Restore frame/subframe, transforms, shape/control values "
             "and constraint influences even on failure. No continuous-extrema"
             " guarantee, hidden polling, physical simulation or arbitrary "
@@ -1282,6 +1292,48 @@ _DECLARATIONS = (
         ),
         effect="transient",
         execution="synchronous",
+    ),
+    _operation(
+        "blender.geometry.fit",
+        FitArguments,
+        FitResult,
+        lambda b, a, q: b.geometry_fit(a),
+        "Fit 1..8 sphere/circle/cylinder/plane or landmark frames from "
+        "bounded mesh selectors, named construction features and typed "
+        "points. Normalized least squares and rank/conditioning/residual "
+        "gates; ambiguous evidence returns UNCERTAIN without a fabricated "
+        "frame. Cylinder axes require coherent surface normals or directed "
+        "point evidence. A sphere alone has no axis. Optional typed "
+        "axis/secondary evidence avoids manual roll math. Return center, "
+        "axis, radius, errors, support, source fingerprint and ready-to-use "
+        "world-space rest frame head/tail/x_reference. Roll without secondary"
+        " evidence is explicitly conventional. expected_sha256 detects "
+        "changed source geometry/points; stale fits provide no consumable "
+        "frame. No anatomy inference or persistent mutation. Max8192 "
+        "samples/fit,1M evaluated vertices.",
+        effect="read_only",
+        execution="synchronous",
+        tags=("mechanics", "joint", "fit", "frame", "landmark"),
+    ),
+    _operation(
+        "blender.contact.inspect",
+        ContactArguments,
+        ContactResult,
+        lambda b, a, q: b.contact_inspect(a),
+        "Classify 1..8 selected regional contact envelopes: SEPARATED, "
+        "PERMITTED_CONTACT, INVALID_PENETRATION or UNCERTAIN. Caller declares"
+        " minimum/maximum signed gap. Closed solids use winding and signed "
+        "nearest distance; oriented open patches require explicit allowed "
+        "side, interior boundary support and coherent normals. Rim/ambiguous "
+        "projections are UNCERTAIN, never hidden by exemptions. Bounded "
+        "vertex sampling, counts/fraction, signed gaps, penetration metric, "
+        "worst-N, source fingerprints and reasons. Patch depth is a local "
+        "unilateral metric, not intersection volume or minimum translation. "
+        "No continuous collision or full-scene physics. Up to2048 "
+        "samples/interface and2M tests; read-only.",
+        effect="read_only",
+        execution="synchronous",
+        tags=("mechanics", "contact", "clearance", "regional"),
     ),
     _operation(
         "blender.geometry.inspect",

@@ -3882,6 +3882,15 @@ movement. Pose sweeps accept these diagnostics and restore native state.
 See [volume and layer contracts](docs/volumes-and-layers.md) for definitions,
 reference persistence, invalidation, bounds and examples.
 
+## Regional mechanics evidence
+
+`blender.geometry.fit` derives centers, axes and reusable joint frames from bounded
+selected geometry or landmarks. `blender.contact.inspect` classifies selected
+interfaces against explicit gap envelopes, including guarded open patches.
+`blender.motion.sample` aggregates these findings over a bounded dependency scope
+without counting unrelated static scene objects. See [mechanics evidence](docs/mechanics.md)
+for quality, freshness, uncertainty, work limits and frame consumption.
+
 ## Timeline, actions and coupling
 
 Batched native action channels and keys, typed scalar coupling, explicit timeline

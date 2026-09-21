@@ -6,6 +6,7 @@ from pydantic import Field, FiniteFloat, model_validator
 
 from .corrective_models import ComparisonPair
 from .layer_models import LayerInspectArguments
+from .mechanics_models import ContactEnvelope, EnvelopeAggregate
 from .models import InspectArguments, Model, PageInfo
 from .reference_models import Name, ScalarMeasurementQuery
 from .volume_models import VolumeQuery
@@ -443,6 +444,18 @@ class MotionThreshold(Model):
 
 
 class MotionSampleArguments(Model):
+    scope: list[Name] = Field(
+        default_factory=list,
+        max_length=64,
+        description=(
+            "Additional explicit mechanics owners. Query owners and native "
+            "object/constraint/driver dependencies are included automatically; "
+            "max256 scoped objects. Unrelated static scene objects are excluded."
+        ),
+    )
+    contacts: list[ContactEnvelope] = Field(default_factory=list, max_length=8)
+    contact_max_tests: int = Field(default=200000, ge=1, le=2000000)
+
     frames: list[Frame] = Field(default_factory=list, max_length=128)
     range: FrameRange | None = None
     reference_frame: Frame | None = Field(
@@ -486,7 +499,8 @@ class MotionSampleArguments(Model):
         if self.bones and not self.armature_object:
             raise ValueError("Bone QA requires armature_object")
         if not (
-            self.channels
+            self.contacts
+            or self.channels
             or self.measurements
             or self.couplings
             or self.bones
@@ -497,6 +511,8 @@ class MotionSampleArguments(Model):
         ):
             raise ValueError("Request at least one diagnostic")
         groups: list[list[str] | list[int]] = [
+            self.scope,
+            [c.name for c in self.contacts],
             self.frames,
             self.detail_frames,
             self.bones,
@@ -544,6 +560,10 @@ class MotionFrame(Model):
 
 
 class MotionSampleResult(Model):
+    scoped_object_count: int = 0
+    restoration_object_count: int = 0
+    contacts: list[EnvelopeAggregate] = Field(default_factory=list)
+
     sampled_frames: list[int]
     reference_frame: int
     metrics: list[MotionMetric]
