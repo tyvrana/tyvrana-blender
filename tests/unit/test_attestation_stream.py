@@ -2,6 +2,7 @@
 
 import array
 import importlib.util
+import math
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -23,6 +24,15 @@ def attestation(monkeypatch: pytest.MonkeyPatch) -> Any:
     bindings = ModuleType("tyvrana_blender.bindings")
     bindings.project_id = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, bindings.__name__, bindings)
+    numpy = SimpleNamespace(
+        float32="f",
+        int32="i",
+        frombuffer=lambda data, dtype: memoryview(data).cast(dtype),
+        isfinite=lambda data: SimpleNamespace(
+            all=lambda: all(math.isfinite(x) for x in data)
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "numpy", numpy)
     path = Path(__file__).resolve().parents[2] / "src/tyvrana_blender/attestation.py"
     spec = importlib.util.spec_from_file_location(
         "tyvrana_blender._attestation_test", path
@@ -81,3 +91,22 @@ def test_work_bounds_identify_the_exhausted_counter(attestation: Any) -> None:
     attestation.MAX_BUFFER = 8
     with pytest.raises(attestation.Unqualified, match="buffer_bytes"):
         attestation.Hasher().content(array.array("B", range(16)))
+
+
+def test_native_float_encoding_preserves_signed_zero_and_rejects_nonfinite(
+    attestation: Any,
+) -> None:
+    class Source:
+        def __init__(self, value: float):
+            self.value = value
+
+        def foreach_get(self, target: Any) -> None:
+            target[0] = self.value
+
+    positive, negative = attestation.Hasher(), attestation.Hasher()
+    positive.native_array(Source(0.0), 1, "f")
+    negative.native_array(Source(-0.0), 1, "f")
+    assert positive.digest.digest() != negative.digest.digest()
+    for value in [float("nan"), float("inf"), -float("inf")]:
+        with pytest.raises(attestation.Unqualified, match="Nonfinite"):
+            attestation.Hasher().native_array(Source(value), 1, "f")

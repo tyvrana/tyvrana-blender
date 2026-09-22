@@ -92,6 +92,9 @@ if os.environ.get("TYVRANA_TEST_FILE_OPEN") == "1":
     probe = bpy.data.texts.new("AutoRunProbe.py")
     probe.write("import bpy\nbpy.context.scene['file_script_executed'] = True\n")
     probe.use_module = True
+if os.environ.get("TYVRANA_TEST_DENSE_ATTEST") == "1":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    importlib.import_module("tests.blender.attestation_dense_checks").create()
 deadline = time.monotonic() + 180
 if os.environ.get("TYVRANA_TEST_CYCLES_OVERRIDE") == "1":
     bpy.context.scene.render.engine = "BLENDER_EEVEE"

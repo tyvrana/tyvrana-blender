@@ -9,13 +9,14 @@ import struct
 import sys
 import tempfile
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 import bpy  # type: ignore[import-not-found]
+import numpy as np  # type: ignore[import-not-found]
 
 from .attestation_model import DocumentAttestationResult
 from .bindings import project_id
@@ -169,6 +170,8 @@ class Hasher:
         self.bulk_elements = 0
         self.peak_buffer = 0
         self.start = time.monotonic()
+        self.max_seconds: float = MAX_SECONDS
+        self.resource_start = self.start
         self.seen: set[int] = set()
         self.exceeded: str | None = None
         self.category = "configuration"
@@ -187,8 +190,10 @@ class Hasher:
             self.limit("stream_bytes")
         if self.bulk_elements > MAX_ELEMENTS:
             self.limit("bulk_elements")
-        if time.monotonic() - self.start > MAX_SECONDS:
+        if time.monotonic() - self.start > self.max_seconds:
             self.limit("elapsed_ms")
+        if time.monotonic() - self.resource_start > 20:
+            self.limit("resource_elapsed_ms")
 
     def raw(self, value: Any) -> None:
         self.bytes += len(value)
@@ -268,6 +273,14 @@ class Hasher:
         def chunks(data: Any) -> Iterator[memoryview]:
             with memoryview(data).cast("B") as raw:
                 for offset in range(0, size, CHUNK_BYTES):
+                    if code == "f":
+                        values = np.frombuffer(
+                            raw[offset : offset + CHUNK_BYTES], dtype=np.float32
+                        )
+                        if not np.isfinite(values).all():
+                            del values
+                            raise Unqualified("Nonfinite native float")
+                        del values
                     if sys.byteorder == "big" or array.array(code).itemsize == 1:
                         with raw[offset : offset + CHUNK_BYTES] as encoded:
                             yield encoded
@@ -289,14 +302,20 @@ class Hasher:
             with tempfile.TemporaryFile(prefix="tyvrana-attestation-") as scratch:
                 scratch.truncate(size)
                 with mmap.mmap(scratch.fileno(), size) as mapped:
-                    with memoryview(mapped).cast(code) as target:
+                    target = np.frombuffer(
+                        mapped, dtype=np.float32 if code == "f" else np.int32
+                    )
+                    try:
                         read(target)
+                    finally:
+                        del target
                     self.blob(size, chunks(mapped))
         self.checkpoint()
 
     @contextmanager
     def resource(self, category: str, name: str) -> Iterator[None]:
         self.category, self.resource_name = category, name
+        self.resource_start = time.monotonic()
         before = self.bytes, self.items, self.bulk_elements, time.monotonic()
         try:
             yield
@@ -355,7 +374,8 @@ class Hasher:
                 bulk_elements=MAX_ELEMENTS,
                 buffer_bytes=MAX_BUFFER,
                 resources=4096,
-                elapsed_ms=MAX_SECONDS * 1000,
+                elapsed_ms=int(self.max_seconds * 1000),
+                resource_elapsed_ms=20000,
                 nesting=40,
             ),
             categories=list(categories.values())[:32],
@@ -431,8 +451,13 @@ class Hasher:
         for key in ["loop_start", "loop_total", "material_index", "use_smooth"]:
             self.bulk(mesh.polygons, key, "i")
         self.bulk(mesh.corner_normals, "vector", "f", 3)
+        self.value("loop_triangle_polygons")
+        self.bulk(mesh.loop_triangle_polygons, "value", "i")
         for vertex in mesh.vertices:
-            if vertex.index % 1024 == 0 and time.monotonic() - self.start > MAX_SECONDS:
+            if (
+                vertex.index % 1024 == 0
+                and time.monotonic() - self.start > self.max_seconds
+            ):
                 self.limit("elapsed_ms")
             if vertex.groups:
                 self.value((vertex.index, [(g.group, g.weight) for g in vertex.groups]))
@@ -493,6 +518,12 @@ class Hasher:
             self.feed(owner.bl_rna.identifier.encode())
             for prop in sorted(owner.bl_rna.properties, key=lambda p: p.identifier):
                 key = prop.identifier
+                if isinstance(owner, bpy.types.ShapeKey) and key in {"data", "points"}:
+                    values = getattr(owner, key)
+                    if values and values[0].bl_rna.identifier == "ShapeKeyPoint":
+                        self.value(("ShapeKey", key))
+                        self.bulk(values, "co", "f", 3)
+                        continue
                 if isinstance(owner, bpy.types.ViewLayer) and key == "depsgraph":
                     continue
                 if isinstance(owner, bpy.types.Mesh) and key in {
@@ -501,6 +532,7 @@ class Hasher:
                     "loops",
                     "polygons",
                     "loop_triangles",
+                    "loop_triangle_polygons",
                     "corner_normals",
                     "vertex_normals",
                     "polygon_normals",
@@ -585,13 +617,16 @@ class Hasher:
             self.seen.remove(pointer)
 
 
-def inspect() -> DocumentAttestationResult:
+def inspect_steps(
+    *, max_seconds: float = MAX_SECONDS
+) -> Generator[dict[str, Any], None, DocumentAttestationResult]:
     start = time.monotonic()
     session = identity()
     digest = None
     omissions: list[str] = []
     resources = 0
     h = Hasher()
+    h.max_seconds = max_seconds
     try:
         configured = os.environ.get("OCIO", "")
         h.value(("color_configuration", configured, bytes(bpy.app.build_hash)))
@@ -704,6 +739,7 @@ def inspect() -> DocumentAttestationResult:
                     if isinstance(item, bpy.types.Object) and item.mode != "OBJECT":
                         raise Unqualified("Attestation requires object mode")
                     h.rna(item)
+                yield {"progress": h.diagnostics()}
         digest = h.digest.hexdigest()
     except (Unqualified, RecursionError, ValueError, TypeError, OSError) as exc:
         omissions = [str(exc)[:256] or type(exc).__name__]
@@ -733,3 +769,12 @@ def inspect() -> DocumentAttestationResult:
             "work": h.diagnostics(),
         }
     )
+
+
+def inspect() -> DocumentAttestationResult:
+    steps = inspect_steps()
+    while True:
+        try:
+            next(steps)
+        except StopIteration as done:
+            return cast(DocumentAttestationResult, done.value)

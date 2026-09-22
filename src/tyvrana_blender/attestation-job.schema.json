@@ -323,84 +323,6 @@
       "title": "DocumentAttestation",
       "type": "object"
     },
-    "DocumentAttestationJob": {
-      "additionalProperties": false,
-      "description": "Observable application work with bounded progress and final evidence.",
-      "properties": {
-        "job_id": {
-          "$ref": "#/$defs/ResourceToken"
-        },
-        "state": {
-          "enum": [
-            "queued",
-            "running",
-            "completed",
-            "failed",
-            "cancelled"
-          ],
-          "title": "State",
-          "type": "string"
-        },
-        "revision": {
-          "default": 0,
-          "minimum": 0,
-          "title": "Revision",
-          "type": "integer"
-        },
-        "elapsed_seconds": {
-          "default": 0,
-          "minimum": 0,
-          "title": "Elapsed Seconds",
-          "type": "number"
-        },
-        "poll_after_seconds": {
-          "default": 0.5,
-          "maximum": 5,
-          "minimum": 0.1,
-          "title": "Poll After Seconds",
-          "type": "number"
-        },
-        "progress": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/AttestationWork"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DocumentAttestation"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "error": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProtocolError"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "job_id",
-        "state"
-      ],
-      "title": "DocumentAttestationJob",
-      "type": "object"
-    },
     "Identifier": {
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
       "type": "string"
@@ -469,13 +391,80 @@
       "type": "string"
     }
   },
-  "anyOf": [
-    {
-      "$ref": "#/$defs/DocumentAttestation"
+  "additionalProperties": false,
+  "description": "Observable application work with bounded progress and final evidence.",
+  "properties": {
+    "job_id": {
+      "$ref": "#/$defs/ResourceToken"
     },
-    {
-      "$ref": "#/$defs/DocumentAttestationJob"
+    "state": {
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "revision": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "elapsed_seconds": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Elapsed Seconds",
+      "type": "number"
+    },
+    "poll_after_seconds": {
+      "default": 0.5,
+      "maximum": 5,
+      "minimum": 0.1,
+      "title": "Poll After Seconds",
+      "type": "number"
+    },
+    "progress": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AttestationWork"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DocumentAttestation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProtocolError"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
+  },
+  "required": [
+    "job_id",
+    "state"
   ],
-  "title": "DocumentAttestationResponse"
+  "title": "DocumentAttestationJob",
+  "type": "object"
 }

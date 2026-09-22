@@ -68,6 +68,12 @@ def create() -> None:
         cube.animation_data.action, cube.animation_data.action_slot
     )
     curve = channelbag.fcurves.find("location", index=0)
+    # Allocate optional face layers before taking the restoration baseline.
+    cube.data.polygons[0].material_index = 1
+    cube.data.polygons[0].material_index = 0
+    cube.data.polygons[0].use_smooth = True
+    cube.data.polygons[0].use_smooth = False
+    cube.data.update()
     before = observe("unchanged")
     assert observe("unchanged_repeat")["digest"] == before["digest"]
     collection = cube.users_collection[0]
@@ -87,6 +93,9 @@ def create() -> None:
     change("modifier", lambda: modifier, "levels", 2)
     change("constraint", lambda: constraint, "min_x", 0.125)
     change("shape_key", lambda: key, "value", 0.4)
+    change("shape_key_coordinate", lambda: key.data[0], "co", (-1.0, -1.0, 0.5))
+    change("face_material", lambda: cube.data.polygons[0], "material_index", 1)
+    change("smoothing", lambda: cube.data.polygons[0], "use_smooth", True)
     change(
         "attribute", lambda: cube.data.attributes["Measurement"].data[0], "value", 0.5
     )

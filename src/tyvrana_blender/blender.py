@@ -44,7 +44,11 @@ from .assembly_models import (
     AssemblyInspectArguments,
     AssemblyResult,
 )
-from .attestation_model import DocumentAttestationResult
+from .attestation_model import (
+    AttestationJobArguments,
+    AttestationJobStatus,
+    DocumentAttestationResult,
+)
 from .bake_models import (
     BakeImageArguments,
     BakeInspectArguments,
@@ -1277,9 +1281,26 @@ class BlenderBackend:
         return references.configure_units(arguments)
 
     def document_attest(self) -> DocumentAttestationResult:
-        from .attestation import inspect
+        main_thread()
+        from . import attestation_jobs
 
-        return inspect()
+        return attestation_jobs.start()
+
+    def document_attest_status(
+        self, arguments: AttestationJobArguments
+    ) -> AttestationJobStatus:
+        main_thread()
+        from . import attestation_jobs
+
+        return attestation_jobs.status(arguments.job_id)
+
+    def document_attest_cancel(
+        self, arguments: AttestationJobArguments
+    ) -> AttestationJobStatus:
+        main_thread()
+        from . import attestation_jobs
+
+        return attestation_jobs.cancel(arguments.job_id)
 
     def extension_inspect(self) -> ExtensionState:
         main_thread()
@@ -1863,7 +1884,21 @@ class BlenderBackend:
         return mesh.edit(uv.mesh_object(arguments.object_name), arguments)
 
     def operation_allowed(self, operation: str) -> bool:
-        from . import bake_jobs, form_jobs, growth_dynamics, render_host
+        from . import (
+            attestation_jobs,
+            bake_jobs,
+            form_jobs,
+            growth_dynamics,
+            render_host,
+        )
+
+        if attestation_jobs.busy():
+            return operation in {
+                "blender.document.attest",
+                "blender.document.attest_status",
+                "blender.document.attest_cancel",
+                "blender.extension.inspect",
+            }
 
         if form_jobs.busy():
             return operation in {
@@ -3037,8 +3072,9 @@ def preferences_config() -> ConnectionConfig:
 def stop() -> None:
     global _runtime
     main_thread()
-    from . import form_jobs, growth_dynamics, render_host
+    from . import attestation_jobs, form_jobs, growth_dynamics, render_host
 
+    attestation_jobs.shutdown()
     form_jobs.shutdown()
     render_host.shutdown()
     growth_dynamics.shutdown()
@@ -3067,8 +3103,9 @@ def pump() -> float | None:
             restart()
         if _runtime is not None:
             _runtime.tick()
-            from . import form_jobs, growth_dynamics
+            from . import attestation_jobs, form_jobs, growth_dynamics
 
+            attestation_jobs.tick()
             form_jobs.tick()
             growth_dynamics.tick()
             _status = _runtime.status

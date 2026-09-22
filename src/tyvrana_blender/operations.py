@@ -17,7 +17,11 @@ from .assembly_models import (
     AssemblyInspectArguments,
     AssemblyResult,
 )
-from .attestation_model import DocumentAttestationResult
+from .attestation_model import (
+    AttestationJobArguments,
+    AttestationJobStatus,
+    DocumentAttestationResult,
+)
 from .bake_models import (
     BakeImageArguments,
     BakeInspectArguments,
@@ -801,6 +805,14 @@ class SceneBackend(Protocol):
 
     def extension_inspect(self) -> ExtensionState: ...
     def document_attest(self) -> DocumentAttestationResult: ...
+
+    def document_attest_status(
+        self, arguments: AttestationJobArguments
+    ) -> AttestationJobStatus: ...
+
+    def document_attest_cancel(
+        self, arguments: AttestationJobArguments
+    ) -> AttestationJobStatus: ...
 
     def extension_reload(
         self, arguments: ExtensionReloadArguments, request_id: str
@@ -2965,11 +2977,36 @@ _DECLARATIONS = (
             "Hash bounded material document content inside Blender; "
             "stable process/document sessions. "
             "Incomplete coverage returns no digest. No project mutation "
-            "or serialized geometry."
+            "or serialized geometry. Returns a native job immediately. Inspect status "
+            "after poll_after_seconds (0.5s), backing off to 2s; completed status "
+            "contains final evidence. Four records persist until reload. "
+            "Mutations are blocked during hashing; detected external edits fail closed."
         ),
         effect="read_only",
-        execution="synchronous",
+        execution="job_start",
         tags=("document_attestation",),
+    ),
+    _operation(
+        "blender.document.attest_status",
+        AttestationJobArguments,
+        AttestationJobStatus,
+        lambda b, a, q: b.document_attest_status(a),
+        "Observe compact attestation progress and final evidence. "
+        "Poll after 0.5s, backing off to 2s. No arrays are returned.",
+        effect="read_only",
+        execution="job_status",
+        tags=("document_attestation_status",),
+    ),
+    _operation(
+        "blender.document.attest_cancel",
+        AttestationJobArguments,
+        AttestationJobStatus,
+        lambda b, a, q: b.document_attest_cancel(a),
+        "Cancel incremental attestation and release native work/guards "
+        "without changing document content.",
+        effect="transient",
+        execution="job_status",
+        tags=("document_attestation_cancel",),
     ),
     _operation(
         "blender.extension.inspect",

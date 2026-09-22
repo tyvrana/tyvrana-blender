@@ -69,6 +69,21 @@ async def test_document_continuity(profile: dict[str, str], tmp_path: Path) -> N
                     dict(adapter_id=adapter, operation=operation, arguments=args),
                 )
             )["result"]
+            if operation == "blender.document.attest" and "job_id" in result:
+                while result["state"] in {"queued", "running"}:
+                    await asyncio.sleep(result["poll_after_seconds"])
+                    result = (
+                        await tool(
+                            "tyvrana_execute_operation",
+                            dict(
+                                adapter_id=adapter,
+                                operation="blender.document.attest_status",
+                                arguments={"job_id": result["job_id"]},
+                            ),
+                        )
+                    )["result"]
+                assert result["state"] == "completed", result
+                result = result["result"]
             if operation in {
                 "blender.project.bind",
                 "blender.file.save",
