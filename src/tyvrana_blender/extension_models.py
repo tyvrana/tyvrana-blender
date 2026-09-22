@@ -25,6 +25,9 @@ class ExtensionReloadResult(Model):
 
 
 class ExtensionState(Model):
+    host_session_id: str | None = None
+    document_session_id: str | None = None
+
     host_pid: int
     background: bool
     window_count: int

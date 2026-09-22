@@ -44,6 +44,7 @@ from .assembly_models import (
     AssemblyInspectArguments,
     AssemblyResult,
 )
+from .attestation_model import DocumentAttestationResult
 from .bake_models import (
     BakeImageArguments,
     BakeInspectArguments,
@@ -1275,14 +1276,22 @@ class BlenderBackend:
 
         return references.configure_units(arguments)
 
+    def document_attest(self) -> DocumentAttestationResult:
+        from .attestation import inspect
+
+        return inspect()
+
     def extension_inspect(self) -> ExtensionState:
         main_thread()
         from . import lifecycle
+        from .attestation import identity
         from .bindings import project_id
 
         return ExtensionState.model_validate(
             {
                 **lifecycle.inspect(),
+                "host_session_id": identity()["host"],
+                "document_session_id": identity()["document"],
                 "host_pid": os.getpid(),
                 "background": bool(bpy.app.background),
                 "window_count": len(bpy.context.window_manager.windows),
@@ -3071,6 +3080,9 @@ def pump() -> float | None:
 
 
 def before_load(*args: object) -> None:
+    from .attestation import document_loaded
+
+    document_loaded()
     if not _opening_project:
         stop()
 

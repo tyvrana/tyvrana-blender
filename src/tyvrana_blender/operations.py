@@ -17,6 +17,7 @@ from .assembly_models import (
     AssemblyInspectArguments,
     AssemblyResult,
 )
+from .attestation_model import DocumentAttestationResult
 from .bake_models import (
     BakeImageArguments,
     BakeInspectArguments,
@@ -799,6 +800,8 @@ class SceneBackend(Protocol):
     ) -> SurfaceInstancesSummary: ...
 
     def extension_inspect(self) -> ExtensionState: ...
+    def document_attest(self) -> DocumentAttestationResult: ...
+
     def extension_reload(
         self, arguments: ExtensionReloadArguments, request_id: str
     ) -> ExtensionReloadResult: ...
@@ -2952,6 +2955,21 @@ _DECLARATIONS = (
         "actions/drivers and an explicit evaluated reference frame.",
         effect="read_only",
         execution="synchronous",
+    ),
+    _operation(
+        "blender.document.attest",
+        ExtensionInspectArguments,
+        DocumentAttestationResult,
+        lambda b, a, q: b.document_attest(),
+        (
+            "Hash bounded material document content inside Blender; "
+            "stable process/document sessions. "
+            "Incomplete coverage returns no digest. No project mutation "
+            "or serialized geometry."
+        ),
+        effect="read_only",
+        execution="synchronous",
+        tags=("document_attestation",),
     ),
     _operation(
         "blender.extension.inspect",

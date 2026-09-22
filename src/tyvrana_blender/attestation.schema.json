@@ -1,0 +1,108 @@
+{
+  "$defs": {
+    "ResourceToken": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Complete means no relevant state was silently omitted by the named format.",
+  "properties": {
+    "host_session_id": {
+      "$ref": "#/$defs/ResourceToken"
+    },
+    "document_session_id": {
+      "$ref": "#/$defs/ResourceToken"
+    },
+    "project_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "algorithm": {
+      "const": "sha256",
+      "default": "sha256",
+      "title": "Algorithm",
+      "type": "string"
+    },
+    "format": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Format",
+      "type": "string"
+    },
+    "digest": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Digest"
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "unsupported",
+        "limit_exceeded"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "resource_count": {
+      "maximum": 100000,
+      "minimum": 0,
+      "title": "Resource Count",
+      "type": "integer"
+    },
+    "omissions": {
+      "items": {
+        "maxLength": 256,
+        "type": "string"
+      },
+      "maxItems": 32,
+      "title": "Omissions",
+      "type": "array"
+    },
+    "elapsed_ms": {
+      "minimum": 0,
+      "title": "Elapsed Ms",
+      "type": "number"
+    },
+    "file_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "File Sha256"
+    }
+  },
+  "required": [
+    "host_session_id",
+    "document_session_id",
+    "project_id",
+    "format",
+    "digest",
+    "status",
+    "resource_count",
+    "omissions",
+    "elapsed_ms"
+  ],
+  "title": "DocumentAttestation",
+  "type": "object"
+}

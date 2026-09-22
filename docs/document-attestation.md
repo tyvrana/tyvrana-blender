@@ -1,0 +1,52 @@
+# Document content attestation
+
+`blender.document.attest` provides compact read-only evidence for Core's document
+continuity policy. It never saves or changes authored data. The process owns one
+random host-session UUID in its `bpy` runtime namespace, outside reloadable addon
+modules and saved files. A second UUID identifies the loaded document session.
+Load/new lifecycle notifications replace the latter, including unsaved documents.
+Extension reload and transport reconnect preserve both. A new process creates both.
+Both identities are exposed by typed `blender.extension.inspect` identity metadata
+and each content attestation, separately from adapter instance and connection IDs.
+
+SHA256 hashes a canonical length-delimited stream. RNA property names and native
+resource names are ordered; integer values have exact decimal encoding, scalar
+floats use IEEE754 binary64 in network byte order, and bulk native mesh/image arrays
+use their exact binary32/integer storage in network byte order. No display rounding
+or process pointers enter the digest. Format identity includes Blender's version
+and the hashing implementation identity; different formats are not interchangeable.
+
+The traversal covers retained native data: object identity/type, parenting and
+transforms, collection membership, scene/render settings, mesh topology and point,
+edge, corner and polygon data, material assignments, attributes, UV selection for
+rendering, deform weights, normals, curves, rest bones/poses, modifiers, constraints,
+shape keys, action data, node topology and input values, custom properties and
+supported native resources. Embedded node trees are traversed, not reduced to a
+name. Used images include packed/external bytes and current pixel content; external
+font content is included. Saved document/resource UUID markers identify bindings
+separately and are excluded from material content.
+
+UI workspaces/screens, runtime caches, selection and zero-user resources without a
+fake user are excluded. Such orphan resources are not retained by ordinary save/load.
+Nonmaterial UI fields may conservatively affect some RNA resource hashes; a digest
+mismatch never proves a particular visual defect or grants acceptance.
+
+Linked/override resources, external color configurations, non-simple scripted
+drivers, simulation/bake caches, referenced transient render images and unsupported
+external resource categories fail explicitly. Unreadable values, nonfinite floats,
+unknown value classes and exceeded bounds also produce **no digest**. Complete
+equivalence must never be inferred from an incomplete result.
+
+Bounds: 4096 retained resources, 4 million stream items, 512 MiB streamed content,
+40 nested RNA levels and a 30-second checked work deadline. Results contain identities,
+format, status, a 64-character digest, counts, bounded omissions, elapsed time and an
+optional current saved-file SHA256. They contain no mesh arrays or image pixels.
+File SHA256 identifies saved bytes; it does not alone prove the live scene matches.
+
+The result schema is generated from `tyvrana_protocol.DocumentAttestation` and
+distributed as `attestation.schema.json`. Core validates this canonical model.
+An observation contract can thus be deployed without replacing the extension's
+unchanged transport/dependency wheels in a running host.
+
+Core owns acceptance and continuity policy. Attestation is content evidence, not
+an artistic, anatomical, physical or milestone acceptance judgment.

@@ -21,6 +21,7 @@ from tyvrana_blender.assembly_models import (
     AssemblyInspectArguments,
     AssemblyResult,
 )
+from tyvrana_blender.attestation_model import DocumentAttestationResult
 from tyvrana_blender.bake_models import (
     BakeImageArguments,
     BakeInspectArguments,
@@ -410,6 +411,9 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def document_attest(self) -> DocumentAttestationResult:
+        raise AssertionError("Document attestation uses native fixtures")
+
     def file_audit(self, arguments: FileAuditArguments) -> FileAuditResult:
         raise AssertionError("Delivery audit uses isolated native fixtures")
 
