@@ -1,5 +1,202 @@
 {
   "$defs": {
+    "AttestationCost": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "maxLength": 64,
+          "title": "Category",
+          "type": "string"
+        },
+        "resource": {
+          "default": "",
+          "maxLength": 256,
+          "title": "Resource",
+          "type": "string"
+        },
+        "resources": {
+          "minimum": 0,
+          "title": "Resources",
+          "type": "integer"
+        },
+        "stream_bytes": {
+          "minimum": 0,
+          "title": "Stream Bytes",
+          "type": "integer"
+        },
+        "stream_items": {
+          "minimum": 0,
+          "title": "Stream Items",
+          "type": "integer"
+        },
+        "bulk_elements": {
+          "minimum": 0,
+          "title": "Bulk Elements",
+          "type": "integer"
+        },
+        "elapsed_ms": {
+          "minimum": 0,
+          "title": "Elapsed Ms",
+          "type": "number"
+        }
+      },
+      "required": [
+        "category",
+        "resources",
+        "stream_bytes",
+        "stream_items",
+        "bulk_elements",
+        "elapsed_ms"
+      ],
+      "title": "AttestationCost",
+      "type": "object"
+    },
+    "AttestationLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "stream_bytes": {
+          "minimum": 1,
+          "title": "Stream Bytes",
+          "type": "integer"
+        },
+        "stream_items": {
+          "minimum": 1,
+          "title": "Stream Items",
+          "type": "integer"
+        },
+        "bulk_elements": {
+          "minimum": 1,
+          "title": "Bulk Elements",
+          "type": "integer"
+        },
+        "buffer_bytes": {
+          "minimum": 1,
+          "title": "Buffer Bytes",
+          "type": "integer"
+        },
+        "resources": {
+          "minimum": 1,
+          "title": "Resources",
+          "type": "integer"
+        },
+        "elapsed_ms": {
+          "minimum": 1,
+          "title": "Elapsed Ms",
+          "type": "integer"
+        },
+        "nesting": {
+          "minimum": 1,
+          "title": "Nesting",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "stream_bytes",
+        "stream_items",
+        "bulk_elements",
+        "buffer_bytes",
+        "resources",
+        "elapsed_ms",
+        "nesting"
+      ],
+      "title": "AttestationLimits",
+      "type": "object"
+    },
+    "AttestationWork": {
+      "additionalProperties": false,
+      "description": "Bounded counters, never authored arrays or per-component payloads.",
+      "properties": {
+        "exceeded": {
+          "anyOf": [
+            {
+              "enum": [
+                "stream_bytes",
+                "stream_items",
+                "bulk_elements",
+                "buffer_bytes",
+                "resources",
+                "elapsed_ms",
+                "nesting"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exceeded"
+        },
+        "stream_bytes": {
+          "minimum": 0,
+          "title": "Stream Bytes",
+          "type": "integer"
+        },
+        "stream_items": {
+          "minimum": 0,
+          "title": "Stream Items",
+          "type": "integer"
+        },
+        "bulk_elements": {
+          "minimum": 0,
+          "title": "Bulk Elements",
+          "type": "integer"
+        },
+        "resources_completed": {
+          "minimum": 0,
+          "title": "Resources Completed",
+          "type": "integer"
+        },
+        "peak_buffer_bytes": {
+          "minimum": 0,
+          "title": "Peak Buffer Bytes",
+          "type": "integer"
+        },
+        "current_category": {
+          "maxLength": 64,
+          "title": "Current Category",
+          "type": "string"
+        },
+        "current_resource": {
+          "maxLength": 256,
+          "title": "Current Resource",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/AttestationLimits"
+        },
+        "categories": {
+          "items": {
+            "$ref": "#/$defs/AttestationCost"
+          },
+          "maxItems": 32,
+          "title": "Categories",
+          "type": "array"
+        },
+        "heaviest": {
+          "items": {
+            "$ref": "#/$defs/AttestationCost"
+          },
+          "maxItems": 8,
+          "title": "Heaviest",
+          "type": "array"
+        }
+      },
+      "required": [
+        "stream_bytes",
+        "stream_items",
+        "bulk_elements",
+        "resources_completed",
+        "peak_buffer_bytes",
+        "current_category",
+        "current_resource",
+        "limits",
+        "categories",
+        "heaviest"
+      ],
+      "title": "AttestationWork",
+      "type": "object"
+    },
     "ResourceToken": {
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
@@ -90,6 +287,17 @@
       ],
       "default": null,
       "title": "File Sha256"
+    },
+    "work": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AttestationWork"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

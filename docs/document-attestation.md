@@ -26,7 +26,7 @@ name. Used images include packed/external bytes and current pixel content; exter
 font content is included. Saved document/resource UUID markers identify bindings
 separately and are excluded from material content.
 
-UI workspaces/screens, runtime caches, selection and zero-user resources without a
+UI workspaces/screens, evaluated dependency-graph caches, selection and zero-user resources without a
 fake user are excluded. Such orphan resources are not retained by ordinary save/load.
 Nonmaterial UI fields may conservatively affect some RNA resource hashes; a digest
 mismatch never proves a particular visual defect or grants acceptance.
@@ -37,8 +37,33 @@ external resource categories fail explicitly. Unreadable values, nonfinite float
 unknown value classes and exceeded bounds also produce **no digest**. Complete
 equivalence must never be inferred from an incomplete result.
 
-Bounds: 4096 retained resources, 4 million stream items, 512 MiB streamed content,
-40 nested RNA levels and a 30-second checked work deadline. Results contain identities,
+Dense numerical inputs use native `foreach_get`. Blender requires a contiguous
+full-length target and does not provide offset reads; repeated pixel slices can
+repeatedly materialize the underlying image. Arrays up to 8 MiB use one native
+array buffer. Larger inputs use anonymous disk-backed scratch, then stream through
+1 MiB endian-conversion/hash chunks. There are no full-array byte/string copies or
+Python lists. Scratch closes on success and failure. Memory-mapped pages remain
+subject to the operating system's paging; mapped span is not a measured RSS bound.
+Packed bytes remain bounded native allocations; external files stream in chunks.
+
+Blob type and total byte length are encoded before content. Changing chunk size
+cannot change a digest. Unordered resource/membership/node enumerations are sorted;
+ordered modifier stacks, sockets and geometry indices retain their semantic order.
+
+Bounds: 4096 retained resources, 4 million structural stream items, 4 GiB actual
+streamed bytes, 1,073,741,824 bulk components, 1 GiB per contiguous native/scratch
+buffer, 40 nested RNA levels and a 30-second checked work deadline. Streamed-byte
+capacity is separate from bounded buffering, not a permission to construct a 4 GiB
+Python value. Hashing native bulk data does not count each scalar as an RNA visit.
+The contiguous native call itself is bounded by buffer size; deadline checks occur
+before/after it and at each hash chunk/structural feed.
+
+Results include exact exhausted-budget identity, bytes/items/bulk components,
+completed resources, current category/resource, configured limits, peak contiguous
+buffer span, bounded category totals and eight heaviest resource timings. Buffer
+span includes mapped scratch; it does not claim to measure Python heap or peak RSS.
+
+Results contain identities,
 format, status, a 64-character digest, counts, bounded omissions, elapsed time and an
 optional current saved-file SHA256. They contain no mesh arrays or image pixels.
 File SHA256 identifies saved bytes; it does not alone prove the live scene matches.

@@ -3,12 +3,16 @@
 import array
 import hashlib
 import math
+import mmap
 import os
 import struct
 import sys
+import tempfile
 import time
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import bpy  # type: ignore[import-not-found]
@@ -23,7 +27,11 @@ FORMAT = (
     + hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
 )
 MAX_ITEMS = 4000000
-MAX_BYTES = 512 * 1024 * 1024
+MAX_BYTES = 4 * 1024 * 1024 * 1024
+MAX_BUFFER = 1024 * 1024 * 1024
+DIRECT_BUFFER = 8 * 1024 * 1024
+CHUNK_BYTES = 1024 * 1024
+MAX_ELEMENTS = MAX_BYTES // 4
 MAX_SECONDS = 30
 # RNA runtime caches, UI selection, ownership backreferences and computed handles.
 SKIP = {
@@ -158,22 +166,207 @@ class Hasher:
         self.digest = hashlib.sha256()
         self.items = 0
         self.bytes = 0
+        self.bulk_elements = 0
+        self.peak_buffer = 0
         self.start = time.monotonic()
         self.seen: set[int] = set()
+        self.exceeded: str | None = None
+        self.category = "configuration"
+        self.resource_name = "color"
+        self.completed = 0
+        self.costs: list[dict[str, Any]] = []
+
+    def limit(self, name: str) -> None:
+        self.exceeded = name
+        raise Unqualified("limit: " + name + " attestation budget exhausted")
+
+    def checkpoint(self) -> None:
+        if self.items > MAX_ITEMS:
+            self.limit("stream_items")
+        if self.bytes > MAX_BYTES:
+            self.limit("stream_bytes")
+        if self.bulk_elements > MAX_ELEMENTS:
+            self.limit("bulk_elements")
+        if time.monotonic() - self.start > MAX_SECONDS:
+            self.limit("elapsed_ms")
+
+    def raw(self, value: Any) -> None:
+        self.bytes += len(value)
+        self.checkpoint()
+        self.digest.update(value)
 
     def feed(self, value: bytes) -> None:
         self.items += 1
-        self.bytes += len(value)
-        if self.items > MAX_ITEMS or self.bytes > MAX_BYTES:
-            raise Unqualified("limit: document exceeds attestation work budget")
-        if time.monotonic() - self.start > MAX_SECONDS:
-            raise Unqualified("limit: document attestation deadline exceeded")
-        self.digest.update(struct.pack("!Q", len(value)))
-        self.digest.update(value)
+        self.raw(struct.pack("!Q", len(value)))
+        self.raw(value)
+
+    def buffer(self, size: int) -> None:
+        self.peak_buffer = max(self.peak_buffer, size)
+        if size > MAX_BUFFER:
+            self.limit("buffer_bytes")
+
+    def blob(self, size: int, chunks: Iterable[Any]) -> None:
+        # Chunk boundaries are transport only and never enter the canonical stream.
+        self.feed(b"bytes")
+        self.feed(struct.pack("!Q", size))
+        consumed = 0
+        iterator = iter(chunks)
+        try:
+            for chunk in iterator:
+                consumed += len(chunk)
+                if consumed > size:
+                    raise Unqualified("Native content exceeded declared byte length")
+                self.raw(chunk)
+        finally:
+            close = getattr(iterator, "close", None)
+            if close:
+                close()
+        if consumed != size:
+            raise Unqualified("Native content did not match declared byte length")
+
+    def content(self, value: Any) -> None:
+        self.buffer(len(value))
+        with memoryview(value).cast("B") as data:
+
+            def chunks() -> Iterator[memoryview]:
+                for offset in range(0, len(data), CHUNK_BYTES):
+                    with data[offset : offset + CHUNK_BYTES] as part:
+                        yield part
+
+            self.blob(len(data), chunks())
+
+    def file(self, path: Path) -> None:
+        size = path.stat().st_size
+        self.checkpoint()
+        with path.open("rb") as stream:
+
+            def chunks() -> Iterator[bytes]:
+                while chunk := stream.read(CHUNK_BYTES):
+                    self.buffer(len(chunk))
+                    yield chunk
+
+            self.blob(size, chunks())
+
+    def native_array(
+        self, source: Any, count: int, code: Literal["f", "i"], key: str | None = None
+    ) -> None:
+        size = count * array.array(code).itemsize
+        self.buffer(size)
+        self.bulk_elements += count
+        self.checkpoint()
+        self.value(("native_array", code, count))
+        if not size:
+            self.blob(0, ())
+            return
+
+        def read(target: Any) -> None:
+            if key is None:
+                source.foreach_get(target)
+            else:
+                source.foreach_get(key, target)
+
+        def chunks(data: Any) -> Iterator[memoryview]:
+            with memoryview(data).cast("B") as raw:
+                for offset in range(0, size, CHUNK_BYTES):
+                    if sys.byteorder == "big" or array.array(code).itemsize == 1:
+                        with raw[offset : offset + CHUNK_BYTES] as encoded:
+                            yield encoded
+                    else:
+                        part = array.array(code)
+                        part.frombytes(raw[offset : offset + CHUNK_BYTES])
+                        part.byteswap()
+                        with memoryview(part).cast("B") as encoded:
+                            yield encoded
+
+        if size <= DIRECT_BUFFER:
+            values = array.array(code, [0]) * count
+            read(values)
+            self.blob(size, chunks(values))
+        else:
+            # RNA foreach_get requires a full contiguous target: it has no offset.
+            # Disk-backed scratch avoids giant Python arrays/lists and extra copies.
+            # Only endian-conversion/hash chunks are materialized in Python.
+            with tempfile.TemporaryFile(prefix="tyvrana-attestation-") as scratch:
+                scratch.truncate(size)
+                with mmap.mmap(scratch.fileno(), size) as mapped:
+                    with memoryview(mapped).cast(code) as target:
+                        read(target)
+                    self.blob(size, chunks(mapped))
+        self.checkpoint()
+
+    @contextmanager
+    def resource(self, category: str, name: str) -> Iterator[None]:
+        self.category, self.resource_name = category, name
+        before = self.bytes, self.items, self.bulk_elements, time.monotonic()
+        try:
+            yield
+        except BaseException:
+            raise
+        else:
+            self.completed += 1
+        finally:
+            self.costs.append(
+                dict(
+                    category=category,
+                    resource=name[:256],
+                    resources=1,
+                    stream_bytes=self.bytes - before[0],
+                    stream_items=self.items - before[1],
+                    bulk_elements=self.bulk_elements - before[2],
+                    elapsed_ms=(time.monotonic() - before[3]) * 1000,
+                )
+            )
+
+    def diagnostics(self) -> dict[str, Any]:
+        categories: dict[str, dict[str, Any]] = {}
+        for cost in self.costs:
+            total = categories.setdefault(
+                cost["category"],
+                dict(
+                    category=cost["category"],
+                    resource="",
+                    resources=0,
+                    stream_bytes=0,
+                    stream_items=0,
+                    bulk_elements=0,
+                    elapsed_ms=0.0,
+                ),
+            )
+            for field in (
+                "resources",
+                "stream_bytes",
+                "stream_items",
+                "bulk_elements",
+                "elapsed_ms",
+            ):
+                total[field] += cost[field]
+        return dict(
+            exceeded=self.exceeded,
+            stream_bytes=self.bytes,
+            stream_items=self.items,
+            bulk_elements=self.bulk_elements,
+            resources_completed=self.completed,
+            peak_buffer_bytes=self.peak_buffer,
+            current_category=self.category,
+            current_resource=self.resource_name[:256],
+            limits=dict(
+                stream_bytes=MAX_BYTES,
+                stream_items=MAX_ITEMS,
+                bulk_elements=MAX_ELEMENTS,
+                buffer_bytes=MAX_BUFFER,
+                resources=4096,
+                elapsed_ms=MAX_SECONDS * 1000,
+                nesting=40,
+            ),
+            categories=list(categories.values())[:32],
+            heaviest=sorted(
+                self.costs, key=lambda row: row["elapsed_ms"], reverse=True
+            )[:8],
+        )
 
     def value(self, value: Any, depth: int = 0) -> None:
         if depth > 40:
-            raise Unqualified("limit: RNA nesting exceeds 40")
+            self.limit("nesting")
         if value is None:
             self.feed(b"null")
         elif isinstance(value, bool):
@@ -187,7 +380,7 @@ class Hasher:
         elif isinstance(value, str):
             self.feed(b"str" + value.encode("utf-8", "surrogatepass"))
         elif isinstance(value, bytes):
-            self.feed(b"bytes" + value)
+            self.content(value)
         elif isinstance(value, bpy.types.ID):
             if isinstance(value, bpy.types.Image) and value.type in {
                 "RENDER_RESULT",
@@ -206,13 +399,12 @@ class Hasher:
                 )
         elif hasattr(value, "bl_rna") and hasattr(value, "as_pointer"):
             self.rna(value, depth + 1)
-        elif hasattr(value, "to_dict"):
-            self.value(value.to_dict(), depth + 1)
-        elif isinstance(value, dict):
+        elif isinstance(value, dict) or hasattr(value, "to_dict"):
             self.feed(b"map")
-            for key in sorted(value):
+            for key in sorted(value.keys()):
                 self.value(str(key), depth + 1)
                 self.value(value[key], depth + 1)
+            self.feed(b"end_map")
         elif isinstance(value, set):
             self.value(sorted(value), depth + 1)
         elif hasattr(value, "__iter__") or (
@@ -225,15 +417,11 @@ class Hasher:
         else:
             raise Unqualified("Unsupported value class: " + type(value).__name__)
 
-    def bulk(self, collection: Any, key: str, code: str, width: int = 1) -> None:
-        count = len(collection) * width
-        if count > MAX_BYTES // 8:
-            raise Unqualified("limit: native array exceeds attestation budget")
-        values = array.array(code, [0]) * count
-        collection.foreach_get(key, values)
-        if sys.byteorder != "big":
-            values.byteswap()
-        self.value((key, code, len(collection), width, values.tobytes()))
+    def bulk(
+        self, collection: Any, key: str, code: Literal["f", "i"], width: int = 1
+    ) -> None:
+        self.value((key, len(collection), width))
+        self.native_array(collection, len(collection) * width, code, key)
 
     def mesh(self, mesh: Any) -> None:
         self.bulk(mesh.vertices, "co", "f", 3)
@@ -245,7 +433,7 @@ class Hasher:
         self.bulk(mesh.corner_normals, "vector", "f", 3)
         for vertex in mesh.vertices:
             if vertex.index % 1024 == 0 and time.monotonic() - self.start > MAX_SECONDS:
-                raise Unqualified("limit: mesh weight scan deadline exceeded")
+                self.limit("elapsed_ms")
             if vertex.groups:
                 self.value((vertex.index, [(g.group, g.weight) for g in vertex.groups]))
         for attribute in sorted(mesh.attributes, key=lambda a: a.name):
@@ -265,7 +453,7 @@ class Hasher:
                         prop.array_length if prop.is_array else 1,
                     )
                 elif prop.type == "STRING":
-                    self.value([getattr(v, key) for v in attribute.data])
+                    self.value(getattr(v, key) for v in attribute.data)
                 else:
                     raise Unqualified("Unsupported mesh attribute field: " + key)
         self.value([(uv.name, uv.active_render) for uv in mesh.uv_layers])
@@ -305,6 +493,8 @@ class Hasher:
             self.feed(owner.bl_rna.identifier.encode())
             for prop in sorted(owner.bl_rna.properties, key=lambda p: p.identifier):
                 key = prop.identifier
+                if isinstance(owner, bpy.types.ViewLayer) and key == "depsgraph":
+                    continue
                 if isinstance(owner, bpy.types.Mesh) and key in {
                     "vertices",
                     "edges",
@@ -339,6 +529,40 @@ class Hasher:
                     raise Unqualified(
                         f"Unreadable {owner.bl_rna.identifier}.{key}"
                     ) from exc
+                if isinstance(
+                    owner, (bpy.types.Collection, bpy.types.Scene, bpy.types.ViewLayer)
+                ) and key in {
+                    "objects",
+                    "all_objects",
+                    "children",
+                    "collection_objects",
+                    "collection_children",
+                }:
+
+                    def order(item: Any) -> str:
+                        target = (
+                            getattr(item, "object", None)
+                            or getattr(item, "collection", None)
+                            or item
+                        )
+                        return str(
+                            getattr(target, "name_full", getattr(target, "name", ""))
+                        )
+
+                    value = sorted(value, key=order)
+                if isinstance(owner, bpy.types.NodeTree) and key == "nodes":
+                    value = sorted(value, key=lambda node: node.name)
+                if isinstance(owner, bpy.types.NodeTree) and key == "links":
+                    value = sorted(
+                        value,
+                        key=lambda link: (
+                            link.from_node.name,
+                            link.from_socket.identifier,
+                            link.to_node.name,
+                            link.to_socket.identifier,
+                            link.multi_input_sort_id,
+                        ),
+                    )
                 self.feed(key.encode())
                 self.value(value, depth + 1)
             if isinstance(owner, bpy.types.Mesh):
@@ -383,14 +607,8 @@ def inspect() -> DocumentAttestationResult:
         if not configured.startswith("ocio://"):
             for color_file in sorted(color_root.rglob("*")):
                 if color_file.is_file():
-                    if color_file.stat().st_size > MAX_BYTES:
-                        raise Unqualified("limit: color configuration exceeds budget")
-                    h.value(
-                        (
-                            color_file.relative_to(color_root).as_posix(),
-                            color_file.read_bytes(),
-                        )
-                    )
+                    h.value(color_file.relative_to(color_root).as_posix())
+                    h.file(color_file)
         if any(
             scene.render.engine not in {"BLENDER_EEVEE", "CYCLES"}
             or scene.render.use_freestyle
@@ -418,80 +636,76 @@ def inspect() -> DocumentAttestationResult:
                 }:
                     # Output buffers; material references fail in value().
                     continue
-                resources += 1
-                if resources > 4096:
-                    raise Unqualified("limit: more than 4096 resources")
-                if item.library or item.override_library:
-                    raise Unqualified("Linked/override resource: " + item.name_full)
-                if (
-                    item.bl_rna.identifier == "VectorFont"
-                    and item.filepath != "<builtin>"
-                ):
-                    if item.packed_file:
-                        h.value(bytes(item.packed_file.data))
-                    else:
-                        font_path = Path(bpy.path.abspath(item.filepath))
-                        if (
-                            not font_path.is_file()
-                            or font_path.stat().st_size > MAX_BYTES
-                        ):
-                            raise Unqualified("Missing/oversized external font")
-                        h.value(font_path.read_bytes())
-                if isinstance(item, bpy.types.Text):
-                    if "_tyvrana_document_id" in item:
+                with h.resource(kind, item.name_full):
+                    resources += 1
+                    if resources > 4096:
+                        h.limit("resources")
+                    if item.library or item.override_library:
+                        raise Unqualified("Linked/override resource: " + item.name_full)
+                    if (
+                        item.bl_rna.identifier == "VectorFont"
+                        and item.filepath != "<builtin>"
+                    ):
+                        if item.packed_file:
+                            h.buffer(item.packed_file.size)
+                            h.content(item.packed_file.data)
+                        else:
+                            font_path = Path(bpy.path.abspath(item.filepath))
+                            if (
+                                not font_path.is_file()
+                                or font_path.stat().st_size > MAX_BYTES
+                            ):
+                                raise Unqualified("Missing/oversized external font")
+                            h.file(font_path)
+                    if isinstance(item, bpy.types.Text):
+                        if "_tyvrana_document_id" in item:
+                            continue
+                        h.value(item.name_full)
+                        h.value(item.as_string())
                         continue
-                    h.value(item.name_full)
-                    h.value(item.as_string())
-                    continue
-                if isinstance(item, bpy.types.Image):
-                    if item.type in {"RENDER_RESULT", "COMPOSITING"}:
-                        raise Unqualified(
-                            "Referenced transient render/compositor image"
-                        )
-                    if item.source not in {"FILE", "GENERATED"}:
-                        raise Unqualified("Unsupported image source: " + item.source)
-                    if item.is_dirty and item.source == "FILE":
-                        raise Unqualified(
-                            "Unsaved image pixels require saved/packed evidence"
-                        )
-                    if item.packed_file:
-                        h.value(bytes(item.packed_file.data))
-                    elif item.source == "FILE":
-                        path = Path(bpy.path.abspath(item.filepath))
-                        if not path.is_file() or path.stat().st_size > MAX_BYTES:
+                    if isinstance(item, bpy.types.Image):
+                        if item.type in {"RENDER_RESULT", "COMPOSITING"}:
                             raise Unqualified(
-                                "Missing/oversized external image: " + item.name
+                                "Referenced transient render/compositor image"
                             )
-                        h.value(path.read_bytes())
-                    pixel_count = len(item.pixels)
-                    if pixel_count > MAX_BYTES // 4:
+                        if item.source not in {"FILE", "GENERATED"}:
+                            raise Unqualified(
+                                "Unsupported image source: " + item.source
+                            )
+                        if item.is_dirty and item.source == "FILE":
+                            raise Unqualified(
+                                "Unsaved image pixels require saved/packed evidence"
+                            )
+                        if item.packed_file:
+                            h.buffer(item.packed_file.size)
+                            h.content(item.packed_file.data)
+                        elif item.source == "FILE":
+                            path = Path(bpy.path.abspath(item.filepath))
+                            if not path.is_file() or path.stat().st_size > MAX_BYTES:
+                                raise Unqualified(
+                                    "Missing/oversized external image: " + item.name
+                                )
+                            h.file(path)
+                        h.native_array(item.pixels, len(item.pixels), "f")
+                    if isinstance(item, bpy.types.Object) and any(
+                        m.type
+                        in {
+                            "FLUID",
+                            "CLOTH",
+                            "SOFT_BODY",
+                            "PARTICLE_SYSTEM",
+                            "MESH_SEQUENCE_CACHE",
+                        }
+                        for m in item.modifiers
+                    ):
                         raise Unqualified(
-                            "limit: image pixels exceed attestation budget"
+                            "Simulation/cache state requires independent attestation"
                         )
-                    pixels = array.array("f", [0]) * pixel_count
-                    item.pixels.foreach_get(pixels)
-                    if sys.byteorder != "big":
-                        pixels.byteswap()
-                    h.value(pixels.tobytes())
-                if isinstance(item, bpy.types.Object) and any(
-                    m.type
-                    in {
-                        "FLUID",
-                        "CLOTH",
-                        "SOFT_BODY",
-                        "PARTICLE_SYSTEM",
-                        "MESH_SEQUENCE_CACHE",
-                    }
-                    for m in item.modifiers
-                ):
-                    raise Unqualified(
-                        "Simulation/cache state requires independent attestation"
-                    )
-                if isinstance(item, bpy.types.Object) and item.mode != "OBJECT":
-                    raise Unqualified("Attestation requires object mode")
-                h.rna(item)
+                    if isinstance(item, bpy.types.Object) and item.mode != "OBJECT":
+                        raise Unqualified("Attestation requires object mode")
+                    h.rna(item)
         digest = h.digest.hexdigest()
-    except (Unqualified, RecursionError, ValueError, TypeError) as exc:
+    except (Unqualified, RecursionError, ValueError, TypeError, OSError) as exc:
         omissions = [str(exc)[:256] or type(exc).__name__]
     saved = None
     if bpy.data.filepath:
@@ -516,5 +730,6 @@ def inspect() -> DocumentAttestationResult:
             "omissions": [str(x) for x in omissions],
             "elapsed_ms": (time.monotonic() - start) * 1000,
             "file_sha256": saved,
+            "work": h.diagnostics(),
         }
     )
