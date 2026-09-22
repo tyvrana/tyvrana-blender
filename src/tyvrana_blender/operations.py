@@ -1194,7 +1194,7 @@ _DECLARATIONS = (
             "metrics are not persistent sources. Unknown external drivers are"
             " preserved."
         ),
-        tags=("rigging", "mapping", "coupled", "batched"),
+        tags=("recovery_replay", "rigging", "mapping", "coupled", "batched"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -2022,7 +2022,7 @@ _DECLARATIONS = (
             "checks and rollback. Configure before owner animation. No "
             "property bags or expressions."
         ),
-        tags=("rigging", "constraints", "controls"),
+        tags=("recovery_replay", "rigging", "constraints", "controls"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -2514,6 +2514,7 @@ _DECLARATIONS = (
         "independent.",
         effect="mutating",
         execution="synchronous",
+        tags=("recovery_replay",),
     ),
     _operation(
         "blender.object_set.configure",
@@ -2829,6 +2830,7 @@ _DECLARATIONS = (
         "returns only counts/hashes; construction rolls back on failure.",
         effect="mutating",
         execution="synchronous",
+        tags=("recovery_replay",),
     ),
     _operation(
         "blender.armature.inspect",
@@ -3599,6 +3601,7 @@ _DECLARATIONS = (
         " edits and rejects unsafe data combinations.",
         effect="mutating",
         execution="synchronous",
+        tags=("recovery_replay",),
     ),
     _operation(
         "blender.modifier.apply",
@@ -3731,6 +3734,7 @@ _DECLARATIONS = (
         "Use mesh.create for bounded authored coordinates/faces.",
         effect="mutating",
         execution="synchronous",
+        tags=("recovery_replay",),
     ),
     _operation(
         "blender.object.delete",
@@ -3741,6 +3745,7 @@ _DECLARATIONS = (
         "enforcing native ownership guards.",
         effect="mutating",
         execution="synchronous",
+        tags=("recovery_replay",),
     ),
     _operation(
         "blender.object.set_transform",
@@ -3752,6 +3757,7 @@ _DECLARATIONS = (
         " For measured dimensions/alignment across objects, use object_set.place.",
         effect="mutating",
         execution="synchronous",
+        tags=("recovery_replay",),
     ),
     _operation(
         "blender.render.devices",

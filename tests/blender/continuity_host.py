@@ -26,9 +26,24 @@ try:
                 bpy.app.timers.unregister(lifecycle._poll)
         command = control / "command.json"
         if command.exists():
-            action = json.loads(command.read_text())["action"]
+            payload = json.loads(command.read_text())
+            action = payload["action"]
             command.unlink()
-            if action == "reconnect":
+            if action == "typed_delta":
+                operations = importlib.import_module(PACKAGE + ".operations")
+                protocol = importlib.import_module("tyvrana_protocol")
+                for index, (operation, arguments) in enumerate(payload["steps"]):
+                    response = operations.execute(
+                        backend.BlenderBackend(),
+                        protocol.OperationRequest(
+                            type="operation.request",
+                            request_id=f"legacy-{index}",
+                            operation=operation,
+                            arguments=arguments,
+                        ),
+                    )
+                    assert response.type == "operation.success", response
+            elif action == "reconnect":
                 backend.restart()
             elif action in {"geometry_changed", "restore_geometry"}:
                 mesh = bpy.data.objects["Fixture"].data

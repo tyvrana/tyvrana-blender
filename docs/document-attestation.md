@@ -130,3 +130,18 @@ diverged until reconciled. Direct client submission of the internal start is ref
 The guarded path currently supports synchronous, artifact-free mutations, including
 mechanical authoring and save. Nested asynchronous mutations, artifact transfers and
 document replacement are not qualified by this transaction contract and fail closed.
+
+## Qualified recovery replay
+
+The `recovery_replay` operation tag permits Core's guarded `project.reconcile`
+workflow to reproduce an explicitly declared missing transition on a disposable,
+independent copy of the trusted prior document. It is not permission to bypass
+normal working-head checks on the live document.
+
+The current qualification covers primitive and object-set creation, armature
+creation, constraint and coupling configuration, object and mesh transforms,
+and object deletion. These synchronous operations use no artifact transport and
+perform no file or lifecycle changes. Core still requires guarded before/after
+receipts, unchanged prerequisite resource fingerprints, and exact full-content
+equality with fresh live evidence. Unknown changes and nondeterministic replay
+results fail closed. Normal authoring continues to use ordinary mutation receipts.
