@@ -251,6 +251,7 @@ from .motion_models import (
     TimelineInspectArguments,
     TimelineState,
 )
+from .mutation_models import MutationArguments, MutationJobStatus
 from .operation_dispatch import (
     OperationSpec as OperationSpec,
 )
@@ -804,6 +805,14 @@ class SceneBackend(Protocol):
     ) -> SurfaceInstancesSummary: ...
 
     def extension_inspect(self) -> ExtensionState: ...
+    def document_mutate(
+        self, arguments: MutationArguments, request: OperationRequest
+    ) -> MutationJobStatus: ...
+
+    def document_mutation_status(
+        self, arguments: AttestationJobArguments
+    ) -> MutationJobStatus: ...
+
     def document_attest(self) -> DocumentAttestationResult: ...
 
     def document_attest_status(
@@ -2967,6 +2976,29 @@ _DECLARATIONS = (
         "actions/drivers and an explicit evaluated reference frame.",
         effect="read_only",
         execution="synchronous",
+    ),
+    _operation(
+        "blender.document.mutate",
+        MutationArguments,
+        MutationJobStatus,
+        lambda b, a, q: b.document_mutate(a, q),
+        "Core-orchestrated guarded execution of one advertised typed mutation. "
+        "Matches the authorized working head and returns a strong before/after "
+        "receipt. "
+        "Use the original authoring operation; Core supplies this internal contract.",
+        effect="mutating",
+        execution="job_start",
+        tags=("document_mutation",),
+    ),
+    _operation(
+        "blender.document.mutation_status",
+        AttestationJobArguments,
+        MutationJobStatus,
+        lambda b, a, q: b.document_mutation_status(a),
+        "Observe a guarded mutation and its terminal receipt, with bounded backoff.",
+        effect="read_only",
+        execution="job_status",
+        tags=("document_mutation_status",),
     ),
     _operation(
         "blender.document.attest",

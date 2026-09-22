@@ -263,6 +263,7 @@ from tyvrana_blender.motion_models import (
     TimelineInspectArguments,
     TimelineState,
 )
+from tyvrana_blender.mutation_models import MutationArguments, MutationJobStatus
 from tyvrana_blender.operations import execute
 from tyvrana_blender.organization_models import (
     CollectionConfigureArguments,
@@ -415,6 +416,16 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def document_mutate(
+        self, arguments: MutationArguments, request: OperationRequest
+    ) -> MutationJobStatus:
+        raise AssertionError("Guarded mutations use native fixtures")
+
+    def document_mutation_status(
+        self, arguments: AttestationJobArguments
+    ) -> MutationJobStatus:
+        raise AssertionError("Guarded mutations use native fixtures")
+
     def document_attest(self) -> DocumentAttestationResult:
         raise AssertionError("Document attestation uses native fixtures")
 

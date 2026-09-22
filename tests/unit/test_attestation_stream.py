@@ -110,3 +110,42 @@ def test_native_float_encoding_preserves_signed_zero_and_rejects_nonfinite(
     for value in [float("nan"), float("inf"), -float("inf")]:
         with pytest.raises(attestation.Unqualified, match="Nonfinite"):
             attestation.Hasher().native_array(Source(value), 1, "f")
+
+
+def test_resource_closure_tracks_dependencies_without_incoming_users(
+    attestation: Any,
+) -> None:
+    h = attestation.Hasher()
+    h.configuration = "color-config"
+    obj, mesh, material = (
+        ("Object", "Base"),
+        ("Mesh", "Geometry"),
+        ("Material", "Surface"),
+    )
+    h.nodes = {
+        obj: ("object-state", {mesh, material}),
+        mesh: ("geometry-a", set()),
+        material: ("shader-a", set()),
+    }
+    h.roots = [("object", "base-id", "Base", obj)]
+    original = h.resource_evidence()[0]
+    # A new downstream user refers to Base. This does not make it a dependency of Base.
+    h.nodes["Object", "Harness"] = ("working", {obj})
+    assert h.resource_evidence()[0] == original
+    for dependency in (mesh, material):
+        previous = h.nodes[dependency]
+        h.nodes[dependency] = ("changed", set())
+        assert h.resource_evidence()[0]["fingerprint"] != original["fingerprint"]
+        h.nodes[dependency] = previous
+    del h.nodes[mesh]
+    assert h.resource_evidence()[0]["state"] == "unsupported"
+    h.roots.append(("object", "base-id", "Duplicate", obj))
+    assert h.resource_evidence()[0]["state"] == "ambiguous"
+
+
+def test_resource_metadata_does_not_change_document_stream(attestation: Any) -> None:
+    first, second = attestation.Hasher(), attestation.Hasher()
+    first.feed(b"native-content")
+    with second.resource("objects", "Base"):
+        second.feed(b"native-content")
+    assert first.digest.digest() == second.digest.digest()

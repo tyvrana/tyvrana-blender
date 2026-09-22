@@ -283,6 +283,7 @@ from .motion_models import (
     TimelineInspectArguments,
     TimelineState,
 )
+from .mutation_models import MutationArguments, MutationJobStatus
 from .operations import Response, execute, registration
 from .organization_models import (
     CollectionConfigureArguments,
@@ -1280,6 +1281,22 @@ class BlenderBackend:
 
         return references.configure_units(arguments)
 
+    def document_mutate(
+        self, arguments: MutationArguments, request: OperationRequest
+    ) -> MutationJobStatus:
+        main_thread()
+        from . import mutation_jobs
+
+        return mutation_jobs.start(self, arguments, request)
+
+    def document_mutation_status(
+        self, arguments: AttestationJobArguments
+    ) -> MutationJobStatus:
+        main_thread()
+        from . import mutation_jobs
+
+        return mutation_jobs.status(arguments.job_id)
+
     def document_attest(self) -> DocumentAttestationResult:
         main_thread()
         from . import attestation_jobs
@@ -1889,8 +1906,15 @@ class BlenderBackend:
             bake_jobs,
             form_jobs,
             growth_dynamics,
+            mutation_jobs,
             render_host,
         )
+
+        if mutation_jobs.busy():
+            return operation in {
+                "blender.document.mutation_status",
+                "blender.extension.inspect",
+            }
 
         if attestation_jobs.busy():
             return operation in {
@@ -3072,8 +3096,15 @@ def preferences_config() -> ConnectionConfig:
 def stop() -> None:
     global _runtime
     main_thread()
-    from . import attestation_jobs, form_jobs, growth_dynamics, render_host
+    from . import (
+        attestation_jobs,
+        form_jobs,
+        growth_dynamics,
+        mutation_jobs,
+        render_host,
+    )
 
+    mutation_jobs.shutdown()
     attestation_jobs.shutdown()
     form_jobs.shutdown()
     render_host.shutdown()
@@ -3103,8 +3134,9 @@ def pump() -> float | None:
             restart()
         if _runtime is not None:
             _runtime.tick()
-            from . import attestation_jobs, form_jobs, growth_dynamics
+            from . import attestation_jobs, form_jobs, growth_dynamics, mutation_jobs
 
+            mutation_jobs.tick()
             attestation_jobs.tick()
             form_jobs.tick()
             growth_dynamics.tick()

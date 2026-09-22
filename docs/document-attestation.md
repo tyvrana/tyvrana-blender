@@ -107,3 +107,26 @@ use native bulk access. In particular, triangle-to-face indices are still covere
 they are not traversed as individual ReadOnlyInteger RNA objects. Variable-length
 vertex deformation groups and unsupported nonnumeric fields retain explicit typed
 traversal or fail closed. Buffer capacity applies to one property at a time.
+
+## Scoped evidence and guarded mutation
+
+Complete observations also carry strong fingerprints for resources with durable
+Tyvrana IDs. Each fingerprint includes the resource's native content and transitive
+outgoing datablock dependencies, including geometry and material content. Incoming
+users are not dependencies: adding a downstream object that references a base does
+not change the base's fingerprint. Ambiguous IDs and incomplete dependency coverage
+cannot authorize a mutation. Structural inspection fingerprints remain separate.
+This metadata does not alter the canonical whole-document byte stream or format.
+
+Core invokes `blender.document.mutate` internally for a bound, staged synchronous
+mutation. The existing native job scheduler obtains a guarded before observation,
+checks the expected identity and working digest, invokes the advertised typed
+operation without yielding between the check and invocation, then obtains a guarded
+after observation. `blender.document.mutation_status` exposes the correlated receipt.
+Only complete evidence can advance Core's working head. A failed operation or an
+unqualified postcondition produces no receipt; an uncertain changed document remains
+diverged until reconciled. Direct client submission of the internal start is refused.
+
+The guarded path currently supports synchronous, artifact-free mutations, including
+mechanical authoring and save. Nested asynchronous mutations, artifact transfers and
+document replacement are not qualified by this transaction contract and fail closed.

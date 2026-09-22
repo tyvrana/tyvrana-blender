@@ -307,6 +307,27 @@
             }
           ],
           "default": null
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/ResourceObservation"
+          },
+          "maxItems": 4096,
+          "title": "Resources",
+          "type": "array"
+        },
+        "resource_scope": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource Scope"
         }
       },
       "required": [
@@ -456,6 +477,63 @@
         "message"
       ],
       "title": "ProtocolError",
+      "type": "object"
+    },
+    "ResourceObservation": {
+      "additionalProperties": false,
+      "description": "Existence is not content validation; fingerprints cover declared scope only.",
+      "properties": {
+        "resource_kind": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "resource_id": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "state": {
+          "enum": [
+            "present",
+            "missing",
+            "ambiguous",
+            "unsupported"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fingerprint"
+        }
+      },
+      "required": [
+        "resource_kind",
+        "resource_id",
+        "state"
+      ],
+      "title": "ResourceObservation",
       "type": "object"
     },
     "ResourceToken": {

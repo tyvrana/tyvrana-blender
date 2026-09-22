@@ -2,6 +2,7 @@
 
 import array
 import hashlib
+import json
 import math
 import mmap
 import os
@@ -17,16 +18,16 @@ from uuid import uuid4
 
 import bpy  # type: ignore[import-not-found]
 import numpy as np  # type: ignore[import-not-found]
+from tyvrana_protocol import JsonValue
 
 from .attestation_model import DocumentAttestationResult
 from .bindings import project_id
 
-FORMAT = (
-    "blender-rna-"
-    + ".".join(map(str, bpy.app.version))
-    + "-"
-    + hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
-)
+# This identifier names canonical bytes, not unrelated implementation metadata.
+# Resource closure observations below do not change the qualified document stream.
+FORMAT = "blender-rna-" + ".".join(map(str, bpy.app.version)) + "-c5cc8d93e23e3309"
+RESOURCE_SCOPE = FORMAT + "-resource-closure"
+
 MAX_ITEMS = 4000000
 MAX_BYTES = 4 * 1024 * 1024 * 1024
 MAX_BUFFER = 1024 * 1024 * 1024
@@ -178,6 +179,11 @@ class Hasher:
         self.resource_name = "color"
         self.completed = 0
         self.costs: list[dict[str, Any]] = []
+        self.resource_digest: Any = None
+        self.references: set[tuple[str, str]] = set()
+        self.nodes: dict[tuple[str, str], tuple[str, set[tuple[str, str]]]] = {}
+        self.roots: list[tuple[str, str, str, tuple[str, str]]] = []
+        self.configuration = ""
 
     def limit(self, name: str) -> None:
         self.exceeded = name
@@ -199,6 +205,8 @@ class Hasher:
         self.bytes += len(value)
         self.checkpoint()
         self.digest.update(value)
+        if self.resource_digest is not None:
+            self.resource_digest.update(value)
 
     def feed(self, value: bytes) -> None:
         self.items += 1
@@ -313,17 +321,32 @@ class Hasher:
         self.checkpoint()
 
     @contextmanager
-    def resource(self, category: str, name: str) -> Iterator[None]:
+    def resource(self, category: str, name: str, item: Any = None) -> Iterator[None]:
         self.category, self.resource_name = category, name
         self.resource_start = time.monotonic()
         before = self.bytes, self.items, self.bulk_elements, time.monotonic()
+        self.resource_digest = hashlib.sha256()
+        self.references = set()
         try:
             yield
         except BaseException:
             raise
         else:
             self.completed += 1
+            if item is not None:
+                key = (item.bl_rna.identifier, item.name_full)
+                self.nodes[key] = (self.resource_digest.hexdigest(), self.references)
+                identifier = item.get("_tyvrana_resource_id")
+                kind = {
+                    "objects": "object",
+                    "materials": "material",
+                    "collections": "collection",
+                }.get(category)
+                if kind and isinstance(identifier, str):
+                    self.roots.append((kind, identifier, name, key))
         finally:
+            self.resource_digest = None
+            self.references = set()
             self.costs.append(
                 dict(
                     category=category,
@@ -335,6 +358,62 @@ class Hasher:
                     elapsed_ms=(time.monotonic() - before[3]) * 1000,
                 )
             )
+
+    def resource_evidence(self) -> list[dict[str, Any]]:
+        """Strong outgoing dependency closure; incoming users are not dependencies."""
+        counts: dict[tuple[str, str], int] = {}
+        for kind, identifier, _, _ in self.roots:
+            counts[kind, identifier] = counts.get((kind, identifier), 0) + 1
+        result: list[dict[str, Any]] = []
+        for kind, identifier, name, root in sorted(self.roots):
+            if any(
+                r["resource_kind"] == kind and r["resource_id"] == identifier
+                for r in result
+            ):
+                continue
+            visited: set[tuple[str, str]] = set()
+            pending = [root]
+            missing = False
+            while pending:
+                key = pending.pop()
+                if key in visited:
+                    continue
+                visited.add(key)
+                self.items += 1
+                self.checkpoint()
+                node = self.nodes.get(key)
+                if node is None:
+                    missing = True
+                    break
+                pending.extend(node[1] - visited)
+            state = (
+                "ambiguous"
+                if counts[kind, identifier] != 1
+                else "unsupported"
+                if missing
+                else "present"
+            )
+            fingerprint = None
+            if state == "present":
+                content = [
+                    self.configuration,
+                    [(key, self.nodes[key][0]) for key in sorted(visited)],
+                ]
+                fingerprint = hashlib.sha256(
+                    json.dumps(
+                        content, separators=(",", ":"), ensure_ascii=True
+                    ).encode()
+                ).hexdigest()
+            result.append(
+                dict(
+                    resource_kind=kind,
+                    resource_id=identifier,
+                    name=name,
+                    state=state,
+                    fingerprint=fingerprint,
+                )
+            )
+        return result
 
     def diagnostics(self) -> dict[str, Any]:
         categories: dict[str, dict[str, Any]] = {}
@@ -410,6 +489,7 @@ class Hasher:
             if value.is_embedded_data:
                 self.rna(value, depth + 1)
                 return
+            self.references.add((value.bl_rna.identifier, value.name_full))
             self.feed(b"ID")
             self.value(value.bl_rna.identifier, depth + 1)
             self.value(value.name_full, depth + 1)
@@ -625,6 +705,7 @@ def inspect_steps(
     digest = None
     omissions: list[str] = []
     resources = 0
+    resource_evidence: list[dict[str, Any]] = []
     h = Hasher()
     h.max_seconds = max_seconds
     try:
@@ -652,6 +733,7 @@ def inspect_steps(
             raise Unqualified("Unsupported render engine or scripted line rendering")
         if any(scene.rigidbody_world is not None for scene in bpy.data.scenes):
             raise Unqualified("Rigid-body cache requires independent attestation")
+        h.configuration = h.digest.hexdigest()
         for prop in sorted(bpy.data.bl_rna.properties, key=lambda p: p.identifier):
             kind = prop.identifier
             if prop.type != "COLLECTION" or kind in ROOT_SKIP:
@@ -671,7 +753,7 @@ def inspect_steps(
                 }:
                     # Output buffers; material references fail in value().
                     continue
-                with h.resource(kind, item.name_full):
+                with h.resource(kind, item.name_full, item):
                     resources += 1
                     if resources > 4096:
                         h.limit("resources")
@@ -740,6 +822,7 @@ def inspect_steps(
                         raise Unqualified("Attestation requires object mode")
                     h.rna(item)
                 yield {"progress": h.diagnostics()}
+        resource_evidence = h.resource_evidence()
         digest = h.digest.hexdigest()
     except (Unqualified, RecursionError, ValueError, TypeError, OSError) as exc:
         omissions = [str(exc)[:256] or type(exc).__name__]
@@ -767,6 +850,8 @@ def inspect_steps(
             "elapsed_ms": (time.monotonic() - start) * 1000,
             "file_sha256": saved,
             "work": h.diagnostics(),
+            "resources": cast(JsonValue, resource_evidence) if digest else [],
+            "resource_scope": RESOURCE_SCOPE if digest else None,
         }
     )
 

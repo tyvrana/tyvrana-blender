@@ -344,6 +344,31 @@
       "title": "DocumentAttestation",
       "type": "object"
     },
+    "DocumentMutationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "mutation_id": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "result": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "before": {
+          "$ref": "#/$defs/DocumentAttestation"
+        },
+        "after": {
+          "$ref": "#/$defs/DocumentAttestation"
+        }
+      },
+      "required": [
+        "mutation_id",
+        "result",
+        "before",
+        "after"
+      ],
+      "title": "DocumentMutationResult",
+      "type": "object"
+    },
     "Identifier": {
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
       "type": "string"
@@ -470,7 +495,6 @@
     }
   },
   "additionalProperties": false,
-  "description": "Observable application work with bounded progress and final evidence.",
   "properties": {
     "job_id": {
       "$ref": "#/$defs/ResourceToken"
@@ -508,18 +532,22 @@
     "progress": {
       "anyOf": [
         {
-          "$ref": "#/$defs/AttestationWork"
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
         },
         {
           "type": "null"
         }
       ],
-      "default": null
+      "default": null,
+      "title": "Progress"
     },
     "result": {
       "anyOf": [
         {
-          "$ref": "#/$defs/DocumentAttestation"
+          "$ref": "#/$defs/DocumentMutationResult"
         },
         {
           "type": "null"
@@ -543,6 +571,6 @@
     "job_id",
     "state"
   ],
-  "title": "DocumentAttestationJob",
+  "title": "DocumentMutationJob",
   "type": "object"
 }

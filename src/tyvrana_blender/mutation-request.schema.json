@@ -1,0 +1,114 @@
+{
+  "$defs": {
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "QualifiedName": {
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "type": "string"
+    },
+    "ResourceReference": {
+      "additionalProperties": false,
+      "description": "Adapter-defined resource kind and saved opaque identity, never a name.",
+      "properties": {
+        "resource_kind": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "resource_id": {
+          "$ref": "#/$defs/ResourceToken"
+        }
+      },
+      "required": [
+        "resource_kind",
+        "resource_id"
+      ],
+      "title": "ResourceReference",
+      "type": "object"
+    },
+    "ResourceToken": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "mutation_id": {
+      "$ref": "#/$defs/ResourceToken"
+    },
+    "operation": {
+      "$ref": "#/$defs/QualifiedName"
+    },
+    "arguments": {
+      "$ref": "#/$defs/JsonValue"
+    },
+    "host_session_id": {
+      "$ref": "#/$defs/ResourceToken"
+    },
+    "document_session_id": {
+      "$ref": "#/$defs/ResourceToken"
+    },
+    "project_id": {
+      "$ref": "#/$defs/ResourceToken"
+    },
+    "format": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Format",
+      "type": "string"
+    },
+    "digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Digest",
+      "type": "string"
+    },
+    "resources": {
+      "items": {
+        "$ref": "#/$defs/ResourceReference"
+      },
+      "maxItems": 4096,
+      "title": "Resources",
+      "type": "array"
+    }
+  },
+  "required": [
+    "mutation_id",
+    "operation",
+    "arguments",
+    "host_session_id",
+    "document_session_id",
+    "project_id",
+    "format",
+    "digest"
+  ],
+  "title": "DocumentMutationRequest",
+  "type": "object"
+}
