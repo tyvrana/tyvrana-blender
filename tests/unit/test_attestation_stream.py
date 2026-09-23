@@ -149,3 +149,67 @@ def test_resource_metadata_does_not_change_document_stream(attestation: Any) -> 
     with second.resource("objects", "Base"):
         second.feed(b"native-content")
     assert first.digest.digest() == second.digest.digest()
+
+
+def test_particle_editor_target_is_not_an_authored_reference(attestation: Any) -> None:
+    types = attestation.bpy.types
+    for name in (
+        "ShapeKey",
+        "ViewLayer",
+        "Mesh",
+        "Image",
+        "Bone",
+        "Collection",
+        "Scene",
+        "NodeTree",
+        "Node",
+    ):
+        setattr(types, name, type(name, (), {}))
+
+    class Reference(types.ID):  # type: ignore[misc, name-defined]
+        is_embedded_data = False
+        library = None
+        bl_rna = SimpleNamespace(identifier="Object")
+
+        def __init__(self, name: str) -> None:
+            self.name_full = name
+
+    class RNA:
+        def __init__(self) -> None:
+            self.bl_rna = SimpleNamespace(
+                identifier=type(self).__name__,
+                properties=[
+                    SimpleNamespace(identifier=key)
+                    for key in ("object", "shape_object")
+                ],
+            )
+            self.object: Any = None
+            self.shape_object: Any = None
+
+        def as_pointer(self) -> int:
+            return id(self)
+
+        def keys(self) -> list[str]:
+            return []
+
+    class ParticleEdit(RNA):
+        pass
+
+    types.ParticleEdit = ParticleEdit
+
+    def digest(owner: RNA) -> str:
+        h = attestation.Hasher()
+        h.rna(owner)
+        return str(h.digest.hexdigest())
+
+    editor = ParticleEdit()
+    empty = digest(editor)
+    editor.object = Reference("Any editor target")
+    assert digest(editor) == empty
+    editor.shape_object = Reference("Authored shaping boundary")
+    assert digest(editor) != empty
+
+    ordinary = RNA()
+    before = digest(ordinary)
+    ordinary.object = editor.object
+    assert digest(ordinary) != before

@@ -4009,3 +4009,18 @@ strong attestation must match the trusted target. The retained job survives the
 normal metadata reconnect caused by loading a file; Core polls its status instead
 of repeating the load. Failed loads and post-load mismatches cannot establish a
 trusted working head. Ordinary file-open and authoring guards are unchanged.
+
+## Authored-content attestation and particle editing
+
+Canonical format `blender-rna-5.2.1-a53f23178bb5db88` excludes
+`ParticleEdit.object`, the read-only editor target under
+`Scene.tool_settings.particle_edit`. Interactive Blender resolves this pointer from
+editor context while background Blender can report no target for identical saved
+content. The exclusion applies to this RNA class/property, not object names or
+object references generally.
+
+The neighboring writable `shape_object` reference and particle brush/edit settings
+remain covered. No authored particle-system/settings data is excluded; unsupported
+simulation/cache content retains its existing fail-closed behavior. Geometry,
+material, animation and other material-data traversal is unchanged. The new format
+does not reinterpret or migrate existing attestation baselines.

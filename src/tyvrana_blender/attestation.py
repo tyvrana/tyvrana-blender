@@ -25,7 +25,7 @@ from .bindings import project_id
 
 # This identifier names canonical bytes, not unrelated implementation metadata.
 # Resource closure observations below do not change the qualified document stream.
-FORMAT = "blender-rna-" + ".".join(map(str, bpy.app.version)) + "-c5cc8d93e23e3309"
+FORMAT = "blender-rna-" + ".".join(map(str, bpy.app.version)) + "-a53f23178bb5db88"
 RESOURCE_SCOPE = FORMAT + "-resource-closure"
 
 MAX_ITEMS = 4000000
@@ -605,6 +605,10 @@ class Hasher:
                         self.bulk(values, "co", "f", 3)
                         continue
                 if isinstance(owner, bpy.types.ViewLayer) and key == "depsgraph":
+                    continue
+                if isinstance(owner, bpy.types.ParticleEdit) and key == "object":
+                    # Read-only editor target, resolved from interactive context.
+                    # Keep shape_object, brush settings and authored particle data.
                     continue
                 if isinstance(owner, bpy.types.Mesh) and key in {
                     "vertices",
