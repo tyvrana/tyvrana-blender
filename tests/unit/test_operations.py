@@ -316,6 +316,7 @@ from tyvrana_blender.render_models import (
     RenderJobStatus,
     RenderStatusArguments,
 )
+from tyvrana_blender.restore_models import RestoreArguments, RestoreJobStatus
 from tyvrana_blender.rig_models import (
     ArmatureBindArguments,
     ArmatureCreateArguments,
@@ -416,6 +417,16 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def document_restore(
+        self, arguments: RestoreArguments, request: OperationRequest
+    ) -> RestoreJobStatus:
+        return RestoreJobStatus(job_id=arguments.mutation_id, state="queued")
+
+    def document_restore_status(
+        self, arguments: AttestationJobArguments
+    ) -> RestoreJobStatus:
+        return RestoreJobStatus(job_id=arguments.job_id, state="queued")
+
     def document_mutate(
         self, arguments: MutationArguments, request: OperationRequest
     ) -> MutationJobStatus:

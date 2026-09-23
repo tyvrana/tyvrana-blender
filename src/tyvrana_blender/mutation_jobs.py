@@ -12,6 +12,7 @@ from .native_jobs import NativeJobs
 
 if TYPE_CHECKING:
     from .operations import SceneBackend
+    from .restore_models import RestoreArguments, RestoreJobStatus
 
 _jobs: NativeJobs[MutationJobStatus] = NativeJobs()
 busy = _jobs.busy
@@ -98,4 +99,68 @@ def start(
     return _jobs.start(
         MutationJobStatus(job_id=arguments.mutation_id, state="queued"),
         steps(backend, arguments, request),
+    )
+
+
+def restore_steps(
+    backend: "SceneBackend", arguments: "RestoreArguments", request: OperationRequest
+) -> Generator[dict[str, Any], None, MutationResult]:
+    from . import files
+    from .file_models import FileOpenArguments
+    from .operations import REGISTRY
+
+    spec = REGISTRY.get(arguments.operation)
+    if spec is None or "document_open" not in spec.contract.tags:
+        raise OperationError(
+            "restore_contract_unsupported", "Expected typed document open"
+        )
+    parsed = spec.parse(arguments.arguments)
+    if not isinstance(parsed, FileOpenArguments):
+        raise OperationError(
+            "restore_contract_unsupported", "Expected file open arguments"
+        )
+    before = yield from guarded_steps()
+    if before.root.get("status") != "complete" or any(
+        before.root.get(key) != value for key, value in arguments.current.items()
+    ):
+        raise OperationError(
+            "restore_current_changed", "Discard authorization is stale"
+        )
+    # The final live guard, file identity check and typed load do not yield.
+    # UI/other Tyvrana mutations cannot enter between authorization and discard.
+    files.verify_restore_source(parsed.filepath, arguments.target["file_sha256"])
+    nested = request.model_copy(
+        update=dict(operation=arguments.operation, arguments=arguments.arguments)
+    )
+    result, artifacts = spec.invoke(backend, parsed, nested)
+    if artifacts:
+        raise OperationError("restore_contract_invalid", "Unexpected output artifact")
+    after = yield from guarded_steps()
+    if after.root.get("status") != "complete" or any(
+        after.root.get(key) != value for key, value in arguments.target.items()
+    ):
+        raise OperationError(
+            "restore_post_mismatch", "Loaded content differs from the trusted target"
+        )
+    return MutationResult(
+        dict(
+            mutation_id=arguments.mutation_id,
+            result=result.model_dump(mode="json"),
+            before=before.root,
+            after=after.root,
+        )
+    )
+
+
+def start_restore(
+    backend: "SceneBackend", arguments: "RestoreArguments", request: OperationRequest
+) -> "RestoreJobStatus":
+    from .restore_models import RestoreJobStatus
+
+    return cast(
+        RestoreJobStatus,
+        _jobs.start(
+            RestoreJobStatus(job_id=arguments.mutation_id, state="queued"),
+            restore_steps(backend, arguments, request),
+        ),
     )

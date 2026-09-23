@@ -1,0 +1,150 @@
+{
+  "$defs": {
+    "DocumentRestoreTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "file_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "File Sha256",
+          "type": "string"
+        },
+        "format": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Format",
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/$defs/ResourceToken"
+        }
+      },
+      "required": [
+        "project_id",
+        "format",
+        "digest",
+        "file_sha256"
+      ],
+      "title": "DocumentRestoreTarget",
+      "type": "object"
+    },
+    "DocumentState": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "document_session_id": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "format": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Format",
+          "type": "string"
+        },
+        "host_session_id": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceToken"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "host_session_id",
+        "document_session_id",
+        "project_id",
+        "format",
+        "digest"
+      ],
+      "title": "DocumentState",
+      "type": "object"
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "QualifiedName": {
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "type": "string"
+    },
+    "ResourceToken": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "arguments": {
+      "$ref": "#/$defs/JsonValue"
+    },
+    "current": {
+      "$ref": "#/$defs/DocumentState"
+    },
+    "discard_current": {
+      "const": true,
+      "title": "Discard Current",
+      "type": "boolean"
+    },
+    "mutation_id": {
+      "$ref": "#/$defs/ResourceToken"
+    },
+    "operation": {
+      "$ref": "#/$defs/QualifiedName"
+    },
+    "target": {
+      "$ref": "#/$defs/DocumentRestoreTarget"
+    }
+  },
+  "required": [
+    "mutation_id",
+    "operation",
+    "arguments",
+    "discard_current",
+    "current",
+    "target"
+  ],
+  "title": "DocumentRestoreRequest",
+  "type": "object"
+}

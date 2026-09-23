@@ -3992,3 +3992,20 @@ handles, stale revisions/geometry and required topology changes.
 See [reference-driven constructive forms](docs/constructive_forms.md) for calibrated contour/section
 authoring, smooth structural fusion, family shape interpolation, reference comparison
 and native review packets.
+
+## Guarded trusted-file restore
+
+Core's `project.restore` coordinates explicit discard of divergent working content
+and restoration of a previously proved saved artifact or checkpoint. Blender's
+internal `blender.document.restore` job reuses `blender.file.open`; it is not a
+client-accessible divergence bypass. Core supplies the exact authorized live
+attestation and the independently verified target's logical project, file SHA256,
+attestation format and strong digest.
+
+Immediately before opening, Blender reattests the current document and checks the
+target file's bytes. Missing explicit consent, changed live state, file mismatch
+or incomplete evidence rejects the operation. After the typed open, a complete
+strong attestation must match the trusted target. The retained job survives the
+normal metadata reconnect caused by loading a file; Core polls its status instead
+of repeating the load. Failed loads and post-load mismatches cannot establish a
+trusted working head. Ordinary file-open and authoring guards are unchanged.

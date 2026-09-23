@@ -332,6 +332,7 @@ from .render_models import (
     RenderStatusArguments,
 )
 from .render_operations import DECLARATIONS as _RENDER_DECLARATIONS
+from .restore_models import RestoreArguments, RestoreJobStatus
 from .retopo_models import (
     RetopoBridgeArguments,
     RetopoCollapseArguments,
@@ -805,6 +806,14 @@ class SceneBackend(Protocol):
     ) -> SurfaceInstancesSummary: ...
 
     def extension_inspect(self) -> ExtensionState: ...
+    def document_restore(
+        self, arguments: RestoreArguments, request: OperationRequest
+    ) -> RestoreJobStatus: ...
+
+    def document_restore_status(
+        self, arguments: AttestationJobArguments
+    ) -> RestoreJobStatus: ...
+
     def document_mutate(
         self, arguments: MutationArguments, request: OperationRequest
     ) -> MutationJobStatus: ...
@@ -2980,6 +2989,28 @@ _DECLARATIONS = (
         execution="synchronous",
     ),
     _operation(
+        "blender.document.restore",
+        RestoreArguments,
+        RestoreJobStatus,
+        lambda b, a, q: b.document_restore(a, q),
+        "Core-only trusted artifact restore. Uses explicit discard authorization, "
+        "exact current identity/content, target file hash and strong post-load proof. "
+        "Use project.restore; ordinary file.open retains normal divergence guards.",
+        effect="mutating",
+        execution="job_start",
+        tags=("document_restore",),
+    ),
+    _operation(
+        "blender.document.restore_status",
+        AttestationJobArguments,
+        RestoreJobStatus,
+        lambda b, a, q: b.document_restore_status(a),
+        "Observe trusted artifact restore and its content-qualified terminal receipt.",
+        effect="read_only",
+        execution="job_status",
+        tags=("document_restore_status",),
+    ),
+    _operation(
         "blender.document.mutate",
         MutationArguments,
         MutationJobStatus,
@@ -3203,6 +3234,7 @@ _DECLARATIONS = (
         "project_path before sending further operations.",
         effect="mutating",
         execution="synchronous",
+        tags=("document_open",),
     ),
     _operation(
         "blender.file.save",
@@ -3215,6 +3247,7 @@ _DECLARATIONS = (
         "the resulting project_path before sending further operations.",
         effect="mutating",
         execution="synchronous",
+        tags=("document_save",),
     ),
     _operation(
         "blender.image.configure",

@@ -343,6 +343,7 @@ from .render_models import (
     RenderJobStatus,
     RenderStatusArguments,
 )
+from .restore_models import RestoreArguments, RestoreJobStatus
 from .retopo_models import (
     RetopoCreateArguments,
     RetopoCreateResult,
@@ -1281,6 +1282,24 @@ class BlenderBackend:
 
         return references.configure_units(arguments)
 
+    def document_restore(
+        self, arguments: RestoreArguments, request: OperationRequest
+    ) -> RestoreJobStatus:
+        main_thread()
+        from . import mutation_jobs
+
+        return mutation_jobs.start_restore(self, arguments, request)
+
+    def document_restore_status(
+        self, arguments: AttestationJobArguments
+    ) -> RestoreJobStatus:
+        main_thread()
+        from . import mutation_jobs
+
+        return RestoreJobStatus.model_validate(
+            mutation_jobs.status(arguments.job_id).model_dump()
+        )
+
     def document_mutate(
         self, arguments: MutationArguments, request: OperationRequest
     ) -> MutationJobStatus:
@@ -1913,6 +1932,7 @@ class BlenderBackend:
         if mutation_jobs.busy():
             return operation in {
                 "blender.document.mutation_status",
+                "blender.document.restore_status",
                 "blender.extension.inspect",
             }
 

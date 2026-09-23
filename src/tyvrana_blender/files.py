@@ -130,3 +130,23 @@ def new_project(arguments: FileNewArguments) -> FileState:
         raise OperationError(
             "file_new_failed", str(exc), {"possible_partial_load": True}
         ) from exc
+
+
+def verify_restore_source(filepath: str, expected_sha256: str) -> None:
+    """Recheck the proven file immediately before replacing the live document."""
+    import hashlib
+
+    source = Path(filepath)
+    try:
+        if source.is_symlink() or not source.is_file():
+            raise OperationError(
+                "restore_file_invalid", "Expected an existing regular file"
+            )
+        with source.open("rb") as stream:
+            observed = hashlib.file_digest(stream, "sha256").hexdigest()
+    except OSError as exc:
+        raise OperationError("restore_file_invalid", str(exc)) from exc
+    if observed != expected_sha256:
+        raise OperationError(
+            "restore_file_mismatch", "Trusted artifact file hash differs"
+        )
