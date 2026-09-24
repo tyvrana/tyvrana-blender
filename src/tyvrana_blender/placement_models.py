@@ -9,6 +9,7 @@ from .models import Model
 from .numeric import Float32, Vector32
 from .organization_models import Name
 from .reference_models import GeometryPoint, PointSource, WorldPoint
+from .seating_models import RigidSeating, SeatingResult
 
 type Dimension = Annotated[Float32, Field(gt=0.000001, le=1000000)]
 type Dimensions = Annotated[list[Dimension | None], Field(min_length=3, max_length=3)]
@@ -78,11 +79,18 @@ class PlacementEdit(Model):
 
 
 class PlacementArguments(Model):
+    seating: RigidSeating | None = None
     placements: list[PlacementEdit] = Field(default_factory=list, max_length=64)
     refresh: list[Name] = Field(default_factory=list, max_length=64)
 
     @model_validator(mode="after")
     def distinct(self) -> Self:
+        if self.seating is not None:
+            if self.placements or self.refresh:
+                raise ValueError(
+                    "Seating is exclusive with individual placements/refresh"
+                )
+            return self
         names = [p.name for p in self.placements] + self.refresh
         if not names or len(names) != len(set(names)) or len(names) > 64:
             raise ValueError(
@@ -101,4 +109,5 @@ class PlacementSummary(Model):
 
 
 class PlacementResult(Model):
-    placements: list[PlacementSummary]
+    placements: list[PlacementSummary] = Field(default_factory=list)
+    seating: SeatingResult | None = None

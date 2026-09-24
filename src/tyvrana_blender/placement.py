@@ -197,6 +197,10 @@ def summary(obj: Any) -> PlacementSummary:
 
 
 def place(args: PlacementArguments) -> PlacementResult:
+    if args.seating is not None:
+        from .seating import seat
+
+        return PlacementResult(seating=seat(args.seating))
     organization.idle(mutate=True)
     edits = list(args.placements)
     for name in args.refresh:

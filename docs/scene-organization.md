@@ -195,3 +195,71 @@ Native semantics follow Blender's [collections API](https://docs.blender.org/api
 [object relationships](https://docs.blender.org/api/5.2/bpy.types.Object.html),
 [linked duplication](https://docs.blender.org/manual/id/5.2/scene_layout/object/editing/duplicate_linked.html)
 and [datablock ownership](https://docs.blender.org/api/5.2/bpy.types.BlendData.html).
+
+### Multi-interface rigid seating
+
+`blender.object_set.place` accepts an exclusive `seating` mode for one rigid set.
+Select `members`; descendants are included by default (at most 256 total). Unparented
+members are supported. Every member receives the same world rotation/translation;
+geometry, scale, parenting and child-local transforms are preserved. Animated,
+constrained, rigid-body or non-object-parented members are rejected. Existing
+individual placement rules and refresh are exclusive with seating.
+
+Supply two to eight named interface terms:
+
+- `point`: existing typed source/target landmark, object, bone or geometry points.
+- `frame`: source/target object origins and proper frame orientations.
+- `surface`: existing regional selectors/named features, nearest-surface gap,
+  optional parallel/opposed normal alignment, and optional centroid alignment.
+
+Terms carry weights and distance tolerances; oriented terms also declare angular
+radian tolerances. Source objects must belong to the moving set; targets must stay
+outside it. Surface information is evaluated internally, never sent as mesh arrays.
+
+Optional selected `guards` use the existing closed-solid or oriented-patch contact
+semantics. Declare positive `minimum_clearance` or `maximum_penetration`, and hard
+or weighted treatment. Only selected regions are checked. Geometry selection is
+bounded: 8,192 triangles per region, 256 solver samples and 2,048 final guard vertices.
+Canonical contact verifies every selected guard vertex after the solve. Hard
+zero-penetration guards additionally check full regional triangle separation and bidirectional component
+containment, and
+conservatively reject triangle contact, including tangency. Positive penetration
+envelopes are signed vertex-contact bounds, not continuous-volume certificates.
+Uncertain open-patch support is rejected. Use targeted `contact.inspect` or geometry
+inspection for further evidence.
+
+The solver uses deterministic projected damped least squares over a six-component
+SE(3) increment, with bounded backtracking, iterations, evaluations and geometric
+work. Translation and axis-angle `rotation_vector` components are bounded about
+the first member's original world origin. A zero component limit locks that axis.
+The result contains one `world_delta`, translation/rotation-vector/pivot, per-term
+residuals, objective, active bounds, clearance/penetration, work counts and bounded
+issues. Distances use scene units. This is a local solver; failed convergence is
+not a proof that no placement exists globally. Rank-deficient solutions return
+`POORLY_CONDITIONED`; explicitly constrain unused axes when appropriate.
+
+`apply:false` evaluates without changing transforms. Only `SOLVED` may apply;
+`INFEASIBLE`, `NO_CONVERGENCE` and `POORLY_CONDITIONED` preserve the original set.
+Invalid requests use normal typed validation/`placement_invalid` errors. Native
+application is checked against the shared rigid delta, including evaluated geometry
+for modified mesh members, and rolled back on failure or dependent deformation.
+
+For an already mirrored assembly, pass a prior result's translation and
+rotation_vector as `initial`, with `mirror_axis`. This reflects only the starting
+estimate (translation as a polar vector, rotation as an axial vector). The second
+assembly is independently solved and verified; symmetry is not a solver assumption.
+
+```json
+{
+  "seating": {
+    "members": ["MovingRoot", "IndependentDependent"],
+    "interfaces": [
+      {"kind":"frame","name":"bearing-a","source_object":"MovingA","target_object":"FixedA"},
+      {"kind":"frame","name":"bearing-b","source_object":"MovingB","target_object":"FixedB"}
+    ],
+    "translation_limit": [1,1,1],
+    "rotation_limit": [0.5,0.5,0.5],
+    "apply": false
+  }
+}
+```

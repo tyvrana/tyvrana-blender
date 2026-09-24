@@ -1158,7 +1158,14 @@ _DECLARATIONS = (
         PlacementArguments,
         PlacementResult,
         lambda b, a, q: b.object_set_place(a),
-        "Atomically place/fit up to64 mesh components: between named landmarks/object "
+        "Seating mode solves 2..8 simultaneous point/frame/regional-surface interfaces "
+        "for one rigid assembly (up to256 members including descendants), with "
+        "selected clearance/penetration guards, bounded translation/rotation, "
+        "mirrored initial estimates and preview/apply. No scale/deformation; "
+        "non-SOLVED results leave all transforms intact. Compact residuals and "
+        "explicit numerical/work bounds; local solve, not global feasibility. "
+        "Alternatively atomically place/fit up to64 mesh components: between "
+        "named landmarks/object "
         "points, align a local anchor/axis to a target frame, fit selected local "
         "dimensions, "
         "reflect a source transform, or align local origin/unit-axis points to four "
