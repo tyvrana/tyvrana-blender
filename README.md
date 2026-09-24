@@ -4012,7 +4012,7 @@ trusted working head. Ordinary file-open and authoring guards are unchanged.
 
 ## Authored-content attestation and particle editing
 
-Canonical format `blender-rna-5.2.1-a53f23178bb5db88` excludes
+Canonical format `blender-rna-5.2.1-7fd96589ef405168` excludes
 `ParticleEdit.object`, the read-only editor target under
 `Scene.tool_settings.particle_edit`. Interactive Blender resolves this pointer from
 editor context while background Blender can report no target for identical saved
@@ -4024,3 +4024,19 @@ remain covered. No authored particle-system/settings data is excluded; unsupport
 simulation/cache content retains its existing fail-closed behavior. Geometry,
 material, animation and other material-data traversal is unchanged. The new format
 does not reinterpret or migrate existing attestation baselines.
+
+
+### Armature hierarchy attestation
+
+Armature bones, pose bones and bone collections are serialized once in name order.
+Parent, handle and membership links contain the owning resource and subresource
+name; hierarchy depth does not recursively expand targets. Parent maps determine
+children. Rest geometry and orientation, deformation/inheritance flags, collection
+membership, custom properties, pose channels, constraints and drivers remain
+covered. The general RNA nesting limit remains 40.
+
+Active/selected bones, collection tree expansion and object/pose editor mode do
+not affect the digest. Edit mode remains unqualified: pending rest edits must be
+committed before the persisted bone rows can be attested. Entering and leaving
+edit mode without changes preserves the digest. This canonical format does not
+reinterpret prior digests or automatically migrate any project baseline.

@@ -321,6 +321,16 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
             ]
             records["qualification_8"] = "PASS"
             for operation, arguments in commands()[:4]:
+                if operation == "armature.create":
+                    arguments["bones"].extend(
+                        dict(
+                            name=f"Joint{i:03}",
+                            head=[3, i, 0],
+                            tail=[3, i + 1, 0],
+                            parent=f"Joint{i - 1:03}" if i else "Rod",
+                        )
+                        for i in range(126)
+                    )
                 await execute(adapter, "blender." + operation, **arguments)
                 await state()
             await execute(
@@ -407,38 +417,6 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
             records["qualification_4"] = "PASS"
             revision = checkpoint["project"]["revision"]
 
-            for change, restore in [
-                ("geometry_changed", "restore_geometry"),
-                ("shader_changed", "restore_shader"),
-            ]:
-                await external(first, change)
-                await negative(
-                    "blender.object.set_transform",
-                    dict(name="Rig", location=[0, 0, 0.2]),
-                    "content_diverged",
-                )
-                await state("invalidated")
-                await external(first, restore)
-                assert (await state())["project"]["revision"] == revision
-            records["qualification_7"] = "PASS"
-            archive = candidate_archive(
-                installed, tmp_path / "reload.zip", "working_lineage"
-            )
-            staged = await isolated_thread(stage, archive, installed)
-            old = adapter
-            await execute(
-                adapter, "blender.extension.reload", expected_build=staged["build"]
-            )
-            adapter = (await discover(previous=old))[0]["instance_id"]
-            reloaded = await execute(adapter, "blender.document.attest")
-            assert all(
-                reloaded[k] == saved[k]
-                for k in ["host_session_id", "document_session_id", "digest"]
-            )
-            packet = await state()
-            assert packet["project"]["revision"] == revision
-            assert packet["checkpoint"]["id"] == "working"
-            records["qualification_9"] = "PASS"
             await execute(
                 adapter,
                 "blender.object.set_transform",
@@ -462,6 +440,55 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
             )
             revision = checkpoint["project"]["revision"]
             saved = await execute(adapter, "blender.document.attest")
+
+            for change, restore in [
+                ("geometry_changed", "restore_geometry"),
+                ("shader_changed", "restore_shader"),
+            ]:
+                await external(first, change)
+                await negative(
+                    "blender.object.set_transform",
+                    dict(name="Rig", location=[0, 0, 0.2]),
+                    "content_diverged",
+                )
+                await state("invalidated")
+                await external(first, restore)
+                assert (await state())["project"]["revision"] == revision
+            records["qualification_7"] = "PASS"
+            before_incomplete = await execute(adapter, "blender.document.attest")
+            await negative(
+                "blender.object.create_primitive",
+                dict(primitive="cube", name="Unattestable"),
+                "mutation_unqualified",
+            )
+            incomplete = await execute(adapter, "blender.document.attest")
+            assert incomplete["status"] != "complete" and incomplete["digest"] is None
+            assert (await state("invalidated"))["project"]["revision"] == revision
+            await external(first, "remove_unattestable")
+            assert (await execute(adapter, "blender.document.attest"))[
+                "digest"
+            ] == before_incomplete["digest"]
+            assert (await state())["project"]["revision"] == revision
+            records["incomplete_mutation"] = "REJECTED without trusted advancement"
+
+            archive = candidate_archive(
+                installed, tmp_path / "reload.zip", "working_lineage"
+            )
+            staged = await isolated_thread(stage, archive, installed)
+            old = adapter
+            await execute(
+                adapter, "blender.extension.reload", expected_build=staged["build"]
+            )
+            adapter = (await discover(previous=old))[0]["instance_id"]
+            reloaded = await execute(adapter, "blender.document.attest")
+            assert all(
+                reloaded[k] == saved[k]
+                for k in ["host_session_id", "document_session_id", "digest"]
+            )
+            packet = await state()
+            assert packet["project"]["revision"] == revision
+            assert packet["checkpoint"]["id"] == "restart"
+            records["qualification_9"] = "PASS"
         async with host("restart"):
             adapter = (await discover())[0]["instance_id"]
             await execute(
@@ -485,6 +512,20 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
             packet = await state()
             assert packet["project"]["revision"] == revision
             assert packet["checkpoint"]["id"] == "restart"
+            structure = await execute(
+                adapter, "blender.armature.inspect", object_name="Rig", sample_limit=0
+            )
+            assert structure["bone_count"] == 128, structure
+            await execute(
+                adapter,
+                "blender.object.set_transform",
+                name="Rig",
+                location=[0, 0, 0.25],
+            )
+            continued = await state()
+            assert continued["project"]["revision"] > revision
+            records["restored_armature_bones"] = structure["bone_count"]
+            records["continued_mutation"] = "PASS"
             records["qualification_10"] = "PASS"
             await execute(
                 adapter,

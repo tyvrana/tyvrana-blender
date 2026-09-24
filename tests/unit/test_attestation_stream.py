@@ -213,3 +213,37 @@ def test_particle_editor_target_is_not_an_authored_reference(attestation: Any) -
     before = digest(ordinary)
     ordinary.object = editor.object
     assert digest(ordinary) != before
+
+
+def test_general_recursive_values_remain_bounded(attestation: Any) -> None:
+    nested: dict[str, Any] = {}
+    nested["next"] = nested
+    h = attestation.Hasher()
+    with pytest.raises(attestation.Unqualified, match="nesting"):
+        h.value(nested)
+    assert h.items < 100
+    assert h.diagnostics()["limits"]["nesting"] == 40
+
+
+def test_armature_references_use_owner_and_named_identity(attestation: Any) -> None:
+    owner = SimpleNamespace(
+        bl_rna=SimpleNamespace(identifier="Armature"), name_full="Structure"
+    )
+    bone = SimpleNamespace(
+        bl_rna=SimpleNamespace(identifier="Bone"),
+        as_pointer=lambda: 1,
+        id_data=owner,
+        name="Joint",
+    )
+    bone.parent = bone
+    first = attestation.Hasher()
+    first.value(bone)
+    assert first.references == {("Armature", "Structure")}
+    same = attestation.Hasher()
+    same.value(bone)
+    assert same.digest.digest() == first.digest.digest()
+    owner.name_full = "Other structure"
+    different = attestation.Hasher()
+    different.value(bone)
+    assert different.digest.digest() != first.digest.digest()
+    assert first.items < 20

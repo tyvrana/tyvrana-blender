@@ -5,6 +5,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 import bpy  # type: ignore[import-not-found]
 
@@ -15,6 +16,18 @@ preferences = bpy.context.preferences.addons[PACKAGE].preferences
 preferences.port = int(os.environ["TYVRANA_TEST_PORT"])
 lifecycle._backend.restart()
 deadline = time.monotonic() + 600
+# Fault injection applies only after the named typed fixture mutation succeeds.
+attestation = importlib.import_module(PACKAGE + ".attestation")
+original_rna = attestation.Hasher.rna
+
+
+def qualify_rna(self: Any, owner: Any, depth: int = 0) -> None:
+    if owner.bl_rna.identifier == "Object" and owner.name == "Unattestable":
+        raise attestation.Unqualified("Fixture simulates incomplete authored coverage")
+    original_rna(self, owner, depth)
+
+
+attestation.Hasher.rna = qualify_rna
 original_vertex = None
 original_roughness = None
 try:
@@ -66,6 +79,10 @@ try:
                 else:
                     socket.default_value = original_roughness
                 bpy.context.view_layer.update()
+            elif action == "remove_unattestable":
+                bpy.data.objects.remove(
+                    bpy.data.objects["Unattestable"], do_unlink=True
+                )
             elif action == "different_document":
                 bpy.ops.wm.read_homefile(
                     use_empty=True,

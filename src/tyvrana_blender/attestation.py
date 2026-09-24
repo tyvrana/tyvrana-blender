@@ -25,7 +25,7 @@ from .bindings import project_id
 
 # This identifier names canonical bytes, not unrelated implementation metadata.
 # Resource closure observations below do not change the qualified document stream.
-FORMAT = "blender-rna-" + ".".join(map(str, bpy.app.version)) + "-a53f23178bb5db88"
+FORMAT = "blender-rna-" + ".".join(map(str, bpy.app.version)) + "-7fd96589ef405168"
 RESOURCE_SCOPE = FORMAT + "-resource-closure"
 
 MAX_ITEMS = 4000000
@@ -118,6 +118,26 @@ UNSUPPORTED = {
     "speakers",
     "pointclouds",
     "lightprobes",
+}
+
+# Named armature subresources form a graph, not recursively nested RNA values.
+# Serialize their owning rows once; parent/handle/membership links are identities.
+ARMATURE_ROWS = {
+    ("Armature", "bones"),
+    ("Armature", "collections_all"),
+    ("Pose", "bones"),
+}
+ARMATURE_REFERENCES = {"Bone", "PoseBone", "BoneCollection"}
+ARMATURE_SKIP = {
+    "Armature": {"collections", "edit_bones"},
+    "Bone": {"children"},
+    "PoseBone": {"child"},
+    "BoneCollection": {
+        "children",  # Derived from the flat parent mapping.
+        "index",  # Enumeration order, not identity.
+        "child_number",
+        "is_expanded",  # Editor tree expansion.
+    },
 }
 
 SUPPORTED = {
@@ -498,7 +518,14 @@ class Hasher:
                     "Linked library content requires independent attestation"
                 )
         elif hasattr(value, "bl_rna") and hasattr(value, "as_pointer"):
-            self.rna(value, depth + 1)
+            if value.bl_rna.identifier in ARMATURE_REFERENCES:
+                owner = value.id_data
+                key = (owner.bl_rna.identifier, owner.name_full)
+                self.references.add(key)
+                self.feed(b"subresource")
+                self.value((key, value.bl_rna.identifier, value.name), depth + 1)
+            else:
+                self.rna(value, depth + 1)
         elif isinstance(value, dict) or hasattr(value, "to_dict"):
             self.feed(b"map")
             for key in sorted(value.keys()):
@@ -570,6 +597,13 @@ class Hasher:
         )
 
     def rna(self, owner: Any, depth: int = 0) -> None:
+        if depth > 40:
+            self.limit("nesting")
+        kind = owner.bl_rna.identifier
+        if kind == "Armature" and owner.is_editmode:
+            # EditBone is an uncommitted editing facade. Never attest stale Bone
+            # rows while pending authored rest edits exist in that facade.
+            raise Unqualified("Armature edit mode requires committing rest edits")
         if owner.bl_rna.identifier in {
             "ShaderNodeScript",
             "GeometryNodeSimulationInput",
@@ -598,6 +632,17 @@ class Hasher:
             self.feed(owner.bl_rna.identifier.encode())
             for prop in sorted(owner.bl_rna.properties, key=lambda p: p.identifier):
                 key = prop.identifier
+                if key in ARMATURE_SKIP.get(kind, ()):
+                    continue
+                if kind == "Object" and key == "mode" and owner.type == "ARMATURE":
+                    continue  # Object/pose editor context, not authored pose channels.
+                if (kind, key) in ARMATURE_ROWS:
+                    self.feed(key.encode())
+                    self.feed(b"armature_rows")
+                    for row in sorted(getattr(owner, key), key=lambda item: item.name):
+                        self.rna(row, depth + 1)
+                    self.feed(b"end_armature_rows")
+                    continue
                 if isinstance(owner, bpy.types.ShapeKey) and key in {"data", "points"}:
                     values = getattr(owner, key)
                     if values and values[0].bl_rna.identifier == "ShapeKeyPoint":
@@ -645,6 +690,11 @@ class Hasher:
                     raise Unqualified(
                         f"Unreadable {owner.bl_rna.identifier}.{key}"
                     ) from exc
+                if (kind, key) in {
+                    ("Bone", "collections"),
+                    ("BoneCollection", "bones"),
+                }:
+                    value = sorted(value, key=lambda item: item.name)
                 if isinstance(
                     owner, (bpy.types.Collection, bpy.types.Scene, bpy.types.ViewLayer)
                 ) and key in {
@@ -822,7 +872,11 @@ def inspect_steps(
                         raise Unqualified(
                             "Simulation/cache state requires independent attestation"
                         )
-                    if isinstance(item, bpy.types.Object) and item.mode != "OBJECT":
+                    if (
+                        isinstance(item, bpy.types.Object)
+                        and item.mode != "OBJECT"
+                        and not (item.type == "ARMATURE" and item.mode == "POSE")
+                    ):
                         raise Unqualified("Attestation requires object mode")
                     h.rna(item)
                 yield {"progress": h.diagnostics()}
