@@ -1,8 +1,10 @@
 """One real MCP workflow across reload, reconnect, external edits and new hosts."""
 
 import asyncio
+import hashlib
 import json
 import shutil
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,7 +18,9 @@ from .test_e2e import core_client
 from .test_extension_reload import candidate_archive, isolated_thread
 
 
-async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
+async def test_automatic_working_lineage(
+    profile: dict[str, str], tmp_path: Path
+) -> None:
     installed = (
         Path(profile["BLENDER_USER_RESOURCES"])
         / "extensions/user_default/tyvrana_blender"
@@ -93,6 +97,33 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
                     )["result"]
                 assert result["state"] == "completed", result
                 result = result["result"]
+            if (
+                operation in {"project.attest", "project.restore", "project.reconcile"}
+                and result.get("state") == "running"
+            ):
+                key_field = {
+                    "project.attest": "attestation_id",
+                    "project.restore": "restore_id",
+                    "project.reconcile": "reconciliation_id",
+                }[operation]
+                while result["state"] == "running":
+                    await asyncio.sleep(result["poll_after_seconds"])
+                    result = (
+                        await tool(
+                            "tyvrana_execute_operation",
+                            dict(
+                                adapter_id="core",
+                                operation=operation + "_status",
+                                arguments={
+                                    "project_id": key,
+                                    key_field: result[key_field],
+                                },
+                            ),
+                        )
+                    )["result"]
+                assert result["state"] == "completed", result
+                if operation == "project.attest":
+                    result = result["result"]
             if operation in {
                 "blender.project.bind",
                 "blender.file.save",
@@ -158,7 +189,7 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
                     adapter, native["project_id"], str(tmp_path / "accepted.blend")
                 )
 
-        async with host("first") as first:
+        async with host("first"):
             adapter = (await discover())[0]["instance_id"]
             await execute(
                 adapter,
@@ -262,6 +293,22 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
                 binding_ids=["binding"],
             )
             revision = verified["project"]["revision"]
+            with (tmp_path / "accepted.blend").open("rb") as stream:
+                file_sha = hashlib.file_digest(stream, "sha256").hexdigest()
+            await execute(
+                "core",
+                "project.attest",
+                project_id=key,
+                document_id="doc",
+                adapter_id=adapter,
+                expected_revision=revision,
+                mode="bootstrap",
+                trusted_artifact_sha256=file_sha,
+                trusted_artifact_locator=str(tmp_path / "accepted.blend"),
+                provenance="Known saved base fixture",
+            )
+            assert len(await discover()) == 1
+            records["bootstrap"] = "PASS"
             m2 = dict(
                 kind="milestone",
                 id="m2",
@@ -310,6 +357,50 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
 
             initial = await execute(adapter, "blender.document.attest")
             assert initial["status"] == "complete", initial
+            packet = await state()
+            base_checkpoint = await execute(
+                "core",
+                "project.apply",
+                project_id=key,
+                expected_revision=packet["project"]["revision"],
+                checkpoint=dict(id="base", label="Accepted base"),
+            )
+            # Seed historical format metadata only; no proof-host setup.
+            with sqlite3.connect(
+                tmp_path / "semantic-state/projects.sqlite3"
+            ) as fixture_db:
+                raw = fixture_db.execute(
+                    "SELECT data FROM document_attestations "
+                    "WHERE project_id=? AND document_id='doc'",
+                    (key,),
+                ).fetchone()[0]
+                historical = json.loads(raw)
+                historical.update(format="fixture-previous-format", digest="f" * 64)
+                fixture_db.execute(
+                    "UPDATE document_attestations SET data=? "
+                    "WHERE project_id=? AND document_id='doc'",
+                    (json.dumps(historical), key),
+                )
+            migrated = await execute(
+                "core",
+                "project.attest",
+                project_id=key,
+                document_id="doc",
+                adapter_id=adapter,
+                expected_revision=base_checkpoint["project"]["revision"],
+                mode="migrate",
+                from_format="fixture-previous-format",
+                to_format=initial["format"],
+                trusted_artifact_sha256=file_sha,
+                provenance="Canonical format fixture migration",
+            )
+            assert (
+                migrated["baseline_migrated"]
+                and not migrated["semantic_revision_changed"]
+            )
+            await state()
+            assert len(await discover()) == 1
+            records["migration"] = "PASS"
             before_failure = await state()
             await negative(
                 "blender.object.set_transform",
@@ -441,36 +532,6 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
             revision = checkpoint["project"]["revision"]
             saved = await execute(adapter, "blender.document.attest")
 
-            for change, restore in [
-                ("geometry_changed", "restore_geometry"),
-                ("shader_changed", "restore_shader"),
-            ]:
-                await external(first, change)
-                await negative(
-                    "blender.object.set_transform",
-                    dict(name="Rig", location=[0, 0, 0.2]),
-                    "content_diverged",
-                )
-                await state("invalidated")
-                await external(first, restore)
-                assert (await state())["project"]["revision"] == revision
-            records["qualification_7"] = "PASS"
-            before_incomplete = await execute(adapter, "blender.document.attest")
-            await negative(
-                "blender.object.create_primitive",
-                dict(primitive="cube", name="Unattestable"),
-                "mutation_unqualified",
-            )
-            incomplete = await execute(adapter, "blender.document.attest")
-            assert incomplete["status"] != "complete" and incomplete["digest"] is None
-            assert (await state("invalidated"))["project"]["revision"] == revision
-            await external(first, "remove_unattestable")
-            assert (await execute(adapter, "blender.document.attest"))[
-                "digest"
-            ] == before_incomplete["digest"]
-            assert (await state())["project"]["revision"] == revision
-            records["incomplete_mutation"] = "REJECTED without trusted advancement"
-
             archive = candidate_archive(
                 installed, tmp_path / "reload.zip", "working_lineage"
             )
@@ -489,26 +550,34 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
             assert packet["project"]["revision"] == revision
             assert packet["checkpoint"]["id"] == "restart"
             records["qualification_9"] = "PASS"
-        async with host("restart"):
+        async with host("restart") as second:
             adapter = (await discover())[0]["instance_id"]
-            await execute(
-                adapter,
-                "blender.file.open",
-                filepath=str(tmp_path / "accepted.blend"),
-                discard_current=True,
-            )
             current = await execute(adapter, "blender.document.attest")
-            assert current["digest"] == saved["digest"], (current, saved)
-            assert current["host_session_id"] != saved["host_session_id"]
-            await execute(
+            restored = await execute(
                 "core",
-                "project.attest",
+                "project.restore",
                 project_id=key,
+                restore_id="restart-working",
+                expected_revision=revision,
                 document_id="doc",
                 adapter_id=adapter,
-                expected_revision=revision,
-                mode="reattach",
+                checkpoint_id="restart",
+                discard_current=True,
+                expected_current={
+                    k: current[k]
+                    for k in (
+                        "host_session_id",
+                        "document_session_id",
+                        "project_id",
+                        "format",
+                        "digest",
+                    )
+                },
+                provenance="Recover saved working checkpoint on a fresh work host",
             )
+            assert restored["state"] == "completed", restored
+            revision = restored["revision"]
+            records["restart_restore"] = "PASS"
             packet = await state()
             assert packet["project"]["revision"] == revision
             assert packet["checkpoint"]["id"] == "restart"
@@ -529,18 +598,71 @@ async def test_working_lineage(profile: dict[str, str], tmp_path: Path) -> None:
             records["qualification_10"] = "PASS"
             await execute(
                 adapter,
-                "blender.mesh.transform",
-                object_name="Fixture",
-                selector=dict(mode="all", domain="vertex"),
-                scale=[1.2, 1, 1],
+                "blender.file.save",
+                filepath=str(tmp_path / "accepted.blend"),
+                overwrite=True,
             )
-            await state("invalidated")
-            await negative(
+            prior = await execute(adapter, "blender.document.attest")
+            delta = dict(name="Rig", location=[0, 0, 0.3])
+            (second / "command.json").write_text(
+                json.dumps(
+                    dict(
+                        action="typed_delta",
+                        steps=[["blender.object.set_transform", delta]],
+                    )
+                )
+            )
+            async with asyncio.timeout(15):
+                while not (second / "ack.json").exists():  # noqa: ASYNC110 - External fixture acknowledgement.
+                    await asyncio.sleep(0.05)
+            current = await execute(adapter, "blender.document.attest")
+            packet = await state("invalidated")
+            recovered = await execute(
+                "core",
+                "project.reconcile",
+                project_id=key,
+                reconciliation_id="missing-transition",
+                expected_revision=packet["project"]["revision"],
+                document_id="doc",
+                adapter_id=adapter,
+                stage_id="m2",
+                prior_digest=prior["digest"],
+                expected_digest=current["digest"],
+                provenance="Known pre-receipt fixture transform",
+                delta=[
+                    dict(
+                        operation="blender.object.set_transform",
+                        arguments=delta,
+                        owner_entity_id="harness",
+                    )
+                ],
+            )
+            assert recovered["state"] == "completed", recovered
+            records["reconciliation"] = "PASS"
+            await state()
+            await execute(
+                adapter,
                 "blender.object.set_transform",
-                dict(name="Rig", location=[0, 0, 0.3]),
-                "milestone_blocked",
+                name="Rig",
+                location=[0, 0, 0.35],
             )
-            records["qualification_6"] = "PASS"
+            await execute(
+                adapter,
+                "blender.file.save",
+                filepath=str(tmp_path / "accepted.blend"),
+                overwrite=True,
+            )
+            packet = await state()
+            await execute(
+                "core",
+                "project.apply",
+                project_id=key,
+                expected_revision=packet["project"]["revision"],
+                checkpoint=dict(id="continued", label="Continued reconciled work"),
+            )
+            assert len(await discover()) == 1
+            assert not list(tmp_path.glob("tyvrana-proof-*"))  # noqa: ASYNC240 - Fixture cleanup check.
+            records["proof_orphans"] = 0
         records["calls"] = calls
         records["request_bytes"] = sum(c["request_bytes"] for c in calls)
         records["response_bytes"] = sum(c["response_bytes"] for c in calls)

@@ -297,6 +297,20 @@
           "default": null,
           "title": "File Sha256"
         },
+        "file_locator": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File Locator"
+        },
         "work": {
           "anyOf": [
             {

@@ -54,6 +54,20 @@ def profile(tmp_path: Path) -> dict[str, str]:
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Traceback" not in result.stdout + result.stderr
     assert "Exception in module" not in result.stdout + result.stderr
+    if os.environ.get("TYVRANA_TEST_SOURCE") == "1":
+        import shutil
+
+        installed = root / "extensions/user_default/tyvrana_blender"
+        shutil.copytree(
+            ROOT / "src/tyvrana_blender",
+            installed,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        dependencies = list(root.rglob("site-packages/tyvrana_protocol"))
+        assert len(dependencies) == 1, dependencies
+        shutil.rmtree(dependencies[0])
+        shutil.copytree(Path(os.environ["TYVRANA_PROTOCOL_SOURCE"]), dependencies[0])
     return env
 
 

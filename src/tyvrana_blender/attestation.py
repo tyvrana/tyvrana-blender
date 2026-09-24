@@ -907,6 +907,7 @@ def inspect_steps(
             "omissions": [str(x) for x in omissions],
             "elapsed_ms": (time.monotonic() - start) * 1000,
             "file_sha256": saved,
+            "file_locator": str(bpy.data.filepath) or None,
             "work": h.diagnostics(),
             "resources": cast(JsonValue, resource_evidence) if digest else [],
             "resource_scope": RESOURCE_SCOPE if digest else None,

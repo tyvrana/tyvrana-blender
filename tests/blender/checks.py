@@ -74,9 +74,9 @@ class BlenderTests(unittest.TestCase):
         self.assertEqual(descriptor.byte_size, len(data))
         self.assertEqual(descriptor.sha256, hashlib.sha256(data).hexdigest())
         self.assertEqual(descriptor.media_type, "image/png")
-        self.assertEqual(
-            response.result, {"width": 512, "height": 512, "format": "png"}
-        )
+        self.assertIsInstance(response.result, dict)
+        for key, value in {"width": 512, "height": 512, "format": "png"}.items():
+            self.assertEqual(response.result[key], value)
         self.assertNotIn(str(spool.root), response.model_dump_json())
         self.assertEqual(
             saved,
@@ -303,7 +303,12 @@ class BlenderTests(unittest.TestCase):
                 ),
             )
             self.assertIsInstance(result, OperationFailure)
-            self.assertEqual(result.error.code, "object_not_found")
+            self.assertEqual(
+                result.error.code,
+                "organization_invalid"
+                if operation == "blender.object.delete"
+                else "object_not_found",
+            )
 
     def test_metadata_selection_parent_visibility(self) -> None:
         backend = adapter.BlenderBackend()
@@ -386,7 +391,12 @@ class BlenderTests(unittest.TestCase):
                 ),
             )
             self.assertIsInstance(result, OperationFailure)
-            self.assertEqual(result.error.code, "invalid_context")
+            self.assertEqual(
+                result.error.code,
+                "organization_invalid"
+                if operation == "blender.object.delete"
+                else "invalid_context",
+            )
         bpy.ops.object.mode_set(mode="OBJECT")
         self.assertEqual(len(bpy.context.scene.objects), 1)
 

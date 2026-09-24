@@ -5,8 +5,12 @@ from typing import Protocol
 from pydantic import TypeAdapter
 from tyvrana_protocol import (
     AdapterRegistration,
+    AdapterRuntime,
     ArtifactDescriptor,
     OperationRequest,
+    ProofHostControl,
+    ProofHostStart,
+    ProofHostStatus,
     ResourceInspectionRequest,
     ResourceInspectionResult,
 )
@@ -461,6 +465,10 @@ from .weight_transfer_models import (
 
 
 class SceneBackend(Protocol):
+    def proof_host_start(self, arguments: ProofHostStart) -> ProofHostStatus: ...
+    def proof_host_status(self, arguments: ProofHostControl) -> ProofHostStatus: ...
+    def proof_host_stop(self, arguments: ProofHostControl) -> ProofHostStatus: ...
+
     def mesh_cleanup(self, arguments: CleanupArguments) -> CleanupResult: ...
 
     def assembly_create(self, arguments: AssemblyCreateArguments) -> AssemblyResult: ...
@@ -1030,6 +1038,38 @@ class SceneBackend(Protocol):
 
 
 _DECLARATIONS = (
+    _operation(
+        "blender.proof_host.start",
+        ProofHostStart,
+        ProofHostStatus,
+        lambda b, a, q: b.proof_host_start(a),
+        "Core-internal lifecycle: start an owned independent proof host "
+        "from an exact durable artifact.",
+        tags=("proof_host_start",),
+        effect="lifecycle",
+        execution="job_start",
+    ),
+    _operation(
+        "blender.proof_host.status",
+        ProofHostControl,
+        ProofHostStatus,
+        lambda b, a, q: b.proof_host_status(a),
+        "Core-internal lifecycle: inspect readiness of an owned proof process.",
+        tags=("proof_host_status",),
+        effect="read_only",
+        execution="job_status",
+    ),
+    _operation(
+        "blender.proof_host.stop",
+        ProofHostControl,
+        ProofHostStatus,
+        lambda b, a, q: b.proof_host_stop(a),
+        "Core-internal lifecycle: release a proof lease "
+        "and terminate only its owned process.",
+        tags=("proof_host_stop",),
+        effect="lifecycle",
+        execution="lifecycle",
+    ),
     _operation(
         "blender.mesh.cleanup",
         CleanupArguments,
@@ -4288,12 +4328,17 @@ OPERATIONS = tuple(sorted(REGISTRY))
 
 
 def registration(
-    instance_id: str, version: str, filepath: str, project_id: str | None = None
+    instance_id: str,
+    version: str,
+    filepath: str,
+    project_id: str | None = None,
+    runtime: AdapterRuntime | None = None,
 ) -> AdapterRegistration:
     return AdapterRegistration(
         type="adapter.register",
         instance_id=instance_id,
         application="blender",
+        runtime=runtime,
         application_version=version,
         project_path=filepath or None,
         project_id=project_id,

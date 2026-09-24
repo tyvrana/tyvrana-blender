@@ -7,6 +7,9 @@ from tyvrana_protocol import (
     OperationFailure,
     OperationRequest,
     OperationSuccess,
+    ProofHostControl,
+    ProofHostStart,
+    ProofHostStatus,
     ResourceInspectionRequest,
     ResourceInspectionResult,
     ResourceObservation,
@@ -417,6 +420,15 @@ EMPTY_PAGE = PageInfo(
 
 
 class Backend:
+    def proof_host_start(self, arguments: ProofHostStart) -> ProofHostStatus:
+        return ProofHostStatus(lease_id=arguments.lease.lease_id, state="starting")
+
+    def proof_host_status(self, arguments: ProofHostControl) -> ProofHostStatus:
+        return ProofHostStatus(lease_id=arguments.lease.lease_id, state="ready")
+
+    def proof_host_stop(self, arguments: ProofHostControl) -> ProofHostStatus:
+        return ProofHostStatus(lease_id=arguments.lease.lease_id, state="stopped")
+
     def document_restore(
         self, arguments: RestoreArguments, request: OperationRequest
     ) -> RestoreJobStatus:

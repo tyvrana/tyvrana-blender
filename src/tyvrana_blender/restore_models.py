@@ -3,7 +3,6 @@
 from typing import Any, Literal
 
 from pydantic import field_validator
-from tyvrana_protocol import JsonValue
 
 from .models import Model
 from .mutation_models import MutationJobStatus, schema
@@ -12,7 +11,7 @@ from .mutation_models import MutationJobStatus, schema
 class RestoreArguments(Model):
     mutation_id: str
     operation: str
-    arguments: JsonValue
+    locator: str
     discard_current: Literal[True]
     current: dict[str, str | None]
     target: dict[str, str]

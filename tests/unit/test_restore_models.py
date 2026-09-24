@@ -17,7 +17,7 @@ def test_restore_is_guarded_and_reuses_document_open() -> None:
         RestoreArguments(
             mutation_id="restore",
             operation="blender.file.open",
-            arguments={},
+            locator="/trusted.blend",
             discard_current=False,  # type: ignore[arg-type]
             current={},
             target={},

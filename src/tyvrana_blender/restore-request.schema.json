@@ -3,6 +3,15 @@
     "DocumentRestoreTarget": {
       "additionalProperties": false,
       "properties": {
+        "project_id": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "format": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Format",
+          "type": "string"
+        },
         "digest": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Digest",
@@ -12,15 +21,6 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "File Sha256",
           "type": "string"
-        },
-        "format": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Format",
-          "type": "string"
-        },
-        "project_id": {
-          "$ref": "#/$defs/ResourceToken"
         }
       },
       "required": [
@@ -35,21 +35,10 @@
     "DocumentState": {
       "additionalProperties": false,
       "properties": {
-        "digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Digest",
-          "type": "string"
-        },
-        "document_session_id": {
+        "host_session_id": {
           "$ref": "#/$defs/ResourceToken"
         },
-        "format": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Format",
-          "type": "string"
-        },
-        "host_session_id": {
+        "document_session_id": {
           "$ref": "#/$defs/ResourceToken"
         },
         "project_id": {
@@ -61,6 +50,17 @@
               "type": "null"
             }
           ]
+        },
+        "format": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Format",
+          "type": "string"
+        },
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
         }
       },
       "required": [
@@ -72,37 +72,6 @@
       ],
       "title": "DocumentState",
       "type": "object"
-    },
-    "JsonValue": {
-      "anyOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "integer"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "string"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/JsonValue"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/JsonValue"
-          },
-          "type": "object"
-        },
-        {
-          "type": "null"
-        }
-      ]
     },
     "QualifiedName": {
       "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
@@ -116,22 +85,25 @@
   },
   "additionalProperties": false,
   "properties": {
-    "arguments": {
-      "$ref": "#/$defs/JsonValue"
+    "mutation_id": {
+      "$ref": "#/$defs/ResourceToken"
     },
-    "current": {
-      "$ref": "#/$defs/DocumentState"
+    "operation": {
+      "$ref": "#/$defs/QualifiedName"
+    },
+    "locator": {
+      "maxLength": 4096,
+      "minLength": 1,
+      "title": "Locator",
+      "type": "string"
     },
     "discard_current": {
       "const": true,
       "title": "Discard Current",
       "type": "boolean"
     },
-    "mutation_id": {
-      "$ref": "#/$defs/ResourceToken"
-    },
-    "operation": {
-      "$ref": "#/$defs/QualifiedName"
+    "current": {
+      "$ref": "#/$defs/DocumentState"
     },
     "target": {
       "$ref": "#/$defs/DocumentRestoreTarget"
@@ -140,7 +112,7 @@
   "required": [
     "mutation_id",
     "operation",
-    "arguments",
+    "locator",
     "discard_current",
     "current",
     "target"

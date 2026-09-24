@@ -114,7 +114,7 @@ def restore_steps(
         raise OperationError(
             "restore_contract_unsupported", "Expected typed document open"
         )
-    parsed = spec.parse(arguments.arguments)
+    parsed = spec.parse({"filepath": arguments.locator, "discard_current": True})
     if not isinstance(parsed, FileOpenArguments):
         raise OperationError(
             "restore_contract_unsupported", "Expected file open arguments"
@@ -130,7 +130,9 @@ def restore_steps(
     # UI/other Tyvrana mutations cannot enter between authorization and discard.
     files.verify_restore_source(parsed.filepath, arguments.target["file_sha256"])
     nested = request.model_copy(
-        update=dict(operation=arguments.operation, arguments=arguments.arguments)
+        update=dict(
+            operation=arguments.operation, arguments=parsed.model_dump(mode="json")
+        )
     )
     result, artifacts = spec.invoke(backend, parsed, nested)
     if artifacts:

@@ -17,6 +17,9 @@ from tyvrana_protocol import (
     JsonValue,
     OperationRequest,
     OperationSuccess,
+    ProofHostControl,
+    ProofHostStart,
+    ProofHostStatus,
     ResourceInspectionRequest,
     ResourceInspectionResult,
 )
@@ -852,6 +855,21 @@ def validate_color_space(name: str) -> None:
 
 
 class BlenderBackend:
+    def proof_host_start(self, arguments: ProofHostStart) -> ProofHostStatus:
+        from . import proof_hosts
+
+        return proof_hosts.start(arguments)
+
+    def proof_host_status(self, arguments: ProofHostControl) -> ProofHostStatus:
+        from . import proof_hosts
+
+        return proof_hosts.status(arguments)
+
+    def proof_host_stop(self, arguments: ProofHostControl) -> ProofHostStatus:
+        from . import proof_hosts
+
+        return proof_hosts.stop(arguments)
+
     def growth_layers_correct(self, arguments: LayerCorrectArguments) -> LayerCache:
         from . import growth_layers
 
@@ -3024,12 +3042,17 @@ class Runtime:
         self.config = config
         self.filepath = str(bpy.data.filepath)
         from .bindings import project_id
+        from .proof_hosts import runtime_identity
 
         self.project_id = project_id()
         self.worker = WorkerProcess(
             config,
             registration(
-                INSTANCE_ID, str(bpy.app.version_string), self.filepath, self.project_id
+                INSTANCE_ID,
+                str(bpy.app.version_string),
+                self.filepath,
+                self.project_id,
+                runtime_identity(),
             ),
         )
         self.queue = CommandQueue(
@@ -3107,6 +3130,11 @@ _status = "disabled"
 
 
 def preferences_config() -> ConnectionConfig:
+    from .proof_hosts import connection
+
+    proof = connection()
+    if proof:
+        return ConnectionConfig(host=proof[0], port=proof[1])
     addon = bpy.context.preferences.addons.get(__package__)
     if addon is None:
         return ConnectionConfig()
@@ -3121,9 +3149,11 @@ def stop() -> None:
         form_jobs,
         growth_dynamics,
         mutation_jobs,
+        proof_hosts,
         render_host,
     )
 
+    proof_hosts.shutdown()
     mutation_jobs.shutdown()
     attestation_jobs.shutdown()
     form_jobs.shutdown()
@@ -3154,8 +3184,15 @@ def pump() -> float | None:
             restart()
         if _runtime is not None:
             _runtime.tick()
-            from . import attestation_jobs, form_jobs, growth_dynamics, mutation_jobs
+            from . import (
+                attestation_jobs,
+                form_jobs,
+                growth_dynamics,
+                mutation_jobs,
+                proof_hosts,
+            )
 
+            proof_hosts.tick()
             mutation_jobs.tick()
             attestation_jobs.tick()
             form_jobs.tick()
@@ -3183,6 +3220,7 @@ def after_load(*args: object) -> None:
 
 def after_save(*args: object) -> None:
     from .bindings import project_id
+    from .proof_hosts import runtime_identity
 
     identity = project_id()
     if _runtime is not None and (
@@ -3192,7 +3230,11 @@ def after_save(*args: object) -> None:
         _runtime.project_id = identity
         _runtime.worker.send(
             registration(
-                INSTANCE_ID, str(bpy.app.version_string), _runtime.filepath, identity
+                INSTANCE_ID,
+                str(bpy.app.version_string),
+                _runtime.filepath,
+                identity,
+                runtime_identity(),
             )
         )
 

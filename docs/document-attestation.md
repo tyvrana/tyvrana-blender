@@ -145,3 +145,18 @@ perform no file or lifecycle changes. Core still requires guarded before/after
 receipts, unchanged prerequisite resource fingerprints, and exact full-content
 equality with fresh live evidence. Unknown changes and nondeterministic replay
 results fail closed. Normal authoring continues to use ordinary mutation receipts.
+
+## Disposable independent proof hosts
+
+Core project workflows use the internal typed `blender.proof_host.start/status/stop`
+lifecycle. The work adapter snapshots its active implementation, verifies build and
+artifact SHA256, and starts Blender's own executable in background mode. The private
+bootstrap opens the exact artifact without running embedded scripts and registers the
+Core-issued lease, origin, build, process role and document identity. Core alone routes
+proof work. No client command line or second adapter selection is involved.
+
+The parent retains the owned process handle and bounds graceful shutdown before
+terminating only that process group. Parent shutdown/reload releases children; lease
+TTL, parent-liveness and Core-disconnection checks bound orphan lifetime. Independent
+proof never saves the artifact. Complete evidence includes the saved file locator and
+SHA256; the locator does not enter canonical authored-content hashing.
