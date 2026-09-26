@@ -29,6 +29,69 @@ class RenderHostTests(unittest.TestCase):
         self.addCleanup(host.shutdown)
         self.identifier = "b" * 32
 
+    def test_transient_inspection_restores_strong_content_on_all_outcomes(self) -> None:
+        attestation = importlib.import_module(package + ".attestation")
+        renderer = importlib.import_module(package + ".render")
+        scene = bpy.context.scene
+        scene.frame_set(4, subframe=0.25)
+        before = attestation.inspect().root
+        self.assertEqual(before["status"], "complete", before)
+        options = models.RenderArguments(
+            width=64,
+            height=64,
+            inspection={
+                "objects": ["RenderCube"],
+                "views": [{"name": "Side", "orientation": "right"}],
+            },
+        )
+        for outcome in ("success", "failure", "cancel"):
+            with self.subTest(outcome=outcome):
+
+                def checkpoint(current: str = outcome) -> None:
+                    if current == "cancel":
+                        raise errors.OperationError("render_cancelled", "Test cancel")
+
+                def fail(*args: object, **kwargs: object) -> None:
+                    raise errors.OperationError("render_failed", "Test native failure")
+
+                generator = renderer.render_steps(
+                    options, self.spool, checkpoint=checkpoint
+                )
+                if outcome == "failure":
+                    # Fail after inspection has created its camera and applied settings.
+                    with patch.object(
+                        renderer,
+                        "bpy",
+                        SimpleNamespace(
+                            context=bpy.context,
+                            app=bpy.app,
+                            data=bpy.data,
+                            ops=SimpleNamespace(render=SimpleNamespace(render=fail)),
+                        ),
+                    ):
+                        with self.assertRaises(errors.OperationError):
+                            next(generator)
+                elif outcome == "cancel":
+                    with self.assertRaises(errors.OperationError):
+                        next(generator)
+                else:
+                    with self.assertRaises(StopIteration):
+                        next(generator)
+                generator.close()
+                after = attestation.inspect().root
+                for field in (
+                    "status",
+                    "digest",
+                    "format",
+                    "project_id",
+                    "document_session_id",
+                    "host_session_id",
+                ):
+                    self.assertEqual(before[field], after[field], field)
+                self.assertEqual((scene.frame_current, scene.frame_subframe), (4, 0.25))
+                self.assertNotIn("InspectionCamera", bpy.data.objects)
+                self.assertNotIn("InspectionSheet", bpy.data.images)
+
     def test_render_preserves_scene_state_and_live_image_pixels(self) -> None:
         scene = bpy.context.scene
         image = bpy.data.images.new("Live pixels", width=2, height=2)

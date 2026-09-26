@@ -3208,9 +3208,11 @@ _DECLARATIONS = (
         "Discard the current document and load an empty unsaved factory project. "
         "Requires discard_current=true; preserves host process, preferences and "
         "UI layout. Clears document data/path/identity, without saving. "
-        "Wait for registration to report null project_path/project_id afterward.",
-        effect="mutating",
-        execution="synchronous",
+        "Wait for registration to report null project_path/project_id afterward. "
+        "Document lifecycle transition: preserves Core history and trusted heads; "
+        "does not authorize or validate a replacement semantic document.",
+        effect="lifecycle",
+        execution="lifecycle",
     ),
     _operation(
         "blender.viewport.configure",
@@ -3278,9 +3280,12 @@ _DECLARATIONS = (
         "Open a native project with an explicit discard policy. Embedded "
         "script execution is disabled; project metadata re-registers after "
         "the response drains. Wait for registration to report the resulting "
-        "project_path before sending further operations.",
-        effect="mutating",
-        execution="synchronous",
+        "project_path before sending further operations. Document lifecycle "
+        "transition, not a working-content receipt: existing Core heads remain "
+        "unchanged. Reattach matching saved content with project.attest before "
+        "guarded edits; changed content requires the normal restore/repair workflow.",
+        effect="lifecycle",
+        execution="lifecycle",
         tags=("document_open",),
     ),
     _operation(

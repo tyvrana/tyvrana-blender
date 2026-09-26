@@ -75,6 +75,29 @@ Unknown jobs and unavailable results have separate errors.
 
 ## Rendering and state preservation
 
+Rendering has the `transient` effect: it produces an observation, not an authored
+document mutation or a semantic validation. Bound and unbound documents follow the
+same render-job and artifact-transfer path. It does not enter guarded mutation
+publication, advance the semantic revision, refresh bindings, accept milestones or
+replace the trusted document head. Stale/unverified bindings do not prevent visual
+inspection; authored edits, checkpoints and acceptance still require their normal
+binding/content guards. A successful image alone never certifies project freshness.
+
+Temporary native changes are exclusive to the active job and restored before a
+terminal result, including failure and frame-boundary cancellation. Native Render
+Result/slots, explicit output files/review packets and an explicitly requested
+result display are the documented persistent outputs; authored scene content is
+preserved. Viewport capture remains a separate interactive framebuffer operation,
+while render jobs support both interactive and background hosts.
+
+Native file open/new are document lifecycle transitions, not guarded edits to the
+current document. They preserve Core's trusted heads and historical records; a new
+loaded session is not implicitly verified. After the advertised registration wait,
+reattach matching saved content with `project.attest` before further guarded edits.
+Changed content cannot use reattachment to replace the trusted head. File saving
+remains a guarded mutation on a bound document. Neither rendering nor file loading
+implicitly accepts or repairs semantic state.
+
 One canonical request configures both short and long rendering. Current camera,
 frame, scene color management, transparency, lighting and supported engine are
 retained. Built-in Cycles, Eevee and Workbench are supported; custom engines and

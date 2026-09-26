@@ -22,6 +22,23 @@ from tyvrana_blender.render_jobs import RenderJobs
 from tyvrana_blender.render_models import RenderJobArguments, RenderStatusArguments
 
 
+def test_render_contract_preserves_document_and_supports_artifact_jobs() -> None:
+    from tyvrana_blender.operations import REGISTRY
+
+    render = REGISTRY["blender.render.image"].contract
+    capture = REGISTRY["blender.viewport.capture"].contract
+    assert render.effect == capture.effect == "transient"
+    assert render.execution == "job_start"
+    assert render.output_artifacts == "optional"
+    assert not render.requires_interactive
+    assert capture.execution == "synchronous" and capture.requires_interactive
+    assert REGISTRY["blender.object.set_transform"].contract.effect == "mutating"
+    assert REGISTRY["blender.file.save"].contract.effect == "mutating"
+    for name in ("blender.file.new", "blender.file.open"):
+        contract = REGISTRY[name].contract
+        assert contract.effect == contract.execution == "lifecycle"
+
+
 def request(name: str, **arguments: Any) -> OperationRequest:
     return OperationRequest(
         type="operation.request",

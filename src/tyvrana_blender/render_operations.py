@@ -33,12 +33,16 @@ DECLARATIONS = (
         "within pixel/buffer/artifact/time budgets. Up to64 frames return ZIP. "
         "wait_seconds0..5 returns an image on success or a job ID; use render.status "
         "event waits. Deadlines apply between frames; active frames drain before "
-        "cleanup. Settings/frame are restored. Optional output persists atomically. "
+        "cleanup. Transient: authored document/settings/frame are restored on "
+        "success, failure or cancellation; no semantic revision or acceptance is "
+        "created. Inspection is allowed for stale/unverified bindings and does not "
+        "verify them. Native Render Result and explicitly requested output may "
+        "persist. Optional output persists atomically. "
         "Jobs survive disconnect, not reload/file-open; retain16 records/4 results. "
         "show_result requires an interactive still. Additional passes need multilayer; "
         "AOVs require shader nodes.",
         tags=("render", "production", "exr", "sequence", "artifact"),
-        effect="mutating",
+        effect="transient",
         execution="job_start",
         output_artifacts="optional",
     ),
