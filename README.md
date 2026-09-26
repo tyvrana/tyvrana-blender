@@ -195,9 +195,12 @@ see [Scene organization and coherent object sets](docs/scene-organization.md).
 
 Names are exact. A single typed registry supplies request validation, result
 validation, dispatch, descriptions and registration contracts. Discover a compact
-adapter snapshot through core, then use `tyvrana_list_operations` with selected
-names and `include_schemas: true`. Cache by `catalog_sha256`; refresh after a
-contract change. Schemas describe enums, required fields, bounds and defaults;
+adapter snapshot through core, search compact summaries with `query`, then use
+`tyvrana_list_operations` with selected `names` and `schemas: "arguments"`.
+Detailed discovery returns at most eight contracts per page; follow `next_offset`
+until null. Retain each `contract_sha256` and supply `known_contracts` on overlapping
+queries. Use `schemas: "full"` only when result schemas are needed. Schemas describe
+enums, required fields, bounds and defaults;
 preserve omitted fields when configuring existing resources. Descriptions also
 identify effects, native jobs, interactive requirements and input/output artifacts.
 
