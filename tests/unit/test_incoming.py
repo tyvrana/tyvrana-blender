@@ -36,7 +36,7 @@ def request(*messages: ArtifactBegin, request_id: str = "request") -> OperationR
         type="operation.request",
         request_id=request_id,
         operation="blender.image.create_from_artifact",
-        arguments={},
+        arguments={"images": [{}]},
         artifacts=tuple(item.descriptor for item in messages),
     )
 

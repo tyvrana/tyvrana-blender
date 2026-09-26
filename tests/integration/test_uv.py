@@ -48,7 +48,7 @@ def test_native_input_images(
     )
     (tmp_path / "image-native.log").write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLENDER_INPUT_IMAGE_TESTS_PASSED 11" in result.stdout
+    assert "BLENDER_INPUT_IMAGE_TESTS_PASSED 13" in result.stdout
     assert "Traceback" not in result.stdout + result.stderr
     assert not list(tmp_path.glob("tyvrana-blender-artifacts-*"))
 

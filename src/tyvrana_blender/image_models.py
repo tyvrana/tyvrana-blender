@@ -82,7 +82,7 @@ class ImageConfigureArguments(Model):
         return value
 
 
-class ImageFromArtifactArguments(Model):
+class ImageArtifactSpec(Model):
     artifact_id: ArtifactId
     name: ObjectName | None = None
     color_space: ObjectName | None = None
@@ -94,6 +94,21 @@ class ImageFromArtifactArguments(Model):
         if value is None:
             raise ValueError("Omit an optional property; null is invalid")
         return value
+
+
+class ImageFromArtifactArguments(Model):
+    images: list[ImageArtifactSpec] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def unique_names(self) -> Self:
+        names = [item.name for item in self.images if item.name is not None]
+        if len(names) != len(set(names)):
+            raise ValueError("Explicit image names must be unique")
+        return self
+
+
+class ImageImportResult(Model):
+    images: list[ImageSummary]
 
 
 class ImagePreviewArguments(Model):

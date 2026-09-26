@@ -31,11 +31,13 @@ async def test_image_import_matrix(
                     "media_type": row["media_type"],
                 }
                 started = time.perf_counter()
-                imported = await client.call_tool("tyvrana_import_artifact", request)
+                imported = await client.call_tool(
+                    "tyvrana_import_artifact", {"files": [request]}
+                )
                 import_seconds = time.perf_counter() - started
                 assert not imported.is_error, imported
                 descriptor = ArtifactDescriptor.model_validate(
-                    imported.structured_content
+                    imported.structured_content["artifacts"][0]
                 )
                 assert (
                     descriptor.sha256 == row["sha256"]
@@ -44,7 +46,11 @@ async def test_image_import_matrix(
                 args = dict(
                     adapter_id=adapter.instance_id,
                     operation="blender.image.create_from_artifact",
-                    arguments=dict(artifact_id=descriptor.artifact_id, name="Fixture"),
+                    arguments={
+                        "images": [
+                            dict(artifact_id=descriptor.artifact_id, name="Fixture")
+                        ]
+                    },
                     artifact_ids=[descriptor.artifact_id],
                 )
                 started = time.perf_counter()
@@ -83,7 +89,7 @@ async def test_image_import_matrix(
                     assert state.structured_content["result"]["images"] == []
                 else:
                     assert not result.is_error, result
-                    image = result.structured_content["result"]
+                    image = result.structured_content["result"]["images"][0]
                     assert (image["width"], image["height"]) == (
                         row["width"],
                         row["height"],
@@ -124,7 +130,8 @@ async def test_image_import_matrix(
                     while spooled_count(tmp_path):  # noqa: ASYNC110 - Observe owned worker cleanup.
                         await asyncio.sleep(0.02)
                 released = await client.call_tool(
-                    "tyvrana_release_artifact", {"artifact_id": descriptor.artifact_id}
+                    "tyvrana_release_artifact",
+                    {"artifact_ids": [descriptor.artifact_id]},
                 )
                 assert not released.is_error
     (tmp_path / "image-import-metrics.json").write_text(

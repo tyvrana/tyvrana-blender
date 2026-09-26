@@ -91,7 +91,14 @@ async def test_construction_mcp(profile: dict[str, str], tmp_path: Path) -> None
             for name in ("Front", "Side", "Top"):
                 response = await tool(
                     "tyvrana_import_artifact",
-                    {"path": str(directory / f"{name}.png"), "media_type": "image/png"},
+                    {
+                        "files": [
+                            {
+                                "path": str(directory / f"{name}.png"),
+                                "media_type": "image/png",
+                            }
+                        ]
+                    },
                 )
                 artifact = ArtifactDescriptor.model_validate(
                     response.structured_content
@@ -102,15 +109,19 @@ async def test_construction_mcp(profile: dict[str, str], tmp_path: Path) -> None
                         "adapter_id": adapter.instance_id,
                         "operation": "blender.image.create_from_artifact",
                         "arguments": {
-                            "name": name,
-                            "artifact_id": artifact.artifact_id,
+                            "images": [
+                                {
+                                    "name": name,
+                                    "artifact_id": artifact.artifact_id,
+                                }
+                            ]
                         },
                         "artifact_ids": [artifact.artifact_id],
                     },
                 )
                 assert not response.is_error, response.content
                 await tool(
-                    "tyvrana_release_artifact", {"artifact_id": artifact.artifact_id}
+                    "tyvrana_release_artifact", {"artifact_ids": [artifact.artifact_id]}
                 )
             await call(
                 "reference.create",

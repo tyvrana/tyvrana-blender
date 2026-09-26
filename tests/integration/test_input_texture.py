@@ -96,11 +96,12 @@ async def test_external_texture_binary_inputs_uvs_and_packed_render(
                     )
 
                 imported = await client.call_tool(
-                    "tyvrana_import_artifact", {"path": str(source), "name": "Checker"}
+                    "tyvrana_import_artifact",
+                    {"files": [{"path": str(source), "name": "Checker"}]},
                 )
                 assert not imported.is_error
                 descriptor = ArtifactDescriptor.model_validate(
-                    imported.structured_content
+                    imported.structured_content["artifacts"][0]
                 )
                 assert (
                     descriptor.byte_size == len(data)
@@ -115,15 +116,19 @@ async def test_external_texture_binary_inputs_uvs_and_packed_render(
                             "adapter_id": identifier,
                             "operation": "blender.image.create_from_artifact",
                             "arguments": {
-                                "artifact_id": descriptor.artifact_id,
-                                "name": name,
+                                "images": [
+                                    {
+                                        "artifact_id": descriptor.artifact_id,
+                                        "name": name,
+                                    }
+                                ]
                             },
                             "artifact_ids": [descriptor.artifact_id],
                         },
                     )
                     assert not response.is_error, response.content
                     image = ImageSummary.model_validate(
-                        response.structured_content["result"]
+                        response.structured_content["result"]["images"][0]
                     )
                     assert (
                         image.packed
@@ -136,9 +141,14 @@ async def test_external_texture_binary_inputs_uvs_and_packed_render(
                     while spooled_count(tmp_path):  # noqa: ASYNC110 - Observe the owned Blender process.
                         await asyncio.sleep(0.02)
                 released = await client.call_tool(
-                    "tyvrana_release_artifact", {"artifact_id": descriptor.artifact_id}
+                    "tyvrana_release_artifact",
+                    {"artifact_ids": [descriptor.artifact_id]},
                 )
-                assert released.structured_content == {"released": True}
+                assert released.structured_content == {
+                    "artifacts": [
+                        {"artifact_id": descriptor.artifact_id, "released": True}
+                    ]
+                }
                 assert not source.exists()
                 await call(
                     "object.create_primitive",

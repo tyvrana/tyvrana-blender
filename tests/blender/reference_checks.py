@@ -386,7 +386,8 @@ class ReferenceTests(unittest.TestCase):
             landmarks=[{"name": "Point", "point": [1, 0, 0], "object": "Front"}],
         )
         reject("reference.remove", names=["Front"])
-        call("object.delete", name="Front")
+        # Simulate external deletion; typed domain removal correctly refuses it.
+        bpy.data.objects.remove(bpy.data.objects["Front"], do_unlink=True)
         point = call("landmark.inspect")["landmarks"][0]
         self.assertFalse(point["valid"])
         self.assertEqual(point["attachment"], "object")

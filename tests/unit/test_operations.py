@@ -141,6 +141,7 @@ from tyvrana_blender.image_models import (
     ImageConfigureArguments,
     ImageCreateArguments,
     ImageFromArtifactArguments,
+    ImageImportResult,
     ImageInspectResult,
     ImagePreviewArguments,
     ImagePreviewResult,
@@ -1626,9 +1627,11 @@ class Backend:
 
     def image_from_artifact(
         self, arguments: ImageFromArtifactArguments, request: OperationRequest
-    ) -> ImageSummary:
+    ) -> ImageImportResult:
         self.calls.append("image_from_artifact")
-        return image_summary(arguments.name or "Image")
+        return ImageImportResult(
+            images=[image_summary(item.name or "Image") for item in arguments.images]
+        )
 
     def image_configure(self, arguments: ImageConfigureArguments) -> ImageSummary:
         self.calls.append("image_configure")

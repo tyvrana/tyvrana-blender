@@ -75,7 +75,9 @@ class InputImageTests(unittest.TestCase):
             type="operation.request",
             request_id=message.request_id,
             operation="blender.image.create_from_artifact",
-            arguments={"artifact_id": descriptor.artifact_id, **arguments},
+            arguments={
+                "images": [{"artifact_id": descriptor.artifact_id, **arguments}]
+            },
             artifacts=(descriptor,),
         )
         self.inputs.claim(request)
@@ -92,7 +94,7 @@ class InputImageTests(unittest.TestCase):
             self.admit(data, name="Surface", color_space="sRGB", alpha_mode="straight")
         )
         self.assertIsInstance(response, OperationSuccess, str(response))
-        result = response.result
+        result = response.result["images"][0]
         self.assertEqual((result["width"], result["height"]), (128, 64))
         self.assertEqual(result["source"], "file")
         self.assertTrue(result["packed"])
@@ -129,9 +131,13 @@ class InputImageTests(unittest.TestCase):
         )
         self.assertIsInstance(response, OperationSuccess, str(response))
         self.assertEqual(
-            (response.result["width"], response.result["height"]), (64, 32)
+            (
+                response.result["images"][0]["width"],
+                response.result["images"][0]["height"],
+            ),
+            (64, 32),
         )
-        self.assertTrue(response.result["packed"])
+        self.assertTrue(response.result["images"][0]["packed"])
         image = bpy.data.images["Photo"]
         self.assertEqual(
             hashlib.sha256(image.packed_file.data).hexdigest(),
@@ -205,7 +211,8 @@ class InputImageTests(unittest.TestCase):
         results = [self.call(self.admit(checker_png())) for _ in range(2)]
         self.assertTrue(all(isinstance(result, OperationSuccess) for result in results))
         self.assertEqual(
-            [result.result["name"] for result in results], ["Image", "Image.001"]
+            [result.result["images"][0]["name"] for result in results],
+            ["Image", "Image.001"],
         )
 
     def test_four_k_image_is_supported(self) -> None:
@@ -221,9 +228,13 @@ class InputImageTests(unittest.TestCase):
         response = self.call(self.admit(data, name="Large"))
         self.assertIsInstance(response, OperationSuccess, str(response))
         self.assertEqual(
-            (response.result["width"], response.result["height"]), (4096, 4096)
+            (
+                response.result["images"][0]["width"],
+                response.result["images"][0]["height"],
+            ),
+            (4096, 4096),
         )
-        self.assertTrue(response.result["packed"])
+        self.assertTrue(response.result["images"][0]["packed"])
 
     def test_synthetic_format_dimension_and_metadata_matrix(self) -> None:
         root = Path(os.environ["TYVRANA_TEST_IMAGE_FIXTURES"])
@@ -252,6 +263,70 @@ class InputImageTests(unittest.TestCase):
                     self.assertEqual(list(image.pixels[:4]), pixel)
                     bpy.data.images.remove(image)
                 self.assertFalse(list(self.spool.root.iterdir()))
+
+    def test_batch_success_and_late_failure_rollback(self) -> None:
+        request = self.admit(checker_png(), name="Seed")
+        item = request.arguments["images"][0]
+        request = request.model_copy(
+            update={
+                "arguments": {
+                    "images": [{**item, "name": f"Batch{i}"} for i in range(8)]
+                }
+            }
+        )
+        response = self.call(request)
+        self.assertIsInstance(response, OperationSuccess, str(response))
+        self.assertEqual(
+            [r["name"] for r in response.result["images"]],
+            [f"Batch{i}" for i in range(8)],
+        )
+        self.assertTrue(all(r["packed"] for r in response.result["images"]))
+        before = set(bpy.data.images.keys())
+        request = self.admit(checker_png(), name="Good")
+        item = request.arguments["images"][0]
+        request = request.model_copy(
+            update={"arguments": {"images": [item, {**item, "name": "Fails"}]}}
+        )
+        original = adapter.image_summary
+
+        def fail_second(image: Any) -> Any:
+            if image.name == "Fails":
+                raise RuntimeError("Injected second image failure")
+            return original(image)
+
+        with patch.object(adapter, "image_summary", side_effect=fail_second):
+            response = self.call(request)
+        self.assertIsInstance(response, OperationFailure)
+        self.assertEqual(set(bpy.data.images.keys()), before)
+        self.assertFalse(list(self.spool.root.iterdir()))
+
+    def test_batch_preflight_conflict_and_pixel_budget(self) -> None:
+        self.call(self.admit(checker_png(), name="Existing"))
+        before = set(bpy.data.images.keys())
+        request = self.admit(checker_png(), name="Good")
+        item = request.arguments["images"][0]
+        request = request.model_copy(
+            update={"arguments": {"images": [item, {**item, "name": "Existing"}]}}
+        )
+        response = self.call(request)
+        self.assertIsInstance(response, OperationFailure)
+        self.assertEqual(set(bpy.data.images.keys()), before)
+        request = self.admit(checker_png(), name="OverBudget")
+        request = request.model_copy(
+            update={
+                "arguments": {
+                    "images": [
+                        {**request.arguments["images"][0], "name": f"Budget{i}"}
+                        for i in range(8)
+                    ]
+                }
+            }
+        )
+        with patch.object(adapter, "raster_size", return_value=(4096, 4096)):
+            response = self.call(request)
+        self.assertIsInstance(response, OperationFailure)
+        self.assertEqual(response.error.code, "image_batch_limit")
+        self.assertEqual(set(bpy.data.images.keys()), before)
 
     def test_post_pack_failure_removes_native_datablock_and_input(self) -> None:
         request = self.admit(checker_png(), name="Unpublished")

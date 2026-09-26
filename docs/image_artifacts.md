@@ -1,9 +1,19 @@
 # Image artifact ingestion
 
-`blender.image.create_from_artifact` creates one packed native image from one
-attached artifact. Use the normal Core artifact import once, then pass its ID in
-both the operation arguments and attached artifact IDs. Reuse a retained artifact
-if needed; release it when finished. There is no conversion or intermediate image
+`blender.image.create_from_artifact` atomically creates 1..8 packed native images.
+Pass `images: [{artifact_id, name?, color_space?, alpha_mode?}, ...]` and attach the
+unique artifact IDs. Core imports `files: [{path, name?, media_type?}, ...]` in
+batches of up to eight, returning ordered `artifacts`. Release inputs together
+with `artifact_ids` when finished. Single-image requests use the same list shape.
+The result is ordered `images` metadata. Existing explicit names conflict;
+duplicate explicit names fail validation. Any failure removes every new image
+from that batch and preserves existing images. Artifact ownership remains with Core.
+
+For reference sets, import/create images in batches, then use `reference.create`
+for combined placement, labels, categories and collections; `reference.register`
+already batches metric calibration and provenance. `reference.inspect` retrieves
+a filtered page after setup or reopening. Each batch is atomic; separate image
+and reference calls are not a cross-call transaction. There is no conversion or intermediate image
 inspection step for a valid supported input.
 
 ## Formats and bounds
@@ -14,16 +24,16 @@ this operation's contract even when the host supports them elsewhere.
 
 Before native decode, admission enforces all of:
 
-- At most **67,108,864 encoded bytes (64 MiB)**.
+- At most **67,108,864 encoded bytes (64 MiB)** per image and combined batch.
 - Width and height from **1 through 16,384**.
-- At most **33,554,432 decoded pixels**.
+- At most **33,554,432 decoded pixels** per image and combined batch.
 - Matching MIME/signature, valid dimension header, complete declared segments and
   required terminal marker. JPEG metadata is skipped by its encoded segment length,
   without a separate hidden metadata-size cutoff.
 
 The pixel bound limits one four-channel float representation to 512 MiB; native
 buffers, encoded/packed bytes, caches and existing images consume additional memory.
-It is a per-image admission bound, not a process-memory reservation. Core artifact
+It is an admission bound, not a process-memory reservation. Core artifact
 quotas may reject admission earlier when storage is full or locally configured
 limits are lower. Generated images retain their separate existing size contract.
 
@@ -60,7 +70,7 @@ Transport failures occur before image dispatch and retain their existing
 Successful artifact import alone does not create a Blender image. Check the image
 operation result before invoking dependent reference or material operations.
 
-Failed image creation removes its newly allocated native image; request-scoped
+Failed image creation removes all native images allocated by its batch; request-scoped
 input files are released on completion/cancellation. Existing images remain intact.
 Original Core artifacts retain their normal explicit-release lifetime. Packed bytes
 remain independent of temporary files after success and through native save/reopen.

@@ -162,9 +162,11 @@ from .growth_models import (
 )
 from .image_models import (
     ALPHA_MODES,
+    ImageArtifactSpec,
     ImageConfigureArguments,
     ImageCreateArguments,
     ImageFromArtifactArguments,
+    ImageImportResult,
     ImageInspectResult,
     ImagePreviewArguments,
     ImagePreviewResult,
@@ -2068,6 +2070,76 @@ class BlenderBackend:
 
     def image_from_artifact(
         self, arguments: ImageFromArtifactArguments, request: OperationRequest
+    ) -> ImageImportResult:
+        data_mutation_context()
+        descriptors = {item.artifact_id: item for item in request.artifacts}
+        total_bytes = total_pixels = 0
+        # Admit the complete set before allocating native images. Retain existing
+        # images and reject conflicts; no implicit reuse or overwriting.
+        for index, spec in enumerate(arguments.images):
+            descriptor = descriptors.get(spec.artifact_id)
+            if descriptor is None:
+                raise OperationError(
+                    "artifact_not_attached",
+                    "Image artifact is not attached",
+                    {"item_index": index, "stage": "artifact_read"},
+                )
+            if descriptor.media_type not in {"image/png", "image/jpeg"}:
+                raise OperationError(
+                    "unsupported_artifact_media_type",
+                    "Only PNG and JPEG images are supported",
+                    {"stage": "image_format", "media_type": descriptor.media_type},
+                )
+            if self.spool is None:
+                raise OperationError(
+                    "artifact_not_found", "Input artifact is unavailable"
+                )
+            if spec.name is not None and bpy.data.images.get(spec.name) is not None:
+                raise OperationError(
+                    "invalid_arguments",
+                    "Image name already exists",
+                    {"item_index": index},
+                )
+            if spec.color_space is not None:
+                validate_color_space(spec.color_space)
+            path = input_path(self.spool.root, request.request_id, spec.artifact_id)
+            if not path.is_file():
+                raise OperationError(
+                    "artifact_not_found",
+                    "Input artifact is unavailable",
+                    {"stage": "artifact_read"},
+                )
+            width, height = raster_size(
+                path, descriptor.media_type, expected_bytes=descriptor.byte_size
+            )
+            total_bytes += descriptor.byte_size
+            total_pixels += width * height
+        if total_bytes > 64 * 1024 * 1024 or total_pixels > 33_554_432:
+            raise OperationError(
+                "image_batch_limit",
+                "Combined image batch exceeds admission limits",
+                {
+                    "encoded_bytes": total_bytes,
+                    "pixels": total_pixels,
+                    "max_encoded_bytes": 64 * 1024 * 1024,
+                    "max_pixels": 33_554_432,
+                },
+            )
+        created: list[Any] = []
+        results: list[ImageSummary] = []
+        try:
+            for spec in arguments.images:
+                result = self._image_from_artifact(spec, request)
+                created.append(bpy.data.images[result.name])
+                results.append(result)
+            return ImageImportResult(images=results)
+        except BaseException:
+            for image in reversed(created):
+                bpy.data.images.remove(image, do_unlink=True)
+            raise
+
+    def _image_from_artifact(
+        self, arguments: ImageArtifactSpec, request: OperationRequest
     ) -> ImageSummary:
         data_mutation_context()
         descriptor = next(

@@ -227,7 +227,7 @@ def test_image_import_arguments_reject_invalid_values(
     arguments: dict[str, object],
 ) -> None:
     with pytest.raises(ValidationError):
-        ImageFromArtifactArguments.model_validate(arguments)
+        ImageFromArtifactArguments.model_validate({"images": [arguments]})
 
 
 def test_image_import_dispatch_and_schema() -> None:
@@ -239,10 +239,14 @@ def test_image_import_dispatch_and_schema() -> None:
             request_id="test",
             operation="blender.image.create_from_artifact",
             arguments={
-                "artifact_id": "a" * 32,
-                "name": "Surface",
-                "color_space": "sRGB",
-                "alpha_mode": "straight",
+                "images": [
+                    {
+                        "artifact_id": "a" * 32,
+                        "name": "Surface",
+                        "color_space": "sRGB",
+                        "alpha_mode": "straight",
+                    }
+                ]
             },
         ),
     )
@@ -254,3 +258,23 @@ def test_image_import_dispatch_and_schema() -> None:
     assert (
         "path" not in schema["properties"] and schema["additionalProperties"] is False
     )
+
+
+@pytest.mark.parametrize(
+    "images",
+    [
+        [],
+        [{"artifact_id": "a" * 32}] * 9,
+        [{"artifact_id": "a" * 32, "name": "Same"}] * 2,
+    ],
+)
+def test_image_import_batch_bounds_and_names(images: list[dict[str, object]]) -> None:
+    with pytest.raises(ValidationError):
+        ImageFromArtifactArguments.model_validate({"images": images})
+
+
+def test_image_import_batch_preserves_order_and_shared_input() -> None:
+    arguments = ImageFromArtifactArguments.model_validate(
+        {"images": [{"artifact_id": "a" * 32, "name": f"Image{i}"} for i in range(8)]}
+    )
+    assert [item.name for item in arguments.images] == [f"Image{i}" for i in range(8)]

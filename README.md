@@ -870,8 +870,11 @@ URL downloading, and pixel painting are not exposed.
 
 ### Images from input artifacts
 
-`blender.image.create_from_artifact` requires `artifact_id`. Optional fields are
-`name`, `color_space`, and `alpha_mode` (the same four modes described above).
+`blender.image.create_from_artifact` takes `images`, an ordered list of 1..8
+entries with required `artifact_id`, optional `name`, `color_space`, and
+`alpha_mode` (the same four modes described above). A single image uses the same
+list contract; results contain ordered `images` metadata. Batch creation is atomic:
+any failed item removes all newly created images and preserves existing resources.
 The artifact must also be attached to the operation through core's
 `tyvrana_execute_operation.artifact_ids`. Nulls, unknown fields, duplicate explicit
 image names, and unavailable OCIO color spaces are rejected.
@@ -880,6 +883,7 @@ Supported inputs are deliberately limited to **PNG** (`image/png`) and **JPEG**
 (`image/jpeg`, 8-bit baseline/extended sequential or progressive DCT). Header
 signatures must match the declared type. Limits are **64 MiB encoded**, **1–16384
 pixels per axis**, and **33554432 total pixels**, checked before native decode.
+The combined batch also stays within64 MiB encoded and33554432 pixels.
 Headers and terminal markers are checked; length-delimited JPEG metadata is skipped
 without copying it. Blender
 must then supply a valid decoded buffer with matching dimensions. Corrupt or
@@ -904,14 +908,14 @@ Image creation requires the same editable Object Mode context as generated image
 For an external texture workflow:
 
 1. Call core's `tyvrana_import_artifact` with
-   `{"path": "textures/checker.png", "name": "Checker"}`.
-2. Use its opaque descriptor ID in both the attachment list and the image operation:
+   `{"files": [{"path": "textures/checker.png", "name": "Checker"}]}`.
+2. Use its first `artifacts` descriptor ID in both the attachment list and the image operation:
 
    ```json
    {
      "adapter_id": "<connected Blender instance>",
      "operation": "blender.image.create_from_artifact",
-     "arguments": {"artifact_id": "00112233445566778899aabbccddeeff", "name": "Checker"},
+     "arguments": {"images": [{"artifact_id": "00112233445566778899aabbccddeeff", "name": "Checker"}]},
      "artifact_ids": ["00112233445566778899aabbccddeeff"]
    }
    ```
@@ -920,7 +924,7 @@ For an external texture workflow:
    to its `Vector`, and connect its `Color` to the Principled `Base Color`.
 4. Create/select and unwrap the object's UV map as needed, then render.
 5. Release the core import with `tyvrana_release_artifact` when no more operations
-   need it. The packed Blender image remains usable.
+   need it: `{"artifact_ids": ["..."]}`. The packed Blender image remains usable.
 
 The local path exists exclusively at core's local ingestion boundary. Core copies
 the file into its own storage; Blender receives only opaque descriptors and binary
@@ -3563,7 +3567,9 @@ measurement points.
 ### Reference images and ownership
 
 First import PNG/JPEG bytes through `tyvrana_import_artifact`, then attach the
-returned ID to `blender.image.create_from_artifact`. Reuse the resulting packed
+returned IDs to `blender.image.create_from_artifact` using its `images` list.
+Batch up to eight files/images per call; do not ingest a prepared set one by one.
+Reuse the resulting packed
 image name in reference declarations. Generated images are also supported.
 Release the imported core artifact after creating the image; packed image bytes
 and references survive removal of input temporary files and native save/reopen.

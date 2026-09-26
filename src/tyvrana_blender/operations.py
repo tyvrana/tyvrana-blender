@@ -134,6 +134,7 @@ from .image_models import (
     ImageConfigureArguments,
     ImageCreateArguments,
     ImageFromArtifactArguments,
+    ImageImportResult,
     ImageInspectResult,
     ImagePreviewArguments,
     ImagePreviewResult,
@@ -979,7 +980,7 @@ class SceneBackend(Protocol):
     def image_create(self, arguments: ImageCreateArguments) -> ImageSummary: ...
     def image_from_artifact(
         self, arguments: ImageFromArtifactArguments, request: OperationRequest
-    ) -> ImageSummary: ...
+    ) -> ImageImportResult: ...
     def image_configure(self, arguments: ImageConfigureArguments) -> ImageSummary: ...
     def shader_inspect(
         self, arguments: ShaderInspectArguments
@@ -3362,14 +3363,17 @@ _DECLARATIONS = (
     _operation(
         "blender.image.create_from_artifact",
         ImageFromArtifactArguments,
-        ImageSummary,
+        ImageImportResult,
         lambda b, a, q: b.image_from_artifact(a, q),
-        "Create and pack unchanged bytes from one attached PNG/8-bit DCT JPEG "
+        "Atomically create and pack 1..8 images from attached PNG/8-bit DCT JPEG "
         "(baseline/progressive, RGB/grayscale/CMYK). Limits: 64 MiB encoded, "
-        "16384 pixels per side, 33554432 total pixels, checked before native "
+        "16384 pixels per side; combined batch 64 MiB encoded/33554432 pixels. "
+        "All inputs admitted before native "
         "decode. No resize/re-encoding; EXIF orientation is not applied. "
         "Failures identify format, truncation, byte/pixel limits, native decode "
-        "or packing stage; no image remains on failure. Returns metadata only. "
+        "or packing stage; all newly created images roll back on failure. Existing "
+        "names conflict. Returns ordered metadata only. Use batches for reference "
+        "sets, then reference.create/register for placement and calibration. "
         "Artifact IDs reference transferred bytes, never shared filesystem paths.",
         effect="mutating",
         execution="synchronous",

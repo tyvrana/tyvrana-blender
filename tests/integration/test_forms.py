@@ -108,16 +108,22 @@ async def test_form_reference_and_review_mcp(
 
             imported = await client.call_tool(
                 "tyvrana_import_artifact",
-                {"path": str(path), "media_type": "image/png"},
+                {"files": [{"path": str(path), "media_type": "image/png"}]},
             )
-            descriptor = ArtifactDescriptor.model_validate(imported.structured_content)
+            descriptor = ArtifactDescriptor.model_validate(
+                imported.structured_content["artifacts"][0]
+            )
             await call(
                 "image.create_from_artifact",
-                {"name": "Section", "artifact_id": descriptor.artifact_id},
+                {
+                    "images": [
+                        {"name": "Section", "artifact_id": descriptor.artifact_id}
+                    ]
+                },
                 [descriptor.artifact_id],
             )
             await client.call_tool(
-                "tyvrana_release_artifact", {"artifact_id": descriptor.artifact_id}
+                "tyvrana_release_artifact", {"artifact_ids": [descriptor.artifact_id]}
             )
             image_before = await call("image.inspect", {"names": ["Section"]})
             previewed = await call(

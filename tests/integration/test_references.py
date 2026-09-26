@@ -118,10 +118,12 @@ async def test_reference_measurement_mcp_workflow(
             phase = "image_ingestion"
             imported = await client.call_tool(
                 "tyvrana_import_artifact",
-                {"path": str(source), "name": "Synthetic reference"},
+                {"files": [{"path": str(source), "name": "Synthetic reference"}]},
             )
             assert not imported.is_error
-            descriptor = ArtifactDescriptor.model_validate(imported.structured_content)
+            descriptor = ArtifactDescriptor.model_validate(
+                imported.structured_content["artifacts"][0]
+            )
             source.unlink()
             image = await client.call_tool(
                 "tyvrana_execute_operation",
@@ -129,15 +131,19 @@ async def test_reference_measurement_mcp_workflow(
                     "adapter_id": identifier,
                     "operation": "blender.image.create_from_artifact",
                     "arguments": {
-                        "artifact_id": descriptor.artifact_id,
-                        "name": "Chart",
+                        "images": [
+                            {
+                                "artifact_id": descriptor.artifact_id,
+                                "name": "Chart",
+                            }
+                        ]
                     },
                     "artifact_ids": [descriptor.artifact_id],
                 },
             )
             assert not image.is_error
             released = await client.call_tool(
-                "tyvrana_release_artifact", {"artifact_id": descriptor.artifact_id}
+                "tyvrana_release_artifact", {"artifact_ids": [descriptor.artifact_id]}
             )
             assert not released.is_error
             phase = "create_references"

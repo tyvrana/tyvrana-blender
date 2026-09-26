@@ -260,20 +260,22 @@ async def qualify(client: Client, adapter: str, directory: Path, images: Path) -
     assert await revision() == rev + 2
     # Input transfer must outlive receipt admission until the nested import consumes it.
     image = next(images.glob("*.png"))  # noqa: ASYNC240 - Bounded local fixture inventory.
-    imported = await client.call_tool("tyvrana_import_artifact", dict(path=str(image)))
+    imported = await client.call_tool(
+        "tyvrana_import_artifact", {"files": [dict(path=str(image))]}
+    )
     assert not imported.is_error, imported.content
-    identifier = imported.structured_content["artifact_id"]
+    identifier = imported.structured_content["artifacts"][0]["artifact_id"]
     response = await client.call_tool(
         "tyvrana_execute_operation",
         dict(
             adapter_id=adapter,
             operation="blender.image.create_from_artifact",
-            arguments=dict(name="Reference", artifact_id=identifier),
+            arguments={"images": [dict(name="Reference", artifact_id=identifier)]},
             artifact_ids=[identifier],
         ),
     )
     assert not response.is_error, response.content
-    await client.call_tool("tyvrana_release_artifact", dict(artifact_id=identifier))
+    await client.call_tool("tyvrana_release_artifact", {"artifact_ids": [identifier]})
     path = str(directory / "authoring.blend")
     await op("blender.file.save", filepath=path)
     await op(
@@ -309,9 +311,7 @@ async def qualify(client: Client, adapter: str, directory: Path, images: Path) -
     before = await attest()
     rev = await revision()
     assert (await op("blender.viewport.inspect"))["viewports"] == []
-    await op(
-        "blender.viewport.capture", error="viewport_not_found", viewport_id="1:2"
-    )
+    await op("blender.viewport.capture", error="viewport_not_found", viewport_id="1:2")
     assert (await attest())["digest"] == before["digest"]
     assert await revision() == rev
     rendered = await op(
