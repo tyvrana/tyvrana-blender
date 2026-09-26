@@ -106,6 +106,21 @@ async def test_project_refresh_waits_for_pending_response_and_keeps_worker() -> 
         assert process.process.pid == pid
 
 
+async def test_repeated_project_refresh_does_not_accumulate_failure_backoff() -> None:
+    async with worker() as (process, connected, _):
+        previous = await asyncio.wait_for(connected.get(), 5)
+        pid = process.process.pid
+        for index in range(6):
+            process.send(
+                registration("test-process", "5.2.1 LTS", f"/project/{index}.blend")
+            )
+            following = await asyncio.wait_for(connected.get(), 2)
+            assert previous.close_code == 1000
+            assert following is not previous
+            assert process.process.pid == pid
+            previous = following
+
+
 async def test_real_worker_round_trip_and_cancellation_suppresses_late_reply() -> None:
     async with worker() as (process, connected, messages):
         socket = await asyncio.wait_for(connected.get(), 5)
@@ -179,6 +194,15 @@ def test_backoff_is_bounded_and_resets_only_after_healthy_connection() -> None:
     backoff = Backoff()
     assert [backoff.next_delay() for _ in range(8)] == [0.25, 0.5, 1, 2, 4, 8, 8, 8]
     assert backoff.next_delay(healthy=True) == 0.25
+
+
+def test_intentional_registration_refresh_resets_failure_backoff() -> None:
+    backoff = Backoff()
+    for _ in range(8):
+        backoff.next_delay()
+    assert backoff.next_delay(registration_refresh=True) == 0
+    assert backoff.next_delay() == 0.25
+    assert backoff.next_delay() == 0.5
 
 
 def test_idle_worker_does_not_load_authoring_dispatch() -> None:

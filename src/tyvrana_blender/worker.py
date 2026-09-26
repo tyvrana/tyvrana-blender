@@ -62,7 +62,12 @@ class Backoff:
     def __init__(self) -> None:
         self.delay = 0.25
 
-    def next_delay(self, *, healthy: bool = False) -> float:
+    def next_delay(
+        self, *, healthy: bool = False, registration_refresh: bool = False
+    ) -> float:
+        if registration_refresh:
+            self.delay = 0.25
+            return 0.0
         if healthy:
             self.delay = 0.25
         value = self.delay
@@ -114,6 +119,7 @@ class NetworkClient:
         self.uri = uri
         self.registration = registration
         self._registered: AdapterRegistration | None = None
+        self._registration_refresh = False
         self.output = output
         self.socket: ClientConnection | None = None
         self.pending: set[str] = set()
@@ -402,6 +408,7 @@ class NetworkClient:
             and not self.pending
             and not self.inputs.entries
         ):
+            self._registration_refresh = True
             await self.socket.close(code=1000, reason="Project path changed")
 
     async def expire_inputs(self) -> None:
@@ -442,6 +449,7 @@ class NetworkClient:
         backoff = Backoff()
         while True:
             connected_at: float | None = None
+            self._registration_refresh = False
             try:
                 logger.info("Connecting to %s", self.uri)
                 await self.output.state("connecting")
@@ -572,8 +580,9 @@ class NetworkClient:
                 await self.cleanup()
             await self.output.state("disconnected")
             delay = backoff.next_delay(
+                registration_refresh=self._registration_refresh,
                 healthy=connected_at is not None
-                and time.monotonic() - connected_at >= 5
+                and time.monotonic() - connected_at >= 5,
             )
             logger.info("Disconnected; reconnect in %.2f seconds", delay)
             await asyncio.sleep(delay)

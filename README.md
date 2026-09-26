@@ -173,7 +173,10 @@ access preference. The manifest declares network permission for this connection.
 
 When core is unavailable, Blender remains responsive. Connection attempts use
 an exponential delay from 0.25 seconds up to 8 seconds; a connection lasting at
-least five seconds resets the backoff. Disable the extension to stop its work.
+least five seconds resets the backoff. Intentional document-registration refreshes
+reconnect immediately after pending work drains and reset failure backoff; repeated
+save/open operations do not accumulate network-failure delays. Disable the extension
+to stop its work.
 Unexpected worker failures are logged and shown in preferences; **Apply and
 reconnect** starts a new worker after the cause is resolved.
 
