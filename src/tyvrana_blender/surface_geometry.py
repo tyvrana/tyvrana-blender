@@ -7,6 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Never
 
+from tyvrana_protocol import JsonValue
+
 from .errors import OperationError
 from .surface_models import (
     EllipseOpening,
@@ -29,8 +31,8 @@ def edge_key(a: int, b: int) -> tuple[int, int]:
     return min(a, b), max(a, b)
 
 
-def fail(code: str, message: str) -> Never:
-    raise OperationError("surface_" + code, message)
+def fail(code: str, message: str, details: JsonValue = None) -> Never:
+    raise OperationError("surface_" + code, message, details)
 
 
 def add(a: Point, b: Point) -> Point:
@@ -57,12 +59,13 @@ def cross(a: Point, b: Point) -> Point:
     ]
 
 
-def unit(a: Point) -> Point:
+def unit(a: Point, *, details: dict[str, JsonValue] | None = None) -> Point:
     length = math.hypot(*a)
     if length < 1e-12:
         fail(
             "degenerate",
             "Surface tangent/normal collapsed; revise contours or features",
+            {**(details or {}), "normal_length": length, "minimum_length": 1e-12},
         )
     return mul(a, 1 / length)
 
@@ -346,7 +349,15 @@ class Patch:
             dv = sub(
                 self.base(u, min(1, v + epsilon)), self.base(u, max(0, v - epsilon))
             )
-            normal = unit(cross(du, dv))
+            normal = unit(
+                cross(du, dv),
+                details={
+                    "patch_id": self.spec.id,
+                    "curve_ids": [name for name, _ in self.layout],
+                    "uv": list(uv),
+                    "tangent_lengths": [math.hypot(*du), math.hypot(*dv)],
+                },
+            )
             # Fade displacements at shared boundaries to preserve exact stitches.
             fade = min(1.0, 10 * min(u, 1 - u, v, 1 - v))
             point = add(
@@ -737,7 +748,20 @@ def generate(spec: SurfaceSpec, triangulate: Triangulator) -> Geometry:
             dv = sub(
                 patch.at([u, min(1, v + epsilon)]), patch.at([u, max(0, v - epsilon)])
             )
-            vertex_normals[index].append(mul(unit(cross(du, dv)), signs[p.id]))
+            vertex_normals[index].append(
+                mul(
+                    unit(
+                        cross(du, dv),
+                        details={
+                            "patch_id": p.id,
+                            "curve_ids": list(p.boundaries),
+                            "uv": list(uv),
+                            "tangent_lengths": [math.hypot(*du), math.hypot(*dv)],
+                        },
+                    ),
+                    signs[p.id],
+                )
+            )
             t0, t1, t2, t3 = p.thickness or [spec.thickness] * 4
             thicknesses[index].append(
                 (t0 * (1 - u) + t1 * u) * (1 - v) + (t3 * (1 - u) + t2 * u) * v
@@ -795,7 +819,7 @@ def generate(spec: SurfaceSpec, triangulate: Triangulator) -> Geometry:
         sub(p, mul(n, t / 2))
         for p, n, t in zip(vertices, unit_normals, thickness, strict=True)
     ]
-    for face in faces:
+    for face_index, face in enumerate(faces):
         for i in range(1, len(face) - 1):
             a, b, c = face[0], face[i], face[i + 1]
             normal = cross(sub(vertices[b], vertices[a]), sub(vertices[c], vertices[a]))
@@ -808,6 +832,18 @@ def generate(spec: SurfaceSpec, triangulate: Triangulator) -> Geometry:
                     fail(
                         "degenerate",
                         "Thickness inverts a face; reduce thickness or curvature",
+                        {
+                            "patch_id": patch_ids[face_index],
+                            "face_index": face_index,
+                            "triangle_vertices": [a, b, c],
+                            "shell_side": "positive" if offset == 0 else "negative",
+                            "thicknesses": [thickness[j] for j in (a, b, c)],
+                            "edge_lengths": [
+                                math.dist(vertices[j], vertices[k])
+                                for j, k in ((a, b), (b, c), (c, a))
+                            ],
+                            "length_units": "scene_units",
+                        },
                     )
     result_faces = faces + [[i + count for i in reversed(f)] for f in faces]
     result_regions = region_ids * 2

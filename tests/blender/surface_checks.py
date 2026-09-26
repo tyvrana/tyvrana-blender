@@ -48,6 +48,23 @@ class SurfaceTests(unittest.TestCase):
             if not mesh.users:
                 bpy.data.meshes.remove(mesh)
 
+    def test_thickness_failure_identifies_patch_and_local_scale(self) -> None:
+        spec = fixtures()[0]
+        spec["thickness"] = 10
+        spec["patches"][0].pop("thickness")
+        before = (len(bpy.data.objects), len(bpy.data.meshes))
+        result = execute("surface.create", surfaces=[spec])
+        self.assertIsInstance(result, OperationFailure)
+        self.assertEqual(result.error.code, "surface_degenerate")
+        self.assertIn("Thickness inverts", result.error.message)
+        details = result.error.details
+        self.assertEqual(details["patch_id"], "plate")
+        self.assertEqual(len(details["thicknesses"]), 3)
+        self.assertEqual(len(details["edge_lengths"]), 3)
+        self.assertEqual(details["length_units"], "scene_units")
+        self.assertLess(len(str(details)), 1000)
+        self.assertEqual(before, (len(bpy.data.objects), len(bpy.data.meshes)))
+
     def test_hard_fixtures_manifold_genus_regions_bounds_and_determinism(self) -> None:
         specs = fixtures()
         result = call("surface.create", surfaces=specs)

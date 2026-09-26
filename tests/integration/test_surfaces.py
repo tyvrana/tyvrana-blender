@@ -30,7 +30,7 @@ def test_native_surfaces(profile: dict[str, str], tmp_path: Path) -> None:
     log = result.stdout + result.stderr
     (tmp_path / "surface-native.log").write_text(log)
     assert result.returncode == 0, log
-    assert "SURFACE_NATIVE_PASSED 5" in log
+    assert "SURFACE_NATIVE_PASSED 6" in log
 
 
 async def test_surfaces_mcp(profile: dict[str, str], tmp_path: Path) -> None:

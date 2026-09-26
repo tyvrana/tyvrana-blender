@@ -3991,7 +3991,12 @@ components, patch/opening/junction counts, topology counts and freshness. Stored
 QA describes the generated base mesh, not evaluated modifiers. Face integer
 attributes `tyvrana_surface_patch` and `tyvrana_surface_region` retain region
 membership in the native file. All construction/revision batches prepare and check
-meshes first, then commit with rollback. Errors distinguish invalid contours,
+meshes first, then commit with rollback. Collapsed tangent errors identify the patch, boundary curves and UV sample, with
+measured tangent/normal lengths and the rejection threshold. Thickness inversion
+errors identify the patch, triangle, shell side, local edge lengths and thicknesses
+in scene units. These bounded diagnostics guide local corrections without changing
+geometry tolerances or claiming that a unit/scale change repairs the shape.
+Errors distinguish invalid contours,
 openings, junctions, features, degeneracy, self-intersection, limits, unknown
 handles, stale revisions/geometry and required topology changes.
 

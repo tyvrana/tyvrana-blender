@@ -118,3 +118,31 @@ def test_curve_tangents_remain_continuous_across_arc_samples() -> None:
         left = unit(sub(curve.at(t), curve.at(t - 1e-6)))
         right = unit(sub(curve.at(t + 1e-6), curve.at(t)))
         assert left == pytest.approx(right, abs=0.001)
+
+
+def test_collapsed_feature_reports_patch_uv_curves_and_measured_scale() -> None:
+    from tests.surface_fixtures import bulge, network
+    from tyvrana_blender.surface_geometry import Patch
+
+    data = network(
+        "Collapsed",
+        {str(i): [float(i), 0, 0] for i in range(4)},
+        {"panel": ["0", "1", "2", "3"]},
+    )
+    data["features"] = [bulge("crest", "panel", [0.5, 0.5], [0.2, 0.2], 0.1)]
+    spec = SurfaceSpec.model_validate(data)
+    layouts, signs, _ = boundary_layout(spec)
+    curves = {c.id: Curve(c, {n.id: n.point for n in spec.nodes}) for c in spec.curves}
+    patch = Patch(
+        spec.patches[0], layouts["panel"], curves, spec.features, signs["panel"]
+    )
+    with pytest.raises(OperationError) as raised:
+        patch.at([0.5, 0.5])
+    assert raised.value.error.code == "surface_degenerate"
+    details = raised.value.error.details
+    assert isinstance(details, dict)
+    assert details["patch_id"] == "panel" and details["uv"] == [0.5, 0.5]
+    assert details["curve_ids"] == [name for name, _ in layouts["panel"]]
+    assert details["normal_length"] == 0
+    assert details["minimum_length"] == 1e-12
+    assert len(str(details)) < 1000
