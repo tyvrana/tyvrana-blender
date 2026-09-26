@@ -33,6 +33,14 @@ def failure(request: OperationRequest, error: ProtocolError) -> OperationFailure
 
 
 @dataclass(frozen=True, slots=True)
+class GuardedJob:
+    """Native lifecycle with a pre-publication guard and atomic cancellation."""
+
+    status: str
+    cancel: str
+
+
+@dataclass(frozen=True, slots=True)
 class OperationSpec:
     contract: OperationContract
     parse: Callable[[JsonValue], BaseModel]
@@ -40,6 +48,8 @@ class OperationSpec:
         [SceneBackend, BaseModel, OperationRequest],
         tuple[BaseModel, tuple[ArtifactDescriptor, ...]],
     ]
+
+    guarded_job: GuardedJob | None = None
 
 
 def argument_schema(validator: TypeAdapter[Any]) -> dict[str, Any]:
@@ -76,6 +86,7 @@ def _operation[A: BaseModel, R: BaseModel](
     *,
     effect: Literal["read_only", "mutating", "transient", "lifecycle"],
     execution: Literal["synchronous", "job_start", "job_status", "lifecycle"],
+    guarded_job: GuardedJob | None = None,
     requires_interactive: bool = False,
     tags: tuple[str, ...] = (),
     input_artifacts: Literal["none", "required"] = "none",
@@ -110,7 +121,7 @@ def _operation[A: BaseModel, R: BaseModel](
             result, artifacts = value, ()
         return result_validator.validate_python(result), artifacts
 
-    return OperationSpec(contract, validator.validate_python, invoke)
+    return OperationSpec(contract, validator.validate_python, invoke, guarded_job)
 
 
 def _safe_text(value: str, limit: int) -> str:
@@ -144,35 +155,7 @@ def execute(
     try:
         arguments = spec.parse(request.arguments)
     except ValidationError as exc:
-        details: list[JsonValue] = []
-        for item in exc.errors(include_context=False, include_url=False)[:8]:
-            received = item.get("input")
-            preview = (
-                str(received)[:120]
-                if isinstance(received, (str, int, float, bool)) or received is None
-                else f"{type(received).__name__} with {len(received)} items"
-                if isinstance(received, (list, dict))
-                else type(received).__name__
-            )
-            details.append(
-                {
-                    "field": _safe_text(".".join(map(str, item["loc"])), 500),
-                    "message": _safe_text(item["msg"], 500),
-                    "reason": item["type"],
-                    "received": _safe_text(preview, 120),
-                }
-            )
-        return failure(
-            request,
-            ProtocolError(
-                code="invalid_arguments",
-                message=(
-                    f"Invalid arguments for {request.operation} "
-                    f"({exc.error_count()} errors; up to 8 shown)"
-                ),
-                details=details,
-            ),
-        )
+        return failure(request, argument_error(request.operation, exc))
     try:
         if spec.contract.input_artifacts == "none" and request.artifacts:
             raise OperationError(
@@ -197,3 +180,32 @@ def execute(
                 message="Blender operation failed; see the application log",
             ),
         )
+
+
+def argument_error(operation: str, exc: ValidationError) -> ProtocolError:
+    details: list[JsonValue] = []
+    for item in exc.errors(include_context=False, include_url=False)[:8]:
+        received = item.get("input")
+        preview = (
+            str(received)[:120]
+            if isinstance(received, (str, int, float, bool)) or received is None
+            else f"{type(received).__name__} with {len(received)} items"
+            if isinstance(received, (list, dict))
+            else type(received).__name__
+        )
+        details.append(
+            {
+                "field": _safe_text(".".join(map(str, item["loc"])), 500),
+                "message": _safe_text(item["msg"], 500),
+                "reason": item["type"],
+                "received": _safe_text(preview, 120),
+            }
+        )
+    return ProtocolError(
+        code="invalid_arguments",
+        message=(
+            f"Invalid arguments for {operation} "
+            f"({exc.error_count()} errors; up to 8 shown)"
+        ),
+        details=details,
+    )

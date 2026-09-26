@@ -12,7 +12,7 @@ from .form_models import (
     FormJobStatus,
     FormResult,
 )
-from .native_jobs import NativeJobs
+from .native_jobs import NativeJobs, publication_guard
 
 _jobs: NativeJobs[FormJobStatus] = NativeJobs()
 busy = _jobs.busy
@@ -27,10 +27,18 @@ def start(arguments: FormCreateArguments | FormConfigureArguments) -> FormJobSta
         raise OperationError(
             "adapter_busy", "A form job is active; inspect or cancel it"
         )
+    guard = publication_guard.get()
+
+    def before_publish() -> Generator[int, None, None]:
+        yield len(arguments.forms)
+        if guard is not None:
+            for _ in guard():
+                yield len(arguments.forms)
+
     steps = (
-        forms.create_steps(arguments)
+        forms.create_steps(arguments, before_publish)
         if isinstance(arguments, FormCreateArguments)
-        else forms.configure_steps(arguments)
+        else forms.configure_steps(arguments, before_publish)
     )
     next(steps)
 
@@ -40,7 +48,6 @@ def start(arguments: FormCreateArguments | FormConfigureArguments) -> FormJobSta
                 try:
                     prepared = next(steps)
                 except StopIteration as done:
-                    yield {"prepared_forms": len(arguments.forms)}
                     return cast(FormResult, done.value)
                 yield {"prepared_forms": prepared}
         finally:

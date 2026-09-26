@@ -1324,7 +1324,9 @@ class BlenderBackend:
         main_thread()
         from . import mutation_jobs
 
-        return mutation_jobs.start(self, arguments, request)
+        return mutation_jobs.start(
+            self, arguments, request, self.spool.root if self.spool else None
+        )
 
     def document_mutation_status(
         self, arguments: AttestationJobArguments
@@ -1948,7 +1950,7 @@ class BlenderBackend:
         )
 
         if mutation_jobs.busy():
-            return operation in {
+            return mutation_jobs.allows(operation) or operation in {
                 "blender.document.mutation_status",
                 "blender.document.restore_status",
                 "blender.extension.inspect",

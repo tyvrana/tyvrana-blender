@@ -92,6 +92,106 @@ def simple(name: str) -> dict[str, Any]:
 
 
 class FormChecks(unittest.TestCase):
+    def test_publication_and_terminal_job_state_share_one_step(self) -> None:
+        native = importlib.import_module(package + ".native_jobs")
+        clock = iter(range(10000))
+        with patch.object(
+            native, "time", SimpleNamespace(perf_counter=lambda: next(clock))
+        ):
+            queued = response("form.create", _wait=False, forms=[simple("Terminal")])
+            self.assertIsInstance(queued, OperationSuccess)
+            identifier = queued.result["job_id"]
+            for _ in range(1000):
+                jobs.tick()
+                state = jobs.status(identifier).state
+                if "Terminal" in bpy.data.objects:
+                    self.assertEqual(state, "completed")
+                if state not in {"queued", "running"}:
+                    break
+            self.assertEqual(state, "completed")
+
+    def test_guarded_jobs_identity_cancellation_and_publication_guard(self) -> None:
+        mutations = importlib.import_module(package + ".mutation_jobs")
+        models = importlib.import_module(package + ".mutation_models")
+        attestations = importlib.import_module(package + ".attestation_jobs")
+        call("project.bind", resources=[])
+
+        def observation() -> Any:
+            steps = attestations.guarded_steps()
+            while True:
+                try:
+                    next(steps)
+                except StopIteration as done:
+                    return done.value.root
+
+        def begin(name: str, wrong: bool = False) -> Any:
+            before = observation()
+            args = models.MutationArguments(
+                mutation_id=name,
+                operation="blender.form.create",
+                arguments=dict(forms=[simple(name)]),
+                **{
+                    key: before[key]
+                    for key in (
+                        "host_session_id",
+                        "document_session_id",
+                        "project_id",
+                        "format",
+                        "digest",
+                    )
+                },
+            )
+            if wrong:
+                args = args.model_copy(update={"host_session_id": "different-host"})
+            request = OperationRequest(
+                type="operation.request",
+                request_id=name,
+                operation="blender.document.mutate",
+                arguments=args.model_dump(mode="json"),
+            )
+            return mutations.start(adapter.BlenderBackend(), args, request)
+
+        def finish(identifier: str) -> Any:
+            deadline = time.monotonic() + 30
+            while mutations.busy():
+                self.assertLess(time.monotonic(), deadline)
+                mutations.tick()
+                jobs.tick()
+            return mutations.status(identifier)
+
+        try:
+            bad = begin("Wrong", wrong=True)
+            self.assertEqual(finish(bad.job_id).error.code, "content_diverged")
+            self.assertNotIn("Wrong", bpy.data.objects)
+            valid = begin("Valid")
+            result = finish(valid.job_id)
+            self.assertEqual(result.state, "completed", result)
+            self.assertEqual(result.result.root["result"]["state"], "completed")
+            before = observation()["digest"]
+            cancelled = begin("Cancelled")
+            while not jobs.busy():
+                mutations.tick()
+            identifier = jobs._jobs.active
+            cancelled_result = response("form.cancel", job_id=identifier)
+            self.assertIsInstance(cancelled_result, OperationSuccess)
+            self.assertEqual(finish(cancelled.job_id).error.code, "operation_cancelled")
+            self.assertNotIn("Cancelled", bpy.data.objects)
+            self.assertEqual(observation()["digest"], before)
+            changed = begin("Changed")
+            while not jobs.busy():
+                mutations.tick()
+            # Native implementation fixture simulates a user edit during preparation.
+            bpy.data.objects["Valid"].location.x += 1
+            bpy.context.view_layer.update()
+            result = finish(changed.job_id)
+            self.assertEqual(result.error.code, "content_diverged", result)
+            self.assertNotIn("Changed", bpy.data.objects)
+            self.assertEqual(bpy.data.objects["Valid"].location.x, 1)
+            self.assertFalse(mutations.allows("blender.form.cancel"))
+        finally:
+            mutations.shutdown()
+            jobs.shutdown()
+
     def test_cross_section_support_preserves_planes_and_requires_agreement(
         self,
     ) -> None:

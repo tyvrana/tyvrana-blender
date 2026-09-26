@@ -22,7 +22,7 @@ from .test_e2e import core_client, discover
 @pytest.mark.parametrize(
     "script,marker",
     [
-        ("form_checks.py", "FORM_NATIVE_PASSED 14"),
+        ("form_checks.py", "FORM_NATIVE_PASSED 16"),
         ("visual_checks.py", "VISUAL_NATIVE_PASSED 8"),
     ],
 )

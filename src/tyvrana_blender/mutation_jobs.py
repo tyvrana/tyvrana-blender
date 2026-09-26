@@ -1,14 +1,19 @@
 """Guard one advertised mutation between strong observations on the main thread."""
 
 from collections.abc import Generator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
-from tyvrana_protocol import OperationRequest
+from pydantic import ValidationError
+from tyvrana_protocol import OperationRequest, ProtocolError
 
 from .attestation_jobs import guarded_steps
 from .errors import OperationError
+from .incoming import input_path
 from .mutation_models import MutationArguments, MutationJobStatus, MutationResult
-from .native_jobs import NativeJobs
+from .native_jobs import NativeJobs, publication_guard
+from .operation_dispatch import argument_error
 
 if TYPE_CHECKING:
     from .operations import SceneBackend
@@ -20,6 +25,11 @@ status = _jobs.status
 tick = _jobs.tick
 cancel = _jobs.cancel
 shutdown = _jobs.shutdown
+_controls: set[str] = set()
+
+
+def allows(operation: str) -> bool:
+    return operation in _controls
 
 
 def steps(
@@ -31,16 +41,23 @@ def steps(
     if (
         spec is None
         or spec.contract.effect != "mutating"
-        or spec.contract.execution != "synchronous"
-        or spec.contract.input_artifacts != "none"
+        or (spec.contract.execution != "synchronous" and spec.guarded_job is None)
         or spec.contract.output_artifacts != "none"
     ):
         raise OperationError(
             "mutation_contract_unsupported",
-            "Guarded publication requires a synchronous advertised mutation "
-            "without artifact transfers",
+            "Guarded publication requires a synchronous mutation or a qualified "
+            "atomic job, without output artifacts",
         )
-    parsed = spec.parse(arguments.arguments)
+    try:
+        parsed = spec.parse(arguments.arguments)
+    except ValidationError as exc:
+        error = argument_error(arguments.operation, exc)
+        raise OperationError(error.code, error.message, error.details) from None
+    if spec.contract.input_artifacts == "none" and request.artifacts:
+        raise OperationError(
+            "invalid_arguments", "This operation accepts no input artifacts"
+        )
     before = yield from guarded_steps()
     if before.root.get("status") != "complete" or any(
         before.root.get(field) != getattr(arguments, field)
@@ -72,9 +89,63 @@ def steps(
     nested = request.model_copy(
         update={"operation": arguments.operation, "arguments": arguments.arguments}
     )
-    result, artifacts = spec.invoke(backend, parsed, nested)
+
+    def revalidate() -> Generator[dict[str, Any], None, None]:
+        current = yield from guarded_steps()
+        if current.root.get("status") != "complete" or any(
+            current.root.get(field) != before.root.get(field)
+            for field in (
+                "host_session_id",
+                "document_session_id",
+                "project_id",
+                "format",
+                "digest",
+            )
+        ):
+            raise OperationError(
+                "content_diverged",
+                "Document changed while preparing the mutation; nothing published",
+            )
+
+    token = publication_guard.set(revalidate)
+    try:
+        result, artifacts = spec.invoke(backend, parsed, nested)
+    finally:
+        publication_guard.reset(token)
     if artifacts:
         raise OperationError("mutation_contract_invalid", "Unexpected output artifact")
+    lifecycle = spec.guarded_job
+    if lifecycle is not None:
+        identifier = result.model_dump()["job_id"]
+        status_spec, cancel_spec = (
+            REGISTRY[lifecycle.status],
+            REGISTRY[lifecycle.cancel],
+        )
+        job_args = status_spec.parse({"job_id": identifier})
+        _controls.update((lifecycle.status, lifecycle.cancel))
+        try:
+            while result.model_dump()["state"] in {"queued", "running"}:
+                yield {
+                    "progress": {"operation": arguments.operation, "job_id": identifier}
+                }
+                result, _ = status_spec.invoke(backend, job_args, nested)
+            terminal = result.model_dump(mode="json")
+            if terminal["state"] != "completed":
+                error = (
+                    ProtocolError.model_validate(terminal["error"])
+                    if terminal.get("error")
+                    else ProtocolError(
+                        code="operation_cancelled",
+                        message="Native authoring job cancelled; nothing published",
+                    )
+                )
+                raise OperationError(error.code, error.message, error.details)
+        finally:
+            # Closing the outer receipt must not leave unowned work able to publish.
+            cancel_spec.invoke(
+                backend, cancel_spec.parse({"job_id": identifier}), nested
+            )
+            _controls.clear()
     after = yield from guarded_steps()
     if after.root.get("status") != "complete" or any(
         after.root.get(field) != before.root.get(field)
@@ -94,11 +165,43 @@ def steps(
 
 
 def start(
-    backend: "SceneBackend", arguments: MutationArguments, request: OperationRequest
+    backend: "SceneBackend",
+    arguments: MutationArguments,
+    request: OperationRequest,
+    spool: Path | None = None,
 ) -> MutationJobStatus:
+    if busy():
+        raise OperationError("adapter_busy", "A guarded mutation is active")
+    # The worker owns received bytes only until the admission response. Retain
+    # hard links under a distinct correlation ID until the native job exits.
+    retained = request.model_copy(update={"request_id": uuid4().hex})
+
+    def owned() -> Generator[dict[str, Any], None, MutationResult]:
+        paths: list[Path] = []
+        try:
+            if request.artifacts:
+                if spool is None:
+                    raise OperationError(
+                        "invalid_context", "Input storage is unavailable"
+                    )
+                for descriptor in request.artifacts:
+                    path = input_path(
+                        spool, retained.request_id, descriptor.artifact_id
+                    )
+                    path.hardlink_to(
+                        input_path(spool, request.request_id, descriptor.artifact_id)
+                    )
+                    paths.append(path)
+            yield {}  # Enter ownership before returning queued, including cancellation.
+            return (yield from steps(backend, arguments, retained))
+        finally:
+            for path in paths:
+                path.unlink(missing_ok=True)
+
+    work = owned()
+    next(work)
     return _jobs.start(
-        MutationJobStatus(job_id=arguments.mutation_id, state="queued"),
-        steps(backend, arguments, request),
+        MutationJobStatus(job_id=arguments.mutation_id, state="queued"), work
     )
 
 

@@ -3,13 +3,21 @@
 Irregular form needs reference fidelity as well as valid geometry. Inspect the
 source imagery, construct the major contours and sections, review closeups, refine
 local features, and compare again. Dimensions and manifold topology alone do not
-establish shape quality. Finish this loop before production topology and binding.
+establish shape quality. Finish this loop before production topology and skinning. Semantic project binding is supported.
 
 ## Construction and refinement
 
 `form.create` batches up to32 named editable forms in an incremental atomic job.
-`form.configure` uses the same job lifecycle. Both return promptly with a job ID;
-read `form.status` until completed before using the resulting geometry. Only job
+`form.configure` uses the same job lifecycle. Unbound calls return promptly with a job ID;
+read `form.status` until completed before using the resulting geometry. On a bound
+semantic project, Core waits for the guarded receipt and returns the same job
+schema in its completed state; work exceeding its caller window is reported as
+`mutation_pending`, not a failed authoring request. Do not resubmit pending work.
+The receipt status identifies the native job for inspection/cancellation. Content
+is checked before preparation and again immediately before atomic publication.
+A changed document or cancellation discards unpublished meshes; only a qualified
+completion advances the semantic working head. Failed construction retains the
+application error code and structured diagnostics, including through Core. Only job
 status/cancellation and extension identity are available during preparation.
 `form.cancel` discards uncommitted meshes and preserves prior forms. The latest
 four job records persist until host reload. Each form combines named parts:

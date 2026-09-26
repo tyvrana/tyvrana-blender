@@ -2,7 +2,8 @@
 
 import logging
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +13,11 @@ from tyvrana_protocol import ProtocolError
 from .errors import OperationError
 
 log = logging.getLogger(__name__)
+
+# Captured by an opted-in authoring job at admission, never read from a later tick.
+publication_guard: ContextVar[
+    Callable[[], Generator[dict[str, Any], None, None]] | None
+] = ContextVar("publication_guard", default=None)
 
 
 @dataclass

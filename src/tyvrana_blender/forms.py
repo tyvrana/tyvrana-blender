@@ -3,7 +3,7 @@
 import json
 import time
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from typing import Any, cast
 
 import bpy  # type: ignore[import-not-found]
@@ -134,7 +134,10 @@ def create(arguments: FormCreateArguments) -> FormResult:
             return cast(FormResult, done.value)
 
 
-def create_steps(arguments: FormCreateArguments) -> Generator[int, None, FormResult]:
+def create_steps(
+    arguments: FormCreateArguments,
+    before_publish: Callable[[], Generator[int, None, None]] | None = None,
+) -> Generator[int, None, FormResult]:
     started = time.perf_counter()
     organization.idle(mutate=True)
     collections = [organization.collection_named(n) for n in arguments.collections]
@@ -163,6 +166,8 @@ def create_steps(arguments: FormCreateArguments) -> Generator[int, None, FormRes
                 raise OperationError(
                     "form_limit", "Form batch exceeds1048576 output vertices"
                 )
+        if before_publish is not None:
+            yield from before_publish()
         for spec, mesh, stats in prepared:
             obj = bpy.data.objects.new(spec.name, mesh)
             objects.append(obj)
@@ -195,6 +200,7 @@ def configure(arguments: FormConfigureArguments) -> FormResult:
 
 def configure_steps(
     arguments: FormConfigureArguments,
+    before_publish: Callable[[], Generator[int, None, None]] | None = None,
 ) -> Generator[int, None, FormResult]:
     started = time.perf_counter()
     organization.idle(mutate=True)
@@ -264,6 +270,8 @@ def configure_steps(
                 raise OperationError(
                     "form_limit", "Form batch exceeds1048576 output vertices"
                 )
+        if before_publish is not None:
+            yield from before_publish()
         for obj, mesh, spec, stats, meta in prepared:
             committed.append((obj, obj.data, str(obj[KEY])))
             for material in obj.data.materials:

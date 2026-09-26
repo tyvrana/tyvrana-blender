@@ -257,13 +257,14 @@ from .motion_models import (
 )
 from .mutation_models import MutationArguments, MutationJobStatus
 from .operation_dispatch import (
+    GuardedJob,
+    _operation,
+)
+from .operation_dispatch import (
     OperationSpec as OperationSpec,
 )
 from .operation_dispatch import (
     Response as Response,
-)
-from .operation_dispatch import (
-    _operation,
 )
 from .operation_dispatch import (
     argument_schema as argument_schema,
@@ -1106,8 +1107,10 @@ _DECLARATIONS = (
         "Atomic construction; inspect compact inventory and revise with "
         "assembly.configure.",
         tags=(
-            "modeling",
             "structural",
+            "related",
+            "anatomical",
+            "modeling",
             "assembly",
             "family",
             "repeat",
@@ -2166,9 +2169,11 @@ _DECLARATIONS = (
             "Stable handles and compact QA persist; revise with surface.configure."
         ),
         tags=(
+            "anatomical",
+            "plate",
+            "shell",
             "modeling",
             "surface",
-            "shell",
             "patch",
             "contour",
             "opening",
@@ -2197,7 +2202,17 @@ _DECLARATIONS = (
             "External base edits block regeneration; use mesh tools for "
             "downstream refinement."
         ),
-        tags=("modeling", "surface", "revision", "contour", "opening", "batched"),
+        tags=(
+            "refine",
+            "local",
+            "irregular",
+            "modeling",
+            "surface",
+            "revision",
+            "contour",
+            "opening",
+            "batched",
+        ),
         execution="synchronous",
         effect="mutating",
     ),
@@ -2225,7 +2240,8 @@ _DECLARATIONS = (
         FormCreateArguments,
         FormJobStatus,
         lambda b, a, q: b.form_create(a),
-        "Build bounded editable irregular forms from calibrated section "
+        "Build irregular organic or anatomical hard structures as editable forms "
+        "from calibrated section "
         "masks or orthographic silhouettes, existing typed loft/surface "
         "intent and named local features. Smoothly fuse branches, cut "
         "openings/recesses and blend interfaces using native volume "
@@ -2237,8 +2253,19 @@ _DECLARATIONS = (
         "Regeneration changes connectivity; finish form before production "
         "topology. Returns an incremental atomic job; inspect form.status until "
         "completed before using geometry. Cancel leaves no partial batch.",
-        tags=("modeling", "organic", "reference", "form", "blending"),
+        tags=(
+            "irregular",
+            "anatomical",
+            "structural",
+            "constructive",
+            "modeling",
+            "organic",
+            "reference",
+            "form",
+            "blending",
+        ),
         execution="job_start",
+        guarded_job=GuardedJob("blender.form.status", "blender.form.cancel"),
         effect="mutating",
     ),
     _operation(
@@ -2246,7 +2273,8 @@ _DECLARATIONS = (
         FormConfigureArguments,
         FormJobStatus,
         lambda b, a, q: b.form_configure(a),
-        "Atomically replace/add/remove named constructive parts or change "
+        "Refine irregular organic or anatomical hard structures: atomically "
+        "replace/add/remove named constructive parts or change "
         "sampling/reference fitting while preserving object identities. "
         "Expected revision "
         "required. Regeneration changes connectivity and rejects "
@@ -2255,8 +2283,19 @@ _DECLARATIONS = (
         "mismatches, then review and compare again. Returns an atomic incremental "
         "job; inspect form.status until completed. Cancellation preserves "
         "original forms.",
-        tags=("modeling", "organic", "reference", "form", "blending"),
+        tags=(
+            "irregular",
+            "refine",
+            "local",
+            "anatomical",
+            "modeling",
+            "organic",
+            "reference",
+            "form",
+            "blending",
+        ),
         execution="job_start",
+        guarded_job=GuardedJob("blender.form.status", "blender.form.cancel"),
         effect="mutating",
     ),
     _operation(
@@ -2282,7 +2321,7 @@ _DECLARATIONS = (
         "by cancellation.",
         tags=("modeling", "form", "job"),
         execution="synchronous",
-        effect="mutating",
+        effect="transient",
     ),
     _operation(
         "blender.form.inspect",
@@ -2312,7 +2351,7 @@ _DECLARATIONS = (
             "curve.create for ordinary native curve sweeps. At most 1024 "
             "sections/131072 vertices per batch; rollback on failure."
         ),
-        tags=("structural", "organic", "sections", "batched"),
+        tags=("profiles", "sections", "structural", "anatomical", "organic", "batched"),
         execution="synchronous",
         effect="mutating",
     ),
@@ -2330,7 +2369,15 @@ _DECLARATIONS = (
             "Reject shared data, shape keys and externally edited "
             "base meshes; use mesh tools for downstream freeform refinement."
         ),
-        tags=("structural", "organic", "sections", "batched"),
+        tags=(
+            "refine",
+            "local",
+            "irregular",
+            "structural",
+            "organic",
+            "sections",
+            "batched",
+        ),
         execution="synchronous",
         effect="mutating",
     ),
@@ -3066,6 +3113,7 @@ _DECLARATIONS = (
         "Matches the authorized working head and returns a strong before/after "
         "receipt. "
         "Use the original authoring operation; Core supplies this internal contract.",
+        input_artifacts="required",
         effect="mutating",
         execution="job_start",
         tags=("document_mutation",),

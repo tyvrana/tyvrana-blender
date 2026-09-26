@@ -5,7 +5,7 @@ import math
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Never
+from typing import Never, cast
 
 from tyvrana_protocol import JsonValue
 
@@ -65,7 +65,12 @@ def unit(a: Point, *, details: dict[str, JsonValue] | None = None) -> Point:
         fail(
             "degenerate",
             "Surface tangent/normal collapsed; revise contours or features",
-            {**(details or {}), "normal_length": length, "minimum_length": 1e-12},
+            {
+                **(details or {}),
+                "degeneracy": "collapsed_normal",
+                "normal_length": length,
+                "minimum_length": 1e-12,
+            },
         )
     return mul(a, 1 / length)
 
@@ -834,6 +839,18 @@ def generate(spec: SurfaceSpec, triangulate: Triangulator) -> Geometry:
                         "Thickness inverts a face; reduce thickness or curvature",
                         {
                             "patch_id": patch_ids[face_index],
+                            "degeneracy": "offset_orientation_inversion",
+                            "orientation_dot": dot(normal, shifted),
+                            "required_orientation_dot": "> 0",
+                            "positions": [
+                                cast(JsonValue, vertices[j]) for j in (a, b, c)
+                            ],
+                            "boundary_curves": [
+                                c
+                                for p in spec.patches
+                                if p.id == patch_ids[face_index]
+                                for c in p.boundaries
+                            ],
                             "face_index": face_index,
                             "triangle_vertices": [a, b, c],
                             "shell_side": "positive" if offset == 0 else "negative",
