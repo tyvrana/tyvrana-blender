@@ -3,7 +3,8 @@
 `blender.image.create_from_artifact` atomically creates 1..8 packed native images.
 Pass `images: [{artifact_id, name?, color_space?, alpha_mode?}, ...]` and attach the
 unique artifact IDs. Core imports `files: [{path, name?, media_type?}, ...]` in
-batches of up to eight, returning ordered `artifacts`. Release inputs together
+manifests of up to64 files, returning ordered `artifacts`. Attach at most eight
+inputs to each native image batch. Release inputs together
 with `artifact_ids` when finished. Single-image requests use the same list shape.
 The result is ordered `images` metadata. Existing explicit names conflict;
 duplicate explicit names fail validation. Any failure removes every new image

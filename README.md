@@ -3568,7 +3568,8 @@ measurement points.
 
 First import PNG/JPEG bytes through `tyvrana_import_artifact`, then attach the
 returned IDs to `blender.image.create_from_artifact` using its `images` list.
-Batch up to eight files/images per call; do not ingest a prepared set one by one.
+Import a bounded file manifest at Core, then create up to eight images per
+adapter call; do not ingest a prepared set one by one.
 Reuse the resulting packed
 image name in reference declarations. Generated images are also supported.
 Release the imported core artifact after creating the image; packed image bytes
