@@ -47,16 +47,23 @@ def configure(args: TimelineArguments) -> TimelineState:
             )
 
     def apply(data: dict[str, object]) -> None:
+        def changed(owner: object, name: str, value: object) -> None:
+            # Even equal RNA assignments emit native update notifications. In
+            # particular, preview-range setters queue another frame evaluation
+            # in the interactive event loop, after this operation has returned.
+            if getattr(owner, name) != value:
+                setattr(owner, name, value)
+
         # Set in an order that does not trigger Blender's range clamping.
-        s.frame_end = max(s.frame_end, data["frame_end"])
-        s.frame_start = data["frame_start"]
-        s.frame_end = data["frame_end"]
-        s.use_preview_range = data["use_preview_range"]
-        s.frame_preview_end = max(s.frame_preview_end, data["preview_end"])
-        s.frame_preview_start = data["preview_start"]
-        s.frame_preview_end = data["preview_end"]
-        s.render.fps = data["fps"]
-        s.render.fps_base = data["fps_base"]
+        changed(s, "frame_end", max(s.frame_end, data["frame_end"]))
+        changed(s, "frame_start", data["frame_start"])
+        changed(s, "frame_end", data["frame_end"])
+        changed(s, "use_preview_range", data["use_preview_range"])
+        changed(s, "frame_preview_end", max(s.frame_preview_end, data["preview_end"]))
+        changed(s, "frame_preview_start", data["preview_start"])
+        changed(s, "frame_preview_end", data["preview_end"])
+        changed(s.render, "fps", data["fps"])
+        changed(s.render, "fps_base", data["fps_base"])
         s.frame_set(data["frame"], subframe=data["subframe"])
         bpy.context.view_layer.update()
 
