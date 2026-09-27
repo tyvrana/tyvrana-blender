@@ -3,10 +3,20 @@
     "AttestationCost": {
       "additionalProperties": false,
       "properties": {
+        "bulk_elements": {
+          "minimum": 0,
+          "title": "Bulk Elements",
+          "type": "integer"
+        },
         "category": {
           "maxLength": 64,
           "title": "Category",
           "type": "string"
+        },
+        "elapsed_ms": {
+          "minimum": 0,
+          "title": "Elapsed Ms",
+          "type": "number"
         },
         "resource": {
           "default": "",
@@ -28,16 +38,6 @@
           "minimum": 0,
           "title": "Stream Items",
           "type": "integer"
-        },
-        "bulk_elements": {
-          "minimum": 0,
-          "title": "Bulk Elements",
-          "type": "integer"
-        },
-        "elapsed_ms": {
-          "minimum": 0,
-          "title": "Elapsed Ms",
-          "type": "number"
         }
       },
       "required": [
@@ -54,29 +54,14 @@
     "AttestationLimits": {
       "additionalProperties": false,
       "properties": {
-        "stream_bytes": {
-          "minimum": 1,
-          "title": "Stream Bytes",
-          "type": "integer"
-        },
-        "stream_items": {
-          "minimum": 1,
-          "title": "Stream Items",
-          "type": "integer"
-        },
-        "bulk_elements": {
-          "minimum": 1,
-          "title": "Bulk Elements",
-          "type": "integer"
-        },
         "buffer_bytes": {
           "minimum": 1,
           "title": "Buffer Bytes",
           "type": "integer"
         },
-        "resources": {
+        "bulk_elements": {
           "minimum": 1,
-          "title": "Resources",
+          "title": "Bulk Elements",
           "type": "integer"
         },
         "elapsed_ms": {
@@ -101,6 +86,21 @@
           ],
           "default": null,
           "title": "Resource Elapsed Ms"
+        },
+        "resources": {
+          "minimum": 1,
+          "title": "Resources",
+          "type": "integer"
+        },
+        "stream_bytes": {
+          "minimum": 1,
+          "title": "Stream Bytes",
+          "type": "integer"
+        },
+        "stream_items": {
+          "minimum": 1,
+          "title": "Stream Items",
+          "type": "integer"
         }
       },
       "required": [
@@ -119,6 +119,29 @@
       "additionalProperties": false,
       "description": "Bounded counters, never authored arrays or per-component payloads.",
       "properties": {
+        "bulk_elements": {
+          "minimum": 0,
+          "title": "Bulk Elements",
+          "type": "integer"
+        },
+        "categories": {
+          "items": {
+            "$ref": "#/$defs/AttestationCost"
+          },
+          "maxItems": 32,
+          "title": "Categories",
+          "type": "array"
+        },
+        "current_category": {
+          "maxLength": 64,
+          "title": "Current Category",
+          "type": "string"
+        },
+        "current_resource": {
+          "maxLength": 256,
+          "title": "Current Resource",
+          "type": "string"
+        },
         "exceeded": {
           "anyOf": [
             {
@@ -141,6 +164,27 @@
           "default": null,
           "title": "Exceeded"
         },
+        "heaviest": {
+          "items": {
+            "$ref": "#/$defs/AttestationCost"
+          },
+          "maxItems": 8,
+          "title": "Heaviest",
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/$defs/AttestationLimits"
+        },
+        "peak_buffer_bytes": {
+          "minimum": 0,
+          "title": "Peak Buffer Bytes",
+          "type": "integer"
+        },
+        "resources_completed": {
+          "minimum": 0,
+          "title": "Resources Completed",
+          "type": "integer"
+        },
         "stream_bytes": {
           "minimum": 0,
           "title": "Stream Bytes",
@@ -150,50 +194,6 @@
           "minimum": 0,
           "title": "Stream Items",
           "type": "integer"
-        },
-        "bulk_elements": {
-          "minimum": 0,
-          "title": "Bulk Elements",
-          "type": "integer"
-        },
-        "resources_completed": {
-          "minimum": 0,
-          "title": "Resources Completed",
-          "type": "integer"
-        },
-        "peak_buffer_bytes": {
-          "minimum": 0,
-          "title": "Peak Buffer Bytes",
-          "type": "integer"
-        },
-        "current_category": {
-          "maxLength": 64,
-          "title": "Current Category",
-          "type": "string"
-        },
-        "current_resource": {
-          "maxLength": 256,
-          "title": "Current Resource",
-          "type": "string"
-        },
-        "limits": {
-          "$ref": "#/$defs/AttestationLimits"
-        },
-        "categories": {
-          "items": {
-            "$ref": "#/$defs/AttestationCost"
-          },
-          "maxItems": 32,
-          "title": "Categories",
-          "type": "array"
-        },
-        "heaviest": {
-          "items": {
-            "$ref": "#/$defs/AttestationCost"
-          },
-          "maxItems": 8,
-          "title": "Heaviest",
-          "type": "array"
         }
       },
       "required": [
@@ -215,32 +215,10 @@
       "additionalProperties": false,
       "description": "Complete means no relevant state was silently omitted by the named format.",
       "properties": {
-        "host_session_id": {
-          "$ref": "#/$defs/ResourceToken"
-        },
-        "document_session_id": {
-          "$ref": "#/$defs/ResourceToken"
-        },
-        "project_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ResourceToken"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "algorithm": {
           "const": "sha256",
           "default": "sha256",
           "title": "Algorithm",
-          "type": "string"
-        },
-        "format": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Format",
           "type": "string"
         },
         "digest": {
@@ -255,47 +233,13 @@
           ],
           "title": "Digest"
         },
-        "status": {
-          "enum": [
-            "complete",
-            "unsupported",
-            "limit_exceeded"
-          ],
-          "title": "Status",
-          "type": "string"
-        },
-        "resource_count": {
-          "maximum": 100000,
-          "minimum": 0,
-          "title": "Resource Count",
-          "type": "integer"
-        },
-        "omissions": {
-          "items": {
-            "maxLength": 256,
-            "type": "string"
-          },
-          "maxItems": 32,
-          "title": "Omissions",
-          "type": "array"
+        "document_session_id": {
+          "$ref": "#/$defs/ResourceToken"
         },
         "elapsed_ms": {
           "minimum": 0,
           "title": "Elapsed Ms",
           "type": "number"
-        },
-        "file_sha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "File Sha256"
         },
         "file_locator": {
           "anyOf": [
@@ -311,24 +255,52 @@
           "default": null,
           "title": "File Locator"
         },
-        "work": {
+        "file_sha256": {
           "anyOf": [
             {
-              "$ref": "#/$defs/AttestationWork"
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "File Sha256"
         },
-        "resources": {
+        "format": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Format",
+          "type": "string"
+        },
+        "host_session_id": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "omissions": {
           "items": {
-            "$ref": "#/$defs/ResourceObservation"
+            "maxLength": 256,
+            "type": "string"
           },
-          "maxItems": 4096,
-          "title": "Resources",
+          "maxItems": 32,
+          "title": "Omissions",
           "type": "array"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceToken"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resource_count": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Resource Count",
+          "type": "integer"
         },
         "resource_scope": {
           "anyOf": [
@@ -342,6 +314,34 @@
           ],
           "default": null,
           "title": "Resource Scope"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/ResourceObservation"
+          },
+          "maxItems": 4096,
+          "title": "Resources",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "unsupported",
+            "limit_exceeded"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "work": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationWork"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -361,17 +361,17 @@
     "DocumentMutationResult": {
       "additionalProperties": false,
       "properties": {
+        "after": {
+          "$ref": "#/$defs/DocumentAttestation"
+        },
+        "before": {
+          "$ref": "#/$defs/DocumentAttestation"
+        },
         "mutation_id": {
           "$ref": "#/$defs/ResourceToken"
         },
         "result": {
           "$ref": "#/$defs/JsonValue"
-        },
-        "before": {
-          "$ref": "#/$defs/DocumentAttestation"
-        },
-        "after": {
-          "$ref": "#/$defs/DocumentAttestation"
         }
       },
       "required": [
@@ -425,12 +425,12 @@
         "code": {
           "$ref": "#/$defs/Identifier"
         },
-        "message": {
-          "$ref": "#/$defs/_NonBlankText"
-        },
         "details": {
           "$ref": "#/$defs/JsonValue",
           "default": null
+        },
+        "message": {
+          "$ref": "#/$defs/_NonBlankText"
         }
       },
       "required": [
@@ -444,21 +444,19 @@
       "additionalProperties": false,
       "description": "Existence is not content validation; fingerprints cover declared scope only.",
       "properties": {
-        "resource_kind": {
-          "$ref": "#/$defs/ResourceToken"
-        },
-        "resource_id": {
-          "$ref": "#/$defs/ResourceToken"
-        },
-        "state": {
-          "enum": [
-            "present",
-            "missing",
-            "ambiguous",
-            "unsupported"
+        "fingerprint": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "State",
-          "type": "string"
+          "default": null,
+          "title": "Fingerprint"
         },
         "name": {
           "anyOf": [
@@ -474,19 +472,21 @@
           "default": null,
           "title": "Name"
         },
-        "fingerprint": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+        "resource_id": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "resource_kind": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "state": {
+          "enum": [
+            "present",
+            "missing",
+            "ambiguous",
+            "unsupported"
           ],
-          "default": null,
-          "title": "Fingerprint"
+          "title": "State",
+          "type": "string"
         }
       },
       "required": [
@@ -510,31 +510,36 @@
   },
   "additionalProperties": false,
   "properties": {
-    "job_id": {
-      "$ref": "#/$defs/ResourceToken"
-    },
-    "state": {
-      "enum": [
-        "queued",
-        "running",
-        "completed",
-        "failed",
-        "cancelled"
-      ],
-      "title": "State",
-      "type": "string"
-    },
-    "revision": {
-      "default": 0,
-      "minimum": 0,
-      "title": "Revision",
-      "type": "integer"
-    },
     "elapsed_seconds": {
       "default": 0,
       "minimum": 0,
       "title": "Elapsed Seconds",
       "type": "number"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProtocolError"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "job_id": {
+      "$ref": "#/$defs/ResourceToken"
+    },
+    "native_execution": {
+      "default": "unknown",
+      "enum": [
+        "not_started",
+        "started",
+        "completed",
+        "unknown"
+      ],
+      "title": "Native Execution",
+      "type": "string"
     },
     "poll_after_seconds": {
       "default": 0.5,
@@ -569,16 +574,22 @@
       ],
       "default": null
     },
-    "error": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ProtocolError"
-        },
-        {
-          "type": "null"
-        }
+    "revision": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "state": {
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
       ],
-      "default": null
+      "title": "State",
+      "type": "string"
     }
   },
   "required": [

@@ -9,7 +9,6 @@ from tyvrana_protocol import (
     ArtifactDescriptor,
     OperationRequest,
     ProofHostControl,
-    ProofHostStart,
     ProofHostStatus,
     ResourceInspectionRequest,
     ResourceInspectionResult,
@@ -297,6 +296,7 @@ from .organization_models import (
     OrganizationRemoveResult,
 )
 from .placement_models import PlacementArguments, PlacementResult
+from .proof_models import ProofHostStart
 from .reference_models import (
     ConstructionReport,
     LandmarkDeriveArguments,
@@ -1307,7 +1307,7 @@ _DECLARATIONS = (
             "values. Externally modified native drivers are protected; no "
             "orphan purge."
         ),
-        tags=("rigging", "mapping", "coupled", "batched"),
+        tags=("recovery_replay", "rigging", "mapping", "coupled", "batched"),
         effect="mutating",
         execution="synchronous",
     ),
@@ -2962,6 +2962,7 @@ _DECLARATIONS = (
         "branch |X,Z|<=pi-0.0001, |Y|<=pi/2-0.0001. No multi-turn or gimbal "
         "solver. sample_limit=0 suppresses bone rows; structural inspection "
         "selects evaluated endpoints, frames and limits.",
+        tags=("recovery_replay",),
         effect="mutating",
         execution="synchronous",
     ),

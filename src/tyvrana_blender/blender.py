@@ -18,7 +18,6 @@ from tyvrana_protocol import (
     OperationRequest,
     OperationSuccess,
     ProofHostControl,
-    ProofHostStart,
     ProofHostStatus,
     ResourceInspectionRequest,
     ResourceInspectionResult,
@@ -308,6 +307,7 @@ from .organization_models import (
     OrganizationRemoveResult,
 )
 from .placement_models import PlacementArguments, PlacementResult
+from .proof_models import ProofHostStart
 from .raster import raster_size
 from .reference_models import (
     ConstructionReport,

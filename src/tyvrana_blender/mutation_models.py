@@ -37,6 +37,9 @@ class MutationResult(RootModel[dict[str, JsonValue]]):
 class MutationJobStatus(Model):
     job_id: str
     state: Literal["queued", "running", "completed", "failed", "cancelled"]
+    native_execution: Literal["not_started", "started", "completed", "unknown"] = (
+        "unknown"
+    )
     revision: int = 0
     elapsed_seconds: float = 0
     poll_after_seconds: float = 0.5

@@ -50,6 +50,10 @@ def run() -> None:
             for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
         ):
             raise ValueError("Trusted artifact changed during proof load")
+        for settings in data.get("snapshot_threads", []):
+            scene = bpy.data.scenes[settings["scene"]]
+            scene.render.threads = settings["threads"]
+            scene.render.threads_mode = settings["mode"]
         tyvrana_blender.register()
         enabled = True
         from tyvrana_blender import blender, proof_hosts

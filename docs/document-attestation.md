@@ -139,7 +139,8 @@ independent copy of the trusted prior document. It is not permission to bypass
 normal working-head checks on the live document.
 
 The current qualification covers primitive and object-set creation, armature
-creation, constraint and coupling configuration, object and mesh transforms,
+creation and pose, constraint/coupling configuration and coupling removal, object
+and mesh transforms,
 and object deletion. These synchronous operations use no artifact transport and
 perform no file or lifecycle changes. Core still requires guarded before/after
 receipts, unchanged prerequisite resource fingerprints, and exact full-content
@@ -160,3 +161,24 @@ terminating only that process group. Parent shutdown/reload releases children; l
 TTL, parent-liveness and Core-disconnection checks bound orphan lifetime. Independent
 proof never saves the artifact. Complete evidence includes the saved file locator and
 SHA256; the locator does not enter canonical authored-content hashing.
+
+
+### Native execution and unsaved recovery proof
+
+Mutation status reports `native_execution` independently of receipt completion.
+A post-attestation failure after native success remains `completed` natively and
+has no qualified receipt. Attestation failures retain notification kinds and
+identity-change evidence; notifications still invalidate the observation. They do
+not establish who caused the notification or authorize accepting changed state.
+
+Core can request an owned proof host from an untrusted live snapshot. Blender uses
+library serialization, preserving the open file, dirty state and save lifecycle.
+Process-local render thread settings are reproduced only in the copy. Core checks
+that loaded content and all resources exactly match the source, then requires
+inverse proof of the trusted pre-state and forward proof of the exact live result.
+Only the disposable copy is edited. Snapshot files are owned by the proof lease and
+removed on termination; the live unsaved document is not persisted by this action.
+
+The proof-start and mutation schemas are distributed independently of transport
+wheels, like attestation schemas. They implement the canonical protocol contract
+without replacing Blender-managed dependencies during a live implementation reload.

@@ -8,7 +8,6 @@ from tyvrana_protocol import (
     OperationRequest,
     OperationSuccess,
     ProofHostControl,
-    ProofHostStart,
     ProofHostStatus,
     ResourceInspectionRequest,
     ResourceInspectionResult,
@@ -287,6 +286,7 @@ from tyvrana_blender.organization_models import (
     OrganizationRemoveResult,
 )
 from tyvrana_blender.placement_models import PlacementArguments, PlacementResult
+from tyvrana_blender.proof_models import ProofHostStart
 from tyvrana_blender.reference_models import (
     ConstructionReport,
     LandmarkDeriveArguments,

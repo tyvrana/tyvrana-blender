@@ -14,8 +14,8 @@ from pathlib import Path
 
 from tyvrana_protocol import (
     AdapterRuntime,
+    ProofArtifact,
     ProofHostControl,
-    ProofHostStart,
     ProofHostStatus,
     ProofLease,
     ProtocolError,
@@ -23,6 +23,7 @@ from tyvrana_protocol import (
 
 from . import deployment
 from .errors import OperationError
+from .proof_models import ProofHostStart
 
 
 @dataclass
@@ -83,15 +84,18 @@ def start(request: ProofHostStart) -> ProofHostStatus:
                 "proof_conflict", "Lease is already owned by another request"
             )
         return status(ProofHostControl(lease=request.lease))
-    source = Path(request.artifact.locator)
-    if not source.is_file():
-        raise OperationError(
-            "proof_artifact_missing", "Trusted artifact cannot be opened"
-        )
-    with source.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    if digest != request.artifact.sha256:
-        raise OperationError("proof_file_mismatch", "Trusted artifact SHA256 changed")
+    if request.artifact is not None:
+        source = Path(request.artifact.locator)
+        if not source.is_file():
+            raise OperationError(
+                "proof_artifact_missing", "Trusted artifact cannot be opened"
+            )
+        with source.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if digest != request.artifact.sha256:
+            raise OperationError(
+                "proof_file_mismatch", "Trusted artifact SHA256 changed"
+            )
     directory = Path(tempfile.mkdtemp(prefix="tyvrana-proof-"))
     try:
         implementation = Path(__file__).parent
@@ -106,6 +110,43 @@ def start(request: ProofHostStart) -> ProofHostStatus:
                 "proof_build", "Installed files differ from the active implementation"
             )
         context = request.model_dump(mode="json")
+        if request.snapshot is not None:
+            from . import attestation, bindings
+
+            identity = attestation.identity()
+            expected = request.snapshot
+            if (
+                identity["host"] != expected.host_session_id
+                or identity["document"] != expected.document_session_id
+                or bindings.project_id() != expected.project_id
+                or attestation.FORMAT != expected.format
+            ):
+                raise OperationError("proof_identity", "Live snapshot identity changed")
+            # This is an untrusted proof input, never a save/adoption of live work.
+            # Library serialization does not invoke save handlers, switch the open
+            # file, remap its paths, or clear its dirty state. Core must prove the
+            # loaded copy against the exact current AND trusted prior evidence.
+            snapshot = directory / "snapshot.blend"
+            bpy.data.libraries.write(
+                str(snapshot), set(bpy.data.user_map()), path_remap="NONE"
+            )
+            with snapshot.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            assert expected.project_id is not None
+            # Blender treats render thread overrides as process-local on load.
+            # Preserve them only in the untrusted copy; the exact digest remains
+            # the authority, including every other scene setting.
+            context["snapshot_threads"] = [
+                dict(
+                    scene=scene.name,
+                    threads=scene.render.threads,
+                    mode=scene.render.threads_mode,
+                )
+                for scene in bpy.data.scenes
+            ]
+            context["artifact"] = ProofArtifact(
+                locator=str(snapshot), sha256=digest, project_id=expected.project_id
+            ).model_dump(mode="json")
         context.update(
             host=_runtime.config.host,
             port=_runtime.config.port,

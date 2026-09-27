@@ -1,0 +1,151 @@
+{
+  "$defs": {
+    "DocumentState": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "document_session_id": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "format": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Format",
+          "type": "string"
+        },
+        "host_session_id": {
+          "$ref": "#/$defs/ResourceToken"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceToken"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "host_session_id",
+        "document_session_id",
+        "project_id",
+        "format",
+        "digest"
+      ],
+      "title": "DocumentState",
+      "type": "object"
+    },
+    "Identifier": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "type": "string"
+    },
+    "ProofArtifact": {
+      "additionalProperties": false,
+      "description": "Locator is reopening information; SHA and project identity are authority.",
+      "properties": {
+        "locator": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "locator",
+        "sha256",
+        "project_id"
+      ],
+      "title": "ProofArtifact",
+      "type": "object"
+    },
+    "ProofLease": {
+      "additionalProperties": false,
+      "description": "Core-issued capability, accepted only for its originating work host.",
+      "properties": {
+        "lease_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "parent_adapter_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "token": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lease_id",
+        "token",
+        "parent_adapter_id"
+      ],
+      "title": "ProofLease",
+      "type": "object"
+    },
+    "ResourceToken": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProofArtifact"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "expected_build": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Expected Build",
+      "type": "string"
+    },
+    "lease": {
+      "$ref": "#/$defs/ProofLease"
+    },
+    "snapshot": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DocumentState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "ttl_seconds": {
+      "maximum": 900,
+      "minimum": 1,
+      "title": "Ttl Seconds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "lease",
+    "expected_build",
+    "ttl_seconds"
+  ],
+  "title": "ProofHostStart",
+  "type": "object"
+}

@@ -591,6 +591,9 @@ def remove(args: MotionRemoveArguments) -> MotionNames:
             key = pointer(name, side)
             if key in bpy.context.scene:
                 del bpy.context.scene[key]
+    for key, values in ((KEY, records()), (mechanisms.KEY, mechanisms.catalog())):
+        if not values and key in bpy.context.scene:
+            del bpy.context.scene[key]
     channels.refresh()
     return MotionNames(names=args.names)
 

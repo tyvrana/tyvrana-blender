@@ -10,9 +10,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from tyvrana_protocol import ProofArtifact, ProofHostControl, ProofHostStart, ProofLease
+from tyvrana_protocol import ProofArtifact, ProofHostControl, ProofLease
 
 from tyvrana_blender import deployment, proof_hosts
+from tyvrana_blender.proof_models import ProofHostStart
 
 
 def intent(path: Path, build: str = "a" * 64) -> ProofHostStart:

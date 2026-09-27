@@ -107,6 +107,8 @@ def steps(
                 "Document changed while preparing the mutation; nothing published",
             )
 
+    job = _jobs.jobs[arguments.mutation_id]
+    job.status = job.status.model_copy(update={"native_execution": "started"})
     token = publication_guard.set(revalidate)
     try:
         result, artifacts = spec.invoke(backend, parsed, nested)
@@ -146,6 +148,7 @@ def steps(
                 backend, cancel_spec.parse({"job_id": identifier}), nested
             )
             _controls.clear()
+    job.status = job.status.model_copy(update={"native_execution": "completed"})
     after = yield from guarded_steps()
     if after.root.get("status") != "complete" or any(
         after.root.get(field) != before.root.get(field)
@@ -201,7 +204,10 @@ def start(
     work = owned()
     next(work)
     return _jobs.start(
-        MutationJobStatus(job_id=arguments.mutation_id, state="queued"), work
+        MutationJobStatus(
+            job_id=arguments.mutation_id, state="queued", native_execution="not_started"
+        ),
+        work,
     )
 
 

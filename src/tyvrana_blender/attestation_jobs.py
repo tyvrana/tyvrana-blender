@@ -22,21 +22,23 @@ shutdown = _jobs.shutdown
 def guarded_steps() -> Generator[dict[str, Any], None, DocumentAttestationResult]:
     bpy.context.view_layer.update()
     session = attestation.identity()
-    changed = False
-
-    def invalidate(*args: Any) -> None:
-        nonlocal changed
-        changed = True
+    changed: set[str] = set()
 
     handlers = (
-        bpy.app.handlers.depsgraph_update_post,
-        bpy.app.handlers.frame_change_post,
-        bpy.app.handlers.load_pre,
-        bpy.app.handlers.undo_pre,
-        bpy.app.handlers.redo_pre,
+        ("dependency_graph", bpy.app.handlers.depsgraph_update_post),
+        ("frame", bpy.app.handlers.frame_change_post),
+        ("load", bpy.app.handlers.load_pre),
+        ("undo", bpy.app.handlers.undo_pre),
+        ("redo", bpy.app.handlers.redo_pre),
     )
-    for group in handlers:
+    registered = []
+    for event, group in handlers:
+
+        def invalidate(*args: Any, event: str = event) -> None:
+            changed.add(event)
+
         group.append(invalidate)
+        registered.append((group, invalidate))
     steps = attestation.inspect_steps(max_seconds=120)
     try:
         while True:
@@ -44,6 +46,10 @@ def guarded_steps() -> Generator[dict[str, Any], None, DocumentAttestationResult
                 raise OperationError(
                     "application_changed",
                     "Document changed during attestation; no digest is valid",
+                    {
+                        "change_notifications": [event for event in sorted(changed)],
+                        "identity_changed": session != attestation.identity(),
+                    },
                 )
             try:
                 progress = next(steps)
@@ -53,12 +59,18 @@ def guarded_steps() -> Generator[dict[str, Any], None, DocumentAttestationResult
                     raise OperationError(
                         "application_changed",
                         "Document changed during attestation; no digest is valid",
+                        {
+                            "change_notifications": [
+                                event for event in sorted(changed)
+                            ],
+                            "identity_changed": session != attestation.identity(),
+                        },
                     ) from None
                 return cast(DocumentAttestationResult, done.value)
             yield progress
     finally:
         steps.close()
-        for group in handlers:
+        for group, invalidate in registered:
             if invalidate in group:
                 group.remove(invalidate)
 
