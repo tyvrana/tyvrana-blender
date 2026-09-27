@@ -4,6 +4,7 @@ import array
 import importlib.util
 import math
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -54,6 +55,40 @@ def test_chunk_boundaries_do_not_change_digest(attestation: Any) -> None:
     assert first.digest.digest() != third.digest.digest()
     with pytest.raises(attestation.Unqualified, match="declared byte length"):
         attestation.Hasher().blob(3, [b"ab"])
+
+
+def test_durable_ids_follow_retained_users_not_orphan_counts(attestation: Any) -> None:
+    @dataclass(eq=False)
+    class ID:
+        users: int = 1
+        use_fake_user: bool = False
+        use_extra_user: bool = False
+
+    scene = ID(use_extra_user=True)
+    obj, mesh, material = ID(), ID(), ID()
+    orphan, orphan_material = ID(users=0), ID()
+    retained_material = ID(use_fake_user=True)
+    retained_image = ID()
+    attestation.bpy.data = SimpleNamespace(
+        user_map=lambda: {
+            scene: set(),
+            obj: {scene},
+            mesh: {obj},
+            material: {mesh},
+            orphan: set(),
+            orphan_material: {orphan},
+            retained_material: set(),
+            retained_image: {retained_material},
+        }
+    )
+    expected = {scene, obj, mesh, material, retained_material, retained_image}
+    assert attestation.durable_ids() == expected
+    # A shared material remains durable if at least one user survives.
+    users = attestation.bpy.data.user_map()
+    users[orphan_material].add(mesh)
+    attestation.bpy.data.user_map = lambda: users
+    assert attestation.durable_ids() == expected | {orphan_material}
+    assert orphan.users == 0 and orphan_material.users == 1  # Read-only query.
 
 
 def test_native_memory_and_mapped_paths_are_identical(attestation: Any) -> None:

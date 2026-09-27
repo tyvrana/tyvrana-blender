@@ -4030,7 +4030,16 @@ trusted working head. Ordinary file-open and authoring guards are unchanged.
 
 ## Authored-content attestation and particle editing
 
-Canonical format `blender-rna-5.2.1-7fd96589ef405168` excludes
+Canonical format `blender-rna-5.2.1-46e0c05d01837c2a` follows native retained
+datablock roots (fake users and native extra users) and their used dependencies.
+A positive user count from an orphan datablock does not establish persistence:
+an unused mesh can keep a material resident until reopening drops both. Such
+orphan chains are excluded without purging or changing application data. Materials
+assigned to retained content and resources explicitly retained with a fake user
+remain covered. Changing retained geometry, materials or animation changes the
+digest. Previous-format baselines are not silently reinterpreted or adopted.
+
+The format also excludes
 `ParticleEdit.object`, the read-only editor target under
 `Scene.tool_settings.particle_edit`. Interactive Blender resolves this pointer from
 editor context while background Blender can report no target for identical saved

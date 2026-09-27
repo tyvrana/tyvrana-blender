@@ -25,7 +25,7 @@ from .bindings import project_id
 
 # This identifier names canonical bytes, not unrelated implementation metadata.
 # Resource closure observations below do not change the qualified document stream.
-FORMAT = "blender-rna-" + ".".join(map(str, bpy.app.version)) + "-7fd96589ef405168"
+FORMAT = "blender-rna-" + ".".join(map(str, bpy.app.version)) + "-46e0c05d01837c2a"
 RESOURCE_SCOPE = FORMAT + "-resource-closure"
 
 MAX_ITEMS = 4000000
@@ -181,6 +181,33 @@ def document_loaded() -> None:
 
 class Unqualified(Exception):
     pass
+
+
+def durable_ids() -> set[Any]:
+    """Follow native persistence roots, not references from orphan datablocks.
+
+    A zero-user mesh can still give its material a positive user count. That
+    material disappears with the orphan chain on reopen. Fake users and native
+    extra users retain roots; only their used dependencies belong in the stream.
+    This is read-only: never purge native data to obtain a stable digest.
+    """
+    users = bpy.data.user_map()
+    dependencies: dict[Any, set[Any]] = {}
+    pending = []
+    for item, referrers in users.items():
+        if item.use_fake_user or item.use_extra_user:
+            pending.append(item)
+        if item.users or item.use_fake_user:
+            for referrer in referrers:
+                dependencies.setdefault(referrer, set()).add(item)
+    retained = set()
+    while pending:
+        item = pending.pop()
+        if item in retained:
+            continue
+        retained.add(item)
+        pending.extend(dependencies.get(item, ()))
+    return retained
 
 
 class Hasher:
@@ -788,18 +815,19 @@ def inspect_steps(
         if any(scene.rigidbody_world is not None for scene in bpy.data.scenes):
             raise Unqualified("Rigid-body cache requires independent attestation")
         h.configuration = h.digest.hexdigest()
+        retained = durable_ids()
         for prop in sorted(bpy.data.bl_rna.properties, key=lambda p: p.identifier):
             kind = prop.identifier
             if prop.type != "COLLECTION" or kind in ROOT_SKIP:
                 continue
             entries = getattr(bpy.data, kind)
             if (kind in UNSUPPORTED or kind not in SUPPORTED) and any(
-                x.users or x.use_fake_user for x in entries
+                x in retained for x in entries
             ):
                 raise Unqualified("Unsupported document category: " + kind)
             h.feed(kind.encode())
             for item in sorted(entries, key=lambda x: x.name_full):
-                if item.users == 0 and not item.use_fake_user:
+                if item not in retained:
                     continue
                 if isinstance(item, bpy.types.Image) and item.type in {
                     "RENDER_RESULT",
