@@ -3189,7 +3189,13 @@ _DECLARATIONS = (
         lambda b, a, q: b.extension_reload(a, q.request_id),
         "Activate the already staged matching build through the extension "
         "lifecycle. Returns an acknowledgement before reconnection; changes "
-        "adapter identity while preserving the host process/project.",
+        "adapter identity while preserving the host process/project, "
+        "not cross-format trust. "
+        "Before a format-changing update, reconcile and save/checkpoint the current "
+        "head under its existing format. Do not activate on unsaved/divergent work: "
+        "migration requires that head's durable file SHA256, not an older save. "
+        "If already stranded, keep the host open and inspect Core continuation; "
+        "never force-save or replay.",
         effect="lifecycle",
         execution="lifecycle",
     ),

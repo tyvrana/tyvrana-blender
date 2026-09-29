@@ -4067,3 +4067,21 @@ not affect the digest. Edit mode remains unqualified: pending rest edits must be
 committed before the persisted bone rows can be attested. Entering and leaving
 edit mode without changes preserves the digest. This canonical format does not
 reinterpret prior digests or automatically migrate any project baseline.
+
+
+### Attestation format upgrade boundary
+
+A same-process adapter update preserves native content, not the meaning of a prior
+attestation. Before a format-changing activation, complete pending work, reconcile
+any uncommitted transition under the existing format, then save and checkpoint that
+exact head. Migration requires its trusted file SHA256 plus independently matching
+new-format content and resources. An older checkpoint hash is not a replacement.
+
+An already-upgraded unsaved old-format head is unsupported and fails closed. Core
+continuation reports `attestation_upgrade_unsupported` with both formats and an
+actionable preservation diagnostic. Keep the live host open; do not force-save,
+replay native work, use capture to adopt it, or silently restore a checkpoint.
+Equal digest strings across formats do not establish equivalence. Returning to a
+qualified implementation of the original format needs separate authorization and
+qualification. Restoring durable work discards unsaved changes and requires explicit
+approval. This boundary introduces no alternate digest or compatibility API.

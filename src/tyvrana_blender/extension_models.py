@@ -13,7 +13,15 @@ class ExtensionInspectArguments(Arguments):
 
 
 class ExtensionReloadArguments(Arguments):
-    expected_build: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    expected_build: Annotated[
+        str,
+        Field(
+            pattern=r"^[0-9a-f]{64}$",
+            description="Staged build identity. Host preservation does not prove "
+            "cross-format continuity; resolve and durably save the current head "
+            "before format-changing activation.",
+        ),
+    ]
 
 
 class ExtensionReloadResult(Model):
