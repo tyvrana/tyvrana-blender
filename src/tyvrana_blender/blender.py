@@ -1363,12 +1363,17 @@ class BlenderBackend:
     def extension_inspect(self) -> ExtensionState:
         main_thread()
         from . import lifecycle
-        from .attestation import identity
+        from .attestation import FORMAT, identity
         from .bindings import project_id
+        from .extension_formats import staged_format
 
         return ExtensionState.model_validate(
             {
                 **lifecycle.inspect(),
+                "attestation_format": FORMAT,
+                "staged_attestation_format": staged_format(
+                    Path(__file__).parent, bpy.app.version
+                ),
                 "host_session_id": identity()["host"],
                 "document_session_id": identity()["document"],
                 "host_pid": os.getpid(),

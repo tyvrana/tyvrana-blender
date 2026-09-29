@@ -50,6 +50,8 @@ class ExtensionState(Model):
     ]
     reload_id: str | None
     staged_build: str | None
+    attestation_format: str | None = None
+    staged_attestation_format: str | None = None
     error: str | None
     adapter_id: str | None
     connection_state: str

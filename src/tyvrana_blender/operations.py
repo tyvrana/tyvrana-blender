@@ -1210,6 +1210,7 @@ _DECLARATIONS = (
         ),
         effect="mutating",
         execution="synchronous",
+        tags=("recovery_replay",),
     ),
     _operation(
         "blender.motion.set_properties",
@@ -3177,6 +3178,10 @@ _DECLARATIONS = (
         lambda b, a, q: b.extension_inspect(),
         "Inspect adapter/build identity, host PID, background flag, window count, "
         "application version, project path/UUID, connection and lifecycle counts. "
+        "Active/staged attestation formats identify upgrade boundaries; staged "
+        "format metadata is not content proof. A staged original-format build "
+        "can restore the verifier, but exact Core reattachment/reconciliation "
+        "must prove the unsaved head before saving. "
         "Interactive means background=false with windows; it does not prove "
         "physical monitor visibility. Read before selecting a real-work target.",
         effect="read_only",
